@@ -5154,47 +5154,6 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     });
   }
 };
-var ToolModePickerModal = class extends import_obsidian5.SuggestModal {
-  constructor(app, settings, onChoose) {
-    super(app);
-    this.settings = settings;
-    this.onChoose = onChoose;
-    this.emptyStateText = "\u6CA1\u6709\u53EF\u7528\u7684 Pi \u5DE5\u5177\u6A21\u5F0F\u3002";
-    this.setPlaceholder("\u9009\u62E9\u5DE5\u5177\u6A21\u5F0F\u2026");
-    this.setInstructions([
-      { command: "\u2191\u2193", purpose: "\u5BFC\u822A" },
-      { command: "\u21B5", purpose: "\u9009\u62E9" },
-      { command: "esc", purpose: "\u5173\u95ED" }
-    ]);
-  }
-  getSuggestions(query) {
-    const normalized = query.trim().toLowerCase();
-    return this.getItems().filter((item) =>
-      `${item.primary} ${item.secondary}`.toLowerCase().includes(normalized)
-    );
-  }
-  getItems() {
-    return Object.entries(getToolModeOptions()).map(([value, label]) => {
-      const [primary, ...rest] = String(label).split(" \u2014 ");
-      return { value, primary, secondary: rest.join(" \u2014 ") };
-    });
-  }
-  renderSuggestion(item, el) {
-    el.createDiv({ cls: "pi-agent-suggestion-title", text: item.primary });
-    if (item.secondary) {
-      el.createDiv({ cls: "pi-agent-suggestion-detail", text: item.secondary });
-    }
-    el.setAttribute(
-      "aria-label",
-      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.sandboxMode === item.value ? ", \u5DF2\u9009\u4E2D" : ""}`
-    );
-  }
-  onChooseSuggestion(item) {
-    Promise.resolve(this.onChoose(item.value)).catch((error) => {
-      new import_obsidian5.Notice(error instanceof Error ? error.message : String(error));
-    });
-  }
-};
 function formatEffectiveModel(settings) {
   const slug = settings.model || settings.effectiveModel;
   const model = settings.availableModels.find((candidate) => candidate.slug === slug);
@@ -7759,13 +7718,29 @@ var RunSettingsControls = class {
       "Model",
       { provider: this.getModelProvider() },
       this.getModelLabel(),
-      async () => {
-        await this.openPicker(ModelPickerModal, async (value) => {
-          this.plugin.settings.model = value;
-          this.plugin.settings.reasoningEffort = "";
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        });
+      async (event) => {
+        await this.plugin.ensureRuntimeModelState();
+        const menu = new import_obsidian15.Menu();
+        const items = buildModelPickerItems(this.plugin.settings);
+        if (items.length === 0) {
+          menu.addItem((menuItem) =>
+            menuItem.setTitle("\u6CA1\u6709\u53EF\u7528\u7684\u6A21\u578B").setDisabled(true)
+          );
+        }
+        for (const item of items) {
+          menu.addItem((menuItem) =>
+            menuItem
+              .setTitle(getModelPickerPrimary(item))
+              .setChecked(this.plugin.settings.model === item.value)
+              .onClick(async () => {
+                this.plugin.settings.model = item.value;
+                this.plugin.settings.reasoningEffort = "";
+                await this.plugin.saveSettings();
+                this.plugin.refreshOpenModelControls();
+              })
+          );
+        }
+        menu.showAtMouseEvent(event);
       }
     );
     this.addPickerSetting(
@@ -7773,12 +7748,22 @@ var RunSettingsControls = class {
       "Think",
       "brain",
       this.formatDefaultReasoningLabel(),
-      async () => {
-        await this.openPicker(ThinkingPickerModal, async (value) => {
-          this.plugin.settings.reasoningEffort = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        });
+      async (event) => {
+        await this.plugin.ensureRuntimeModelState();
+        const menu = new import_obsidian15.Menu();
+        for (const [value, label] of Object.entries(getReasoningOptions(this.plugin.settings))) {
+          menu.addItem((menuItem) =>
+            menuItem
+              .setTitle(label)
+              .setChecked(this.plugin.settings.reasoningEffort === value)
+              .onClick(async () => {
+                this.plugin.settings.reasoningEffort = value;
+                await this.plugin.saveSettings();
+                this.plugin.refreshOpenModelControls();
+              })
+          );
+        }
+        menu.showAtMouseEvent(event);
       }
     );
     this.addPickerSetting(
@@ -7786,31 +7771,41 @@ var RunSettingsControls = class {
       "Mode",
       this.getToolModeIcon(),
       this.getToolModeLabel(),
-      async () => {
-        new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
-          if (value === this.plugin.settings.sandboxMode) return;
-          if (
-            (value === "edit" || value === "full-agent" || value === "workspace-write") &&
-            !this.plugin.settings.acknowledgedToolRisk &&
-            !(await confirmWithModal(this.plugin.app, {
-              title: "Enable write tools?",
-              message:
-                "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
-              confirmText: "Enable tools",
-              warning: true
-            }))
-          ) {
-            return;
-          }
-          this.plugin.settings.sandboxMode = value;
-          if (value === "edit" || value === "full-agent" || value === "workspace-write") {
-            this.plugin.settings.acknowledgedToolRisk = true;
-          }
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        }).open();
+      (event) => {
+        const menu = new import_obsidian15.Menu();
+        for (const [value, label] of Object.entries(getToolModeOptions())) {
+          menu.addItem((menuItem) =>
+            menuItem
+              .setTitle(label)
+              .setChecked(this.plugin.settings.sandboxMode === value)
+              .onClick(() => this.applyToolMode(value))
+          );
+        }
+        menu.showAtMouseEvent(event);
       }
     );
+  }
+  async applyToolMode(value) {
+    if (value === this.plugin.settings.sandboxMode) return;
+    if (
+      (value === "edit" || value === "full-agent" || value === "workspace-write") &&
+      !this.plugin.settings.acknowledgedToolRisk &&
+      !(await confirmWithModal(this.plugin.app, {
+        title: "\u542F\u7528\u5199\u5165\u5DE5\u5177\uFF1F",
+        message:
+          "Pi \u5DE5\u5177\u6A21\u5F0F\u5E76\u975E\u64CD\u4F5C\u7CFB\u7EDF\u7EA7\u6C99\u7BB1\u3002\u7F16\u8F91\u548C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u53EF\u4EE5\u4FEE\u6539\u5E93\u6216\u9879\u76EE\u6587\u4EF6\uFF0C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u8FD8\u53EF\u4EE5\u6267\u884C shell \u547D\u4EE4\u3002",
+        confirmText: "\u542F\u7528\u5DE5\u5177",
+        warning: true
+      }))
+    ) {
+      return;
+    }
+    this.plugin.settings.sandboxMode = value;
+    if (value === "edit" || value === "full-agent" || value === "workspace-write") {
+      this.plugin.settings.acknowledgedToolRisk = true;
+    }
+    await this.plugin.saveSettings();
+    this.plugin.refreshOpenModelControls();
   }
   addPickerSetting(containerEl, name, icon, label, onClick) {
     const buttonEl = containerEl.createEl("button", {
@@ -7822,10 +7817,11 @@ var RunSettingsControls = class {
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
     buttonEl.addEventListener("click", async (event) => {
       event.preventDefault();
+      event.stopPropagation();
       buttonEl.disabled = true;
-      labelEl.setText("Loading\u2026");
+      labelEl.setText("\u52A0\u8F7D\u4E2D\u2026");
       try {
-        await onClick();
+        await onClick(event);
       } catch (error) {
         new import_obsidian15.Notice(error instanceof Error ? error.message : String(error));
       } finally {
@@ -7836,20 +7832,16 @@ var RunSettingsControls = class {
       }
     });
   }
-  async openPicker(Picker, onChoose) {
-    await this.plugin.ensureRuntimeModelState();
-    new Picker(this.plugin.app, this.plugin.settings, onChoose).open();
-  }
   getModelLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
-      return this.plugin.settings.customModel.trim() || "Custom";
+      return this.plugin.settings.customModel.trim() || "\u81EA\u5B9A\u4E49\u6A21\u578B";
     }
     const model = getSelectedModelInfo(this.plugin.settings);
     if (model) return model.displayName;
     const effective = this.plugin.settings.availableModels.find(
       (candidate) => candidate.slug === this.plugin.settings.effectiveModel
     );
-    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi default";
+    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi \u9ED8\u8BA4";
   }
   getModelProvider() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {

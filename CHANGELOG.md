@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.22
+
+- The composer **Model**, **Think**, and **Mode** controls now open an anchored menu at the button instead of a full picker dialog, so you can switch options in place without leaving the chat view. The write-tools confirmation and settings persistence are unchanged.
+
 ## 0.0.21
 
 - Translated the plugin settings interface to Simplified Chinese: all settings names and descriptions, the Advanced/Pi CLI/Skills/Context groups, buttons and tooltips, dropdown and thinking-level options, placeholders, the write-tools confirmation, and the desktop-notification notice. The model and thinking pickers and the tool mode labels shown in the composer and message metadata were translated for consistency.

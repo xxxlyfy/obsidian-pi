@@ -1,16 +1,14 @@
-import { Notice, setIcon } from "obsidian";
+import { Menu, Notice, setIcon } from "obsidian";
 import {
   CUSTOM_MODEL_VALUE,
   formatReasoningLevel,
+  getReasoningOptions,
   getResolvedReasoning,
-  getSelectedModelInfo
+  getSelectedModelInfo,
+  getToolModeOptions
 } from "../plugin/settings.mjs";
 import { confirmWithModal } from "./modals/confirm-modal.mjs";
-import {
-  ModelPickerModal,
-  ThinkingPickerModal,
-  ToolModePickerModal
-} from "./modals/model-picker-modal.mjs";
+import { buildModelPickerItems, getModelPickerPrimary } from "./model-picker.mjs";
 import { renderProviderIcon } from "./provider-icons.mjs";
 import { formatToolModeLabel } from "./view/run-metadata.mjs";
 
@@ -36,13 +34,27 @@ export class RunSettingsControls {
       "Model",
       { provider: this.getModelProvider() },
       this.getModelLabel(),
-      async () => {
-        await this.openPicker(ModelPickerModal, async (value) => {
-          this.plugin.settings.model = value;
-          this.plugin.settings.reasoningEffort = "";
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        });
+      async (event) => {
+        await this.plugin.ensureRuntimeModelState();
+        const menu = new Menu();
+        const items = buildModelPickerItems(this.plugin.settings);
+        if (items.length === 0) {
+          menu.addItem((menuItem) => menuItem.setTitle("没有可用的模型").setDisabled(true));
+        }
+        for (const item of items) {
+          menu.addItem((menuItem) =>
+            menuItem
+              .setTitle(getModelPickerPrimary(item))
+              .setChecked(this.plugin.settings.model === item.value)
+              .onClick(async () => {
+                this.plugin.settings.model = item.value;
+                this.plugin.settings.reasoningEffort = "";
+                await this.plugin.saveSettings();
+                this.plugin.refreshOpenModelControls();
+              })
+          );
+        }
+        menu.showAtMouseEvent(event);
       }
     );
 
@@ -51,12 +63,22 @@ export class RunSettingsControls {
       "Think",
       "brain",
       this.formatDefaultReasoningLabel(),
-      async () => {
-        await this.openPicker(ThinkingPickerModal, async (value) => {
-          this.plugin.settings.reasoningEffort = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        });
+      async (event) => {
+        await this.plugin.ensureRuntimeModelState();
+        const menu = new Menu();
+        for (const [value, label] of Object.entries(getReasoningOptions(this.plugin.settings))) {
+          menu.addItem((menuItem) =>
+            menuItem
+              .setTitle(label)
+              .setChecked(this.plugin.settings.reasoningEffort === value)
+              .onClick(async () => {
+                this.plugin.settings.reasoningEffort = value;
+                await this.plugin.saveSettings();
+                this.plugin.refreshOpenModelControls();
+              })
+          );
+        }
+        menu.showAtMouseEvent(event);
       }
     );
 
@@ -65,31 +87,42 @@ export class RunSettingsControls {
       "Mode",
       this.getToolModeIcon(),
       this.getToolModeLabel(),
-      async () => {
-        new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
-          if (value === this.plugin.settings.sandboxMode) return;
-          if (
-            (value === "edit" || value === "full-agent" || value === "workspace-write") &&
-            !this.plugin.settings.acknowledgedToolRisk &&
-            !(await confirmWithModal(this.plugin.app, {
-              title: "Enable write tools?",
-              message:
-                "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
-              confirmText: "Enable tools",
-              warning: true
-            }))
-          ) {
-            return;
-          }
-          this.plugin.settings.sandboxMode = value;
-          if (value === "edit" || value === "full-agent" || value === "workspace-write") {
-            this.plugin.settings.acknowledgedToolRisk = true;
-          }
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        }).open();
+      (event) => {
+        const menu = new Menu();
+        for (const [value, label] of Object.entries(getToolModeOptions())) {
+          menu.addItem((menuItem) =>
+            menuItem
+              .setTitle(label)
+              .setChecked(this.plugin.settings.sandboxMode === value)
+              .onClick(() => this.applyToolMode(value))
+          );
+        }
+        menu.showAtMouseEvent(event);
       }
     );
+  }
+
+  async applyToolMode(value) {
+    if (value === this.plugin.settings.sandboxMode) return;
+    if (
+      (value === "edit" || value === "full-agent" || value === "workspace-write") &&
+      !this.plugin.settings.acknowledgedToolRisk &&
+      !(await confirmWithModal(this.plugin.app, {
+        title: "启用写入工具？",
+        message:
+          "Pi 工具模式并非操作系统级沙箱。编辑和完整智能体模式可以修改库或项目文件，完整智能体模式还可以执行 shell 命令。",
+        confirmText: "启用工具",
+        warning: true
+      }))
+    ) {
+      return;
+    }
+    this.plugin.settings.sandboxMode = value;
+    if (value === "edit" || value === "full-agent" || value === "workspace-write") {
+      this.plugin.settings.acknowledgedToolRisk = true;
+    }
+    await this.plugin.saveSettings();
+    this.plugin.refreshOpenModelControls();
   }
 
   addPickerSetting(containerEl, name, icon, label, onClick) {
@@ -102,10 +135,11 @@ export class RunSettingsControls {
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
     buttonEl.addEventListener("click", async (event) => {
       event.preventDefault();
+      event.stopPropagation();
       buttonEl.disabled = true;
-      labelEl.setText("Loading…");
+      labelEl.setText("加载中…");
       try {
-        await onClick();
+        await onClick(event);
       } catch (error) {
         new Notice(error instanceof Error ? error.message : String(error));
       } finally {
@@ -117,21 +151,16 @@ export class RunSettingsControls {
     });
   }
 
-  async openPicker(Picker, onChoose) {
-    await this.plugin.ensureRuntimeModelState();
-    new Picker(this.plugin.app, this.plugin.settings, onChoose).open();
-  }
-
   getModelLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
-      return this.plugin.settings.customModel.trim() || "Custom";
+      return this.plugin.settings.customModel.trim() || "自定义模型";
     }
     const model = getSelectedModelInfo(this.plugin.settings);
     if (model) return model.displayName;
     const effective = this.plugin.settings.availableModels.find(
       (candidate) => candidate.slug === this.plugin.settings.effectiveModel
     );
-    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi default";
+    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi 默认";
   }
 
   getModelProvider() {
