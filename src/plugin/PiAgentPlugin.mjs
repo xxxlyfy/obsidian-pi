@@ -931,6 +931,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
     this.saveThreadHistory();
     this.refreshOpenQueueViews();
+    this.migrateOpenViewInFlightAnnotations(oldPath, newPath);
   }
   invalidateQueuedAnnotationPaths(path) {
     if (!path) return;
@@ -938,12 +939,22 @@ export class PiAgentPlugin extends P.Plugin {
     this.localPromptSteering = invalidateLocalPromptPaths(this.localPromptSteering, path);
     this.saveThreadHistory();
     this.refreshOpenQueueViews();
+    this.invalidateOpenViewInFlightAnnotations(path);
   }
-  refreshOpenQueueViews() {
+  forEachOpenView(callback) {
     for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
       const view = /** @type {any} */ (leaf.view);
-      view?.refreshLocalPromptQueue?.();
+      if (view) callback(view);
     }
+  }
+  refreshOpenQueueViews() {
+    this.forEachOpenView((view) => view.refreshLocalPromptQueue?.());
+  }
+  migrateOpenViewInFlightAnnotations(oldPath, newPath) {
+    this.forEachOpenView((view) => view.migrateInFlightAnnotationPaths?.(oldPath, newPath));
+  }
+  invalidateOpenViewInFlightAnnotations(path) {
+    this.forEachOpenView((view) => view.invalidateInFlightAnnotationPaths?.(path));
   }
   enqueueLocalPrompt(item) {
     this.localPromptQueue = enqueueLocalPrompt(this.localPromptQueue, item);

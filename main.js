@@ -9172,6 +9172,28 @@ var PiAgentView = class extends f4.ItemView {
     this.renderPromptQueue();
     this.setRunningState(this.running);
   }
+  migrateInFlightAnnotationPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    for (const run of this.activeRuns.values()) {
+      const snapshot = run.annotationSnapshot;
+      if (!snapshot) continue;
+      if (snapshot.sourcePath === oldPath) snapshot.sourcePath = newPath;
+      snapshot.annotations = snapshot.annotations.map((annotation) =>
+        annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
+      );
+    }
+  }
+  invalidateInFlightAnnotationPaths(path6) {
+    if (!path6) return;
+    for (const run of this.activeRuns.values()) {
+      const snapshot = run.annotationSnapshot;
+      if (!snapshot) continue;
+      if (snapshot.sourcePath === path6) snapshot.sourcePath = void 0;
+      snapshot.annotations = snapshot.annotations.filter(
+        (annotation) => annotation?.path !== path6
+      );
+    }
+  }
   restoreActiveRunUiState() {
     const threadId = this.getCurrentThreadId();
     const run = threadId ? this.activeRuns.get(threadId) : void 0;
@@ -9213,8 +9235,10 @@ var PiAgentView = class extends f4.ItemView {
         return;
       }
     }
+    const annotationSnapshot = { annotations, sourcePath: annotationSourcePath };
     const restoreUnsentAnnotations = () => {
-      if (!queuedId && annotations.length > 0) this.plugin.restoreConsumedAnnotations(annotations);
+      const unsent = annotationSnapshot.annotations;
+      if (!queuedId && unsent.length > 0) this.plugin.restoreConsumedAnnotations(unsent);
     };
     if (this.isThreadRunning(threadId)) {
       if (queuedId) {
@@ -9229,8 +9253,8 @@ var PiAgentView = class extends f4.ItemView {
           threadId,
           images,
           attachments,
-          annotations,
-          annotationSourcePath
+          annotationSnapshot.annotations,
+          annotationSnapshot.sourcePath
         );
       }
       return;
@@ -9242,8 +9266,8 @@ var PiAgentView = class extends f4.ItemView {
           prompt,
           images,
           attachments,
-          annotations,
-          contextFilePath: annotationSourcePath
+          annotations: annotationSnapshot.annotations,
+          contextFilePath: annotationSnapshot.sourcePath
         },
         { mode: "prompt", threadId }
       );
@@ -9299,8 +9323,8 @@ var PiAgentView = class extends f4.ItemView {
           threadId,
           images,
           attachments,
-          annotations,
-          annotationSourcePath
+          annotationSnapshot.annotations,
+          annotationSnapshot.sourcePath
         );
       }
       return;
@@ -9312,6 +9336,7 @@ var PiAgentView = class extends f4.ItemView {
       notificationRunId: `${threadId}:${this.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(prompt),
       assistantContent: "",
+      annotationSnapshot,
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
@@ -9360,7 +9385,7 @@ var PiAgentView = class extends f4.ItemView {
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.stickToBottom = true;
-    this.plugin.beginAnnotationProcessing(threadId, annotations);
+    this.plugin.beginAnnotationProcessing(threadId, annotationSnapshot.annotations);
     this.setRunningState(this.running);
     if (!queuedId) addUserMessage();
     this.renderThreadListIfVisible();
@@ -11217,6 +11242,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
     this.saveThreadHistory();
     this.refreshOpenQueueViews();
+    this.migrateOpenViewInFlightAnnotations(oldPath, newPath);
   }
   invalidateQueuedAnnotationPaths(path6) {
     if (!path6) return;
@@ -11224,14 +11250,24 @@ var PiAgentPlugin = class extends P.Plugin {
     this.localPromptSteering = invalidateLocalPromptPaths(this.localPromptSteering, path6);
     this.saveThreadHistory();
     this.refreshOpenQueueViews();
+    this.invalidateOpenViewInFlightAnnotations(path6);
   }
-  refreshOpenQueueViews() {
+  forEachOpenView(callback) {
     for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
       const view =
         /** @type {any} */
         leaf.view;
-      view?.refreshLocalPromptQueue?.();
+      if (view) callback(view);
     }
+  }
+  refreshOpenQueueViews() {
+    this.forEachOpenView((view) => view.refreshLocalPromptQueue?.());
+  }
+  migrateOpenViewInFlightAnnotations(oldPath, newPath) {
+    this.forEachOpenView((view) => view.migrateInFlightAnnotationPaths?.(oldPath, newPath));
+  }
+  invalidateOpenViewInFlightAnnotations(path6) {
+    this.forEachOpenView((view) => view.invalidateInFlightAnnotationPaths?.(path6));
   }
   enqueueLocalPrompt(item) {
     this.localPromptQueue = enqueueLocalPrompt(this.localPromptQueue, item);

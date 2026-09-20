@@ -81,7 +81,9 @@ describe("annotation processing UX", () => {
   });
 
   it("starts processing with execution and clears it on mutation or run settlement", () => {
-    expect(viewSource).toContain("this.plugin.beginAnnotationProcessing(threadId, annotations)");
+    expect(viewSource).toContain(
+      "this.plugin.beginAnnotationProcessing(threadId, annotationSnapshot.annotations)"
+    );
     expect(viewSource).toContain("handleSuccessfulToolMutation(event, threadId)");
     expect(viewSource).toContain("completeAnnotationProcessingForPath(threadId, file.path)");
     expect(viewSource).toContain("endAnnotationProcessingForThread(threadId)");
@@ -93,5 +95,13 @@ describe("annotation processing UX", () => {
     expect(pluginSource).toContain("this.migrateQueuedAnnotationPaths(oldPath, file.path)");
     expect(pluginSource).toContain("this.invalidateQueuedAnnotationPaths(file.path)");
     expect(pluginSource).toContain("this.refreshOpenQueueViews()");
+    expect(pluginSource).toContain("this.migrateOpenViewInFlightAnnotations(oldPath, newPath)");
+    expect(pluginSource).toContain("this.invalidateOpenViewInFlightAnnotations(path)");
+  });
+
+  it("restores unsent annotations from the run snapshot instead of stale local paths", () => {
+    expect(viewSource).toContain("run.annotationSnapshot");
+    expect(viewSource).toContain("const unsent = annotationSnapshot.annotations;");
+    expect(viewSource).toContain("contextFilePath: annotationSnapshot.sourcePath");
   });
 });

@@ -37,7 +37,7 @@ describe("pending context badges", () => {
     );
     expect(viewSource).toContain("(item) => item.id !== attachment.id");
     expect(viewSource).toContain("this.plugin.annotationStore.deletePath(contextFile.path)");
-    expect(viewSource).toContain("contextFilePath: annotationSourcePath");
+    expect(viewSource).toContain("contextFilePath: annotationSnapshot.sourcePath");
     expect(pluginSource).toContain("this.refreshAnnotationBadges()");
     expect(pluginSource).toContain("Follow every annotation's user-authored request");
   });

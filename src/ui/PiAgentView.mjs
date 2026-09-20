@@ -795,6 +795,26 @@ export class PiAgentView extends f.ItemView {
     this.renderPromptQueue();
     this.setRunningState(this.running);
   }
+  migrateInFlightAnnotationPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    for (const run of this.activeRuns.values()) {
+      const snapshot = run.annotationSnapshot;
+      if (!snapshot) continue;
+      if (snapshot.sourcePath === oldPath) snapshot.sourcePath = newPath;
+      snapshot.annotations = snapshot.annotations.map((annotation) =>
+        annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
+      );
+    }
+  }
+  invalidateInFlightAnnotationPaths(path) {
+    if (!path) return;
+    for (const run of this.activeRuns.values()) {
+      const snapshot = run.annotationSnapshot;
+      if (!snapshot) continue;
+      if (snapshot.sourcePath === path) snapshot.sourcePath = undefined;
+      snapshot.annotations = snapshot.annotations.filter((annotation) => annotation?.path !== path);
+    }
+  }
   restoreActiveRunUiState() {
     const threadId = this.getCurrentThreadId();
     const run = threadId ? this.activeRuns.get(threadId) : undefined;
@@ -836,8 +856,10 @@ export class PiAgentView extends f.ItemView {
         return;
       }
     }
+    const annotationSnapshot = { annotations, sourcePath: annotationSourcePath };
     const restoreUnsentAnnotations = () => {
-      if (!queuedId && annotations.length > 0) this.plugin.restoreConsumedAnnotations(annotations);
+      const unsent = annotationSnapshot.annotations;
+      if (!queuedId && unsent.length > 0) this.plugin.restoreConsumedAnnotations(unsent);
     };
     if (this.isThreadRunning(threadId)) {
       if (queuedId) {
@@ -852,8 +874,8 @@ export class PiAgentView extends f.ItemView {
           threadId,
           images,
           attachments,
-          annotations,
-          annotationSourcePath
+          annotationSnapshot.annotations,
+          annotationSnapshot.sourcePath
         );
       }
       return;
@@ -865,8 +887,8 @@ export class PiAgentView extends f.ItemView {
           prompt,
           images,
           attachments,
-          annotations,
-          contextFilePath: annotationSourcePath
+          annotations: annotationSnapshot.annotations,
+          contextFilePath: annotationSnapshot.sourcePath
         },
         { mode: "prompt", threadId: threadId }
       );
@@ -922,8 +944,8 @@ export class PiAgentView extends f.ItemView {
           threadId,
           images,
           attachments,
-          annotations,
-          annotationSourcePath
+          annotationSnapshot.annotations,
+          annotationSnapshot.sourcePath
         );
       }
       return;
@@ -935,6 +957,7 @@ export class PiAgentView extends f.ItemView {
       notificationRunId: `${threadId}:${this.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(prompt),
       assistantContent: "",
+      annotationSnapshot,
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
@@ -981,7 +1004,7 @@ export class PiAgentView extends f.ItemView {
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.stickToBottom = true;
-    this.plugin.beginAnnotationProcessing(threadId, annotations);
+    this.plugin.beginAnnotationProcessing(threadId, annotationSnapshot.annotations);
     this.setRunningState(this.running);
     if (!queuedId) addUserMessage();
     this.renderThreadListIfVisible();

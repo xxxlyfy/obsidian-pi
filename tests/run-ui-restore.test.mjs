@@ -143,4 +143,38 @@ describe("per-thread live run UI state", () => {
     expect(view.renderPromptQueue).toHaveBeenCalledOnce();
     expect(view.setRunningState).toHaveBeenCalledWith(true);
   });
+
+  it("migrates in-flight annotation snapshots when a note is renamed", () => {
+    const snapshotA = { annotations: [{ id: "a1", path: "A.md" }], sourcePath: "A.md" };
+    const snapshotB = { annotations: [{ id: "b1", path: "B.md" }], sourcePath: "B.md" };
+    const view = {
+      activeRuns: new Map([
+        ["t1", { annotationSnapshot: snapshotA }],
+        ["t2", { annotationSnapshot: snapshotB }]
+      ])
+    };
+
+    PiAgentView.prototype.migrateInFlightAnnotationPaths.call(view, "A.md", "C.md");
+
+    expect(snapshotA.sourcePath).toBe("C.md");
+    expect(snapshotA.annotations[0].path).toBe("C.md");
+    expect(snapshotB.sourcePath).toBe("B.md");
+    expect(snapshotB.annotations[0].path).toBe("B.md");
+  });
+
+  it("drops in-flight annotations for a deleted note", () => {
+    const snapshot = {
+      annotations: [
+        { id: "a1", path: "A.md" },
+        { id: "b1", path: "B.md" }
+      ],
+      sourcePath: "A.md"
+    };
+    const view = { activeRuns: new Map([["t1", { annotationSnapshot: snapshot }]]) };
+
+    PiAgentView.prototype.invalidateInFlightAnnotationPaths.call(view, "A.md");
+
+    expect(snapshot.sourcePath).toBeUndefined();
+    expect(snapshot.annotations.map((annotation) => annotation.id)).toEqual(["b1"]);
+  });
 });
