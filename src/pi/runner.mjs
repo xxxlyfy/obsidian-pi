@@ -162,6 +162,7 @@ export class PiRunner {
       const runtimeState = await client.request("get_state").catch(() => undefined);
       const events = [];
       let finalResponse = "";
+      /** @type {{ errorMessage?: string, fallbackText?: string, tokenUsage?: import("./token-usage.mjs").TokenUsage } | undefined} */
       let runState;
       let settled = false;
       let settleRun;
@@ -220,12 +221,14 @@ export class PiRunner {
         runtimeState
       };
     } catch (error) {
+      const rpcError =
+        /** @type {Error & { piRpcUncertain?: boolean, piRpcRequestType?: string }} */ (error);
       if (this.cancelRequested || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
-      if (error?.piRpcUncertain) {
+      if (rpcError?.piRpcUncertain) {
         await this.recoverUncertainRpcClient(client);
         throw new Error(
-          `Pi RPC ${error.piRpcRequestType ?? "request"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          `Pi RPC ${rpcError.piRpcRequestType ?? "request"} timed out. The agent process was restarted to avoid overlapping runs.`,
           { cause: error }
         );
       }
@@ -258,10 +261,12 @@ export class PiRunner {
         ...(rpcImages.length > 0 ? { images: rpcImages } : {})
       });
     } catch (error) {
-      if (error?.piRpcUncertain) {
+      const rpcError =
+        /** @type {Error & { piRpcUncertain?: boolean, piRpcRequestType?: string }} */ (error);
+      if (rpcError?.piRpcUncertain) {
         await this.recoverUncertainRpcClient(client);
         throw new Error(
-          `Pi RPC ${error.piRpcRequestType ?? "steer"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          `Pi RPC ${rpcError.piRpcRequestType ?? "steer"} timed out. The agent process was restarted to avoid overlapping runs.`,
           { cause: error }
         );
       }

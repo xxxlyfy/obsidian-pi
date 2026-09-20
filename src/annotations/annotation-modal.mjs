@@ -27,7 +27,7 @@ export class AnnotationModal extends Modal {
     });
     this.contextEl.value = this.options.annotation?.context ?? "";
     this.contextEl.addEventListener("input", () => {
-      this.contextEl.removeAttribute("aria-invalid");
+      this.contextEl?.removeAttribute("aria-invalid");
       this.errorEl?.empty();
     });
 

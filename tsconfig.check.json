@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "checkJs": true,
+    "noImplicitAny": false
+  },
+  "include": [
+    "src/types/**/*.d.ts",
+    "src/pi/**/*.mjs",
+    "src/threads/**/*.mjs",
+    "src/annotations/**/*.mjs",
+    "src/shared/**/*.mjs",
+    "src/context/**/*.mjs"
+  ],
+  "exclude": ["main.js", "node_modules"]
+}

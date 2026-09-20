@@ -4,6 +4,14 @@ import { parsePromptReferences } from "./prompt-references.mjs";
 import { getSlashCommands } from "./slash-commands.mjs";
 
 export class ContextBuilder {
+  /**
+   * @param {any} graph
+   * @param {any} settings
+   * @param {string} bundledInstructions
+   * @param {string | undefined} vaultBasePath
+   * @param {() => any[]} [getPiCommands]
+   * @param {(path: string) => any[] | Promise<any[]>} [annotationProvider]
+   */
   constructor(
     graph,
     settings,
@@ -82,11 +90,14 @@ export class ContextBuilder {
    * Reusable prompt-time enrichment hook. Local queue or steer-now callers can
    * pass their normal context packet here without introducing a separate
    * annotation selector or queue path.
+   *
+   * @param {any} context
+   * @param {any} [options]
    */
   async enrichPromptContext(context, options = undefined) {
     const hasSnapshot = Object.prototype.hasOwnProperty.call(options ?? {}, "annotations");
     const annotations = hasSnapshot
-      ? options.annotations
+      ? options?.annotations
       : context.activeNote
         ? await Promise.resolve(this.annotationProvider(context.activeNote.path))
         : [];

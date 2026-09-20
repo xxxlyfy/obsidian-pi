@@ -34,7 +34,8 @@ export function createMarkdownAnnotationExtension(controller) {
       eventHandlers: {
         mousemove(event, view) {
           if (!controller.isPicking(view)) return false;
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const target = /** @type {Element | null} */ (event.target);
+          const line = target?.closest?.(".cm-line") ?? null;
           if (line) controller.hoverPickTarget(view, view.posAtDOM(line));
           return false;
         },
@@ -56,7 +57,8 @@ export function createMarkdownAnnotationExtension(controller) {
             event.preventDefault();
             return true;
           }
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const target = /** @type {Element | null} */ (event.target);
+          const line = target?.closest?.(".cm-line") ?? null;
           if (!line) return false;
           event.preventDefault();
           controller.choosePickTarget(view, view.posAtDOM(line));

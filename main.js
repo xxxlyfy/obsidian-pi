@@ -285,6 +285,10 @@ function contextSupportsMatch(source, from, to, prefix, suffix) {
 
 // src/annotations/annotation-store.mjs
 var AnnotationStore = class {
+  /**
+   * @param {any} [rawData]
+   * @param {(data: any) => void} [onChange]
+   */
   constructor(rawData, onChange = () => {}) {
     this.data = normalizeAnnotationData(rawData);
     this.onChange = onChange;
@@ -478,7 +482,7 @@ var AnnotationModal = class extends import_obsidian.Modal {
     });
     this.contextEl.value = this.options.annotation?.context ?? "";
     this.contextEl.addEventListener("input", () => {
-      this.contextEl.removeAttribute("aria-invalid");
+      this.contextEl?.removeAttribute("aria-invalid");
       this.errorEl?.empty();
     });
     const fieldset = this.contentEl.createEl("fieldset", {
@@ -714,7 +718,10 @@ function createMarkdownAnnotationExtension(controller) {
       eventHandlers: {
         mousemove(event, view) {
           if (!controller.isPicking(view)) return false;
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const target =
+            /** @type {Element | null} */
+            event.target;
+          const line = target?.closest?.(".cm-line") ?? null;
           if (line) controller.hoverPickTarget(view, view.posAtDOM(line));
           return false;
         },
@@ -736,7 +743,10 @@ function createMarkdownAnnotationExtension(controller) {
             event.preventDefault();
             return true;
           }
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const target =
+            /** @type {Element | null} */
+            event.target;
+          const line = target?.closest?.(".cm-line") ?? null;
           if (!line) return false;
           event.preventDefault();
           controller.choosePickTarget(view, view.posAtDOM(line));
@@ -901,11 +911,12 @@ var MarkdownAnnotationsController = class {
     for (const state of this.leaves.values()) {
       const nextPath = state.view.file?.path;
       const reading = this.isReadingState(state);
-      if (state.path !== nextPath && this.pickState?.leaf === state.leaf) this.cancelPick();
+      const pickState = this.pickState;
+      if (state.path !== nextPath && pickState?.leaf === state.leaf) this.cancelPick();
       if (
-        this.pickState?.leaf === state.leaf &&
-        ((this.pickState.kind === "rendered" && !reading) ||
-          (this.pickState.kind === "editor" && reading))
+        pickState &&
+        pickState.leaf === state.leaf &&
+        ((pickState.kind === "rendered" && !reading) || (pickState.kind === "editor" && reading))
       )
         this.cancelPick();
       if (state.path !== nextPath || !reading) {
@@ -1093,12 +1104,13 @@ var MarkdownAnnotationsController = class {
     );
   }
   hoverPickTarget(view, offset) {
-    if (!this.isPicking(view) || this.pickState.hoverOffset === offset) return;
-    this.pickState.hoverOffset = offset;
+    const pickState = this.pickState;
+    if (!this.isPicking(view) || !pickState || pickState.hoverOffset === offset) return;
+    pickState.hoverOffset = offset;
     requestAnnotationRefresh(view);
   }
   pickRangeForEditor(view) {
-    if (!this.isPicking(view)) return void 0;
+    if (!this.isPicking(view) || !this.pickState) return void 0;
     const offset = this.pickState.hoverOffset ?? view.state.selection.main.head;
     return resolveMarkdownBlockRange(view.state.doc.toString(), offset);
   }
@@ -1126,7 +1138,7 @@ var MarkdownAnnotationsController = class {
     return true;
   }
   choosePickTarget(view, offset) {
-    if (!this.isPicking(view)) return;
+    if (!this.isPicking(view) || !this.pickState) return;
     const state = this.leaves.get(this.pickState.leaf);
     if (!state) return this.cancelPick();
     const text = view.state.doc.toString();
@@ -1252,7 +1264,7 @@ var MarkdownAnnotationsController = class {
   setFocusedRenderedRecord(record) {
     for (const item of this.recordsForState(record.state))
       item.element.classList.toggle("is-focused", item === record);
-    this.pickState.focused = record;
+    if (this.pickState) this.pickState.focused = record;
   }
   removeRenderedRecord(record) {
     this.disableRenderedTarget(record);
@@ -1404,6 +1416,7 @@ var MarkdownAnnotationsController = class {
         return;
       }
       if (resolved.notice) new import_obsidian2.Notice(resolved.notice);
+      if (!resolved.range) return;
       const anchor = {
         ...captureAnchor(source, resolved.range.from, resolved.range.to),
         renderedText: resolved.renderedText,
@@ -2103,6 +2116,14 @@ function getSlashCommands(piCommands = []) {
 
 // src/context/context-builder.mjs
 var ContextBuilder = class {
+  /**
+   * @param {any} graph
+   * @param {any} settings
+   * @param {string} bundledInstructions
+   * @param {string | undefined} vaultBasePath
+   * @param {() => any[]} [getPiCommands]
+   * @param {(path: string) => any[] | Promise<any[]>} [annotationProvider]
+   */
   constructor(
     graph,
     settings,
@@ -2175,11 +2196,14 @@ var ContextBuilder = class {
    * Reusable prompt-time enrichment hook. Local queue or steer-now callers can
    * pass their normal context packet here without introducing a separate
    * annotation selector or queue path.
+   *
+   * @param {any} context
+   * @param {any} [options]
    */
   async enrichPromptContext(context, options = void 0) {
     const hasSnapshot = Object.prototype.hasOwnProperty.call(options ?? {}, "annotations");
     const annotations = hasSnapshot
-      ? options.annotations
+      ? options?.annotations
       : context.activeNote
         ? await Promise.resolve(this.annotationProvider(context.activeNote.path))
         : [];
@@ -2879,7 +2903,7 @@ function isNodeRuntimeMissing(text = "") {
   return NODE_RUNTIME_MISSING_PATTERNS.some((pattern) => pattern.test(text));
 }
 function isPiCliMissing(error) {
-  return error && error.code === "ENOENT";
+  return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT";
 }
 function getCombinedErrorText(error, stderr, stdout) {
   return [getErrorMessage(error), stderr, stdout]
@@ -3289,16 +3313,19 @@ var PiRpcClient = class {
     const child = this.child;
     if (!child || child.exitCode !== null) return Promise.resolve();
     const timerHost = this.timerHost ?? resolveActiveWindow3() ?? nodeTimerHost;
-    return new Promise((resolve) => {
-      let timer;
-      const finish = () => {
-        if (timer) timerHost.clearTimeout(timer);
-        child.removeListener("close", finish);
-        resolve();
-      };
-      timer = timerHost.setTimeout(finish, timeoutMs);
-      child.once("close", finish);
-    });
+    return (
+      /** @type {Promise<void>} */
+      new Promise((resolve) => {
+        let timer;
+        const finish = () => {
+          if (timer) timerHost.clearTimeout(timer);
+          child.removeListener("close", finish);
+          resolve();
+        };
+        timer = timerHost.setTimeout(finish, timeoutMs);
+        child.once("close", finish);
+      })
+    );
   }
   subscribe(listener) {
     this.listeners.add(listener);
@@ -3363,7 +3390,8 @@ var PiRpcClient = class {
   }
   async request(type, payload = {}, options = {}) {
     if (!this.running) await this.start();
-    if (!this.child?.stdin?.writable) throw new Error("Pi RPC stdin is not writable.");
+    const child = this.child;
+    if (!child?.stdin?.writable) throw new Error("Pi RPC stdin is not writable.");
     const id = `obsidian-pi-${this.nextRequestId++}`;
     const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const command = { id, type, ...payload };
@@ -3395,7 +3423,7 @@ var PiRpcClient = class {
           reject(error);
         }
       });
-      this.child.stdin.write(
+      child.stdin.write(
         `${JSON.stringify(command)}
 `,
         (error) => {
@@ -3511,6 +3539,7 @@ var PiRpcClient = class {
       this.terminate();
     }
   }
+  /** @param {NodeJS.Signals} [signal] */
   terminate(signal = "SIGTERM") {
     const child = this.child;
     if (!child) return;
@@ -4035,7 +4064,7 @@ function createQueuedPrompt({
     annotations: normalizedAnnotations,
     contextFilePath: contextFilePath ? String(contextFilePath) : void 0,
     threadId: String(threadId || ""),
-    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    createdAt: typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now(),
     state: "pending"
   };
 }
@@ -4110,7 +4139,7 @@ function isSupportedTextFile(fileName, mimeType = "") {
     .toLowerCase()
     .split(";")[0];
   const base = name.split("/").pop() || "";
-  const extension = base.includes(".") ? base.split(".").pop() : "";
+  const extension = base.includes(".") ? (base.split(".").pop() ?? "") : "";
   if (
     [
       "pdf",
@@ -4304,7 +4333,10 @@ function encodeBase64(binary) {
 }
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const FileReader = resolveActiveWindow4()?.FileReader;
+    const activeWindow =
+      /** @type {Window & typeof globalThis | undefined} */
+      resolveActiveWindow4();
+    const FileReader = activeWindow?.FileReader;
     if (!FileReader) {
       reject(new Error("Could not read image."));
       return;
@@ -4512,12 +4544,15 @@ var PiRunner = class {
         runtimeState
       };
     } catch (error) {
+      const rpcError =
+        /** @type {Error & { piRpcUncertain?: boolean, piRpcRequestType?: string }} */
+        error;
       if (this.cancelRequested || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
-      if (error?.piRpcUncertain) {
+      if (rpcError?.piRpcUncertain) {
         await this.recoverUncertainRpcClient(client);
         throw new Error(
-          `Pi RPC ${error.piRpcRequestType ?? "request"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          `Pi RPC ${rpcError.piRpcRequestType ?? "request"} timed out. The agent process was restarted to avoid overlapping runs.`,
           { cause: error }
         );
       }
@@ -4548,10 +4583,13 @@ var PiRunner = class {
         ...(rpcImages.length > 0 ? { images: rpcImages } : {})
       });
     } catch (error) {
-      if (error?.piRpcUncertain) {
+      const rpcError =
+        /** @type {Error & { piRpcUncertain?: boolean, piRpcRequestType?: string }} */
+        error;
+      if (rpcError?.piRpcUncertain) {
         await this.recoverUncertainRpcClient(client);
         throw new Error(
-          `Pi RPC ${error.piRpcRequestType ?? "steer"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          `Pi RPC ${rpcError.piRpcRequestType ?? "steer"} timed out. The agent process was restarted to avoid overlapping runs.`,
           { cause: error }
         );
       }
@@ -9617,7 +9655,10 @@ async function replaceFile(sourcePath, destinationPath) {
   try {
     await import_node_fs3.default.promises.rename(sourcePath, destinationPath);
   } catch (error) {
-    if (!["EEXIST", "EPERM"].includes(error?.code)) throw error;
+    const code =
+      /** @type {NodeJS.ErrnoException} */
+      error?.code;
+    if (code !== "EEXIST" && code !== "EPERM") throw error;
     await import_node_fs3.default.promises.rm(destinationPath, { force: true });
     await import_node_fs3.default.promises.rename(sourcePath, destinationPath);
   }
@@ -9905,7 +9946,10 @@ async function listFiles(folder, extension, includeHidden = false) {
       .map((entry) => entry.name)
       .sort();
   } catch (error) {
-    if (error?.code === "ENOENT") return [];
+    const code =
+      /** @type {NodeJS.ErrnoException} */
+      error?.code;
+    if (code === "ENOENT") return [];
     throw error;
   }
 }
@@ -9915,8 +9959,11 @@ async function removeEmptyDirectory(directory, boundary) {
     try {
       await import_node_fs4.default.promises.rmdir(current);
     } catch (error) {
-      if (error?.code === "ENOENT") return;
-      if (["ENOTEMPTY", "EEXIST"].includes(error?.code)) return;
+      const code =
+        /** @type {NodeJS.ErrnoException} */
+        error?.code;
+      if (code === "ENOENT") return;
+      if (code === "ENOTEMPTY" || code === "EEXIST") return;
       throw error;
     }
     current = import_node_path5.default.dirname(current);

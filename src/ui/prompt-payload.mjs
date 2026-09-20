@@ -98,6 +98,23 @@ const SUPPORTED_TEXT_MIME_TYPES = new Set([
   "application/x-shellscript"
 ]);
 
+/**
+ * @typedef {object} QueuedPrompt
+ * @property {string} id
+ * @property {string} prompt
+ * @property {Array<any>} images
+ * @property {Array<any>} attachments
+ * @property {Array<any>} annotations
+ * @property {string | undefined} contextFilePath
+ * @property {string} threadId
+ * @property {number} createdAt
+ * @property {string} state
+ */
+
+/**
+ * @param {Partial<QueuedPrompt>} [input]
+ * @returns {QueuedPrompt | undefined}
+ */
 export function createQueuedPrompt({
   prompt = "",
   images = [],
@@ -123,7 +140,7 @@ export function createQueuedPrompt({
     annotations: normalizedAnnotations,
     contextFilePath: contextFilePath ? String(contextFilePath) : undefined,
     threadId: String(threadId || ""),
-    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    createdAt: typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now(),
     state: "pending"
   };
 }
@@ -205,7 +222,7 @@ export function isSupportedTextFile(fileName, mimeType = "") {
     .toLowerCase()
     .split(";")[0];
   const base = name.split("/").pop() || "";
-  const extension = base.includes(".") ? base.split(".").pop() : "";
+  const extension = base.includes(".") ? (base.split(".").pop() ?? "") : "";
   if (
     [
       "pdf",
@@ -412,7 +429,10 @@ function encodeBase64(binary) {
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const FileReader = resolveActiveWindow()?.FileReader;
+    const activeWindow = /** @type {Window & typeof globalThis | undefined} */ (
+      resolveActiveWindow()
+    );
+    const FileReader = activeWindow?.FileReader;
     if (!FileReader) {
       reject(new Error("Could not read image."));
       return;

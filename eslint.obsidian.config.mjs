@@ -2,7 +2,7 @@ import obsidianmd from "eslint-plugin-obsidianmd";
 
 export default [
   {
-    ignores: ["main.js", "node_modules/**", "data.json", "pi-sessions/**", "*.zip"]
+    ignores: ["main.js", "node_modules/**", "data.json", "pi-sessions/**", "*.zip", "src/types/**"]
   },
   ...obsidianmd.configs.recommended,
   {

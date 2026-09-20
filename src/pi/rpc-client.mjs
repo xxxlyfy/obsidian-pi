@@ -60,16 +60,18 @@ export class PiRpcClient {
     const child = this.child;
     if (!child || child.exitCode !== null) return Promise.resolve();
     const timerHost = this.timerHost ?? resolveActiveWindow() ?? nodeTimerHost;
-    return new Promise((resolve) => {
-      let timer;
-      const finish = () => {
-        if (timer) timerHost.clearTimeout(timer);
-        child.removeListener("close", finish);
-        resolve();
-      };
-      timer = timerHost.setTimeout(finish, timeoutMs);
-      child.once("close", finish);
-    });
+    return /** @type {Promise<void>} */ (
+      new Promise((resolve) => {
+        let timer;
+        const finish = () => {
+          if (timer) timerHost.clearTimeout(timer);
+          child.removeListener("close", finish);
+          resolve();
+        };
+        timer = timerHost.setTimeout(finish, timeoutMs);
+        child.once("close", finish);
+      })
+    );
   }
 
   subscribe(listener) {
@@ -82,6 +84,7 @@ export class PiRpcClient {
     if (this.running) return;
     if (this.startPromise) return this.startPromise;
 
+    /** @type {Promise<void>} */
     this.startPromise = new Promise((resolve, reject) => {
       const piExecutable = findPiExecutable(this.options.piExecutablePath);
       const invocation = buildPiProcessInvocation(
@@ -137,7 +140,8 @@ export class PiRpcClient {
 
   async request(type, payload = {}, options = {}) {
     if (!this.running) await this.start();
-    if (!this.child?.stdin?.writable) throw new Error("Pi RPC stdin is not writable.");
+    const child = this.child;
+    if (!child?.stdin?.writable) throw new Error("Pi RPC stdin is not writable.");
 
     const id = `obsidian-pi-${this.nextRequestId++}`;
     const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -149,6 +153,7 @@ export class PiRpcClient {
         timeoutMs > 0
           ? timerHost.setTimeout(() => {
               this.pending.delete(id);
+              /** @type {Error & { piRpcUncertain?: boolean, piRpcRequestType?: string }} */
               const error = new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`);
               if (STATEFUL_REQUEST_TYPES.has(type)) {
                 this.uncertainRequest = { id, type };
@@ -173,7 +178,7 @@ export class PiRpcClient {
         }
       });
 
-      this.child.stdin.write(`${JSON.stringify(command)}\n`, (error) => {
+      child.stdin.write(`${JSON.stringify(command)}\n`, (error) => {
         if (!error) return;
         const pending = this.pending.get(id);
         this.pending.delete(id);
@@ -297,6 +302,7 @@ export class PiRpcClient {
     }
   }
 
+  /** @param {NodeJS.Signals} [signal] */
   terminate(signal = "SIGTERM") {
     const child = this.child;
     if (!child) return;

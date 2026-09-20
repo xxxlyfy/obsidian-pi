@@ -4,6 +4,23 @@ export function calculateContextTokens(usage) {
     : 0;
 }
 
+/**
+ * @typedef {object} TokenUsage
+ * @property {number} input
+ * @property {number} output
+ * @property {number} cacheRead
+ * @property {number} cacheWrite
+ * @property {number} totalTokens
+ * @property {number} [contextWindow]
+ * @property {string} [provider]
+ * @property {string} [model]
+ * @property {string} [modelId]
+ */
+
+/**
+ * @param {any} usage
+ * @returns {TokenUsage | undefined}
+ */
 export function normalizeTokenUsage(usage) {
   if (!usage) return undefined;
 

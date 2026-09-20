@@ -119,11 +119,12 @@ export class MarkdownAnnotationsController {
     for (const state of this.leaves.values()) {
       const nextPath = state.view.file?.path;
       const reading = this.isReadingState(state);
-      if (state.path !== nextPath && this.pickState?.leaf === state.leaf) this.cancelPick();
+      const pickState = this.pickState;
+      if (state.path !== nextPath && pickState?.leaf === state.leaf) this.cancelPick();
       if (
-        this.pickState?.leaf === state.leaf &&
-        ((this.pickState.kind === "rendered" && !reading) ||
-          (this.pickState.kind === "editor" && reading))
+        pickState &&
+        pickState.leaf === state.leaf &&
+        ((pickState.kind === "rendered" && !reading) || (pickState.kind === "editor" && reading))
       )
         this.cancelPick();
       if (state.path !== nextPath || !reading) {
@@ -155,6 +156,7 @@ export class MarkdownAnnotationsController {
       }
     });
     view.containerEl.addClass("pi-agent-annotations-host");
+    /** @type {{ leaf: any, view: any, actionEl: any, listEl: any, path: string | undefined, cachedRenderedSelection?: any, captureSelection?: () => void }} */
     const state = {
       leaf,
       view,
@@ -322,13 +324,14 @@ export class MarkdownAnnotationsController {
   }
 
   hoverPickTarget(view, offset) {
-    if (!this.isPicking(view) || this.pickState.hoverOffset === offset) return;
-    this.pickState.hoverOffset = offset;
+    const pickState = this.pickState;
+    if (!this.isPicking(view) || !pickState || pickState.hoverOffset === offset) return;
+    pickState.hoverOffset = offset;
     requestAnnotationRefresh(view);
   }
 
   pickRangeForEditor(view) {
-    if (!this.isPicking(view)) return undefined;
+    if (!this.isPicking(view) || !this.pickState) return undefined;
     const offset = this.pickState.hoverOffset ?? view.state.selection.main.head;
     return resolveMarkdownBlockRange(view.state.doc.toString(), offset);
   }
@@ -358,7 +361,7 @@ export class MarkdownAnnotationsController {
   }
 
   choosePickTarget(view, offset) {
-    if (!this.isPicking(view)) return;
+    if (!this.isPicking(view) || !this.pickState) return;
     const state = this.leaves.get(this.pickState.leaf);
     if (!state) return this.cancelPick();
     const text = view.state.doc.toString();
@@ -489,7 +492,7 @@ export class MarkdownAnnotationsController {
   setFocusedRenderedRecord(record) {
     for (const item of this.recordsForState(record.state))
       item.element.classList.toggle("is-focused", item === record);
-    this.pickState.focused = record;
+    if (this.pickState) this.pickState.focused = record;
   }
 
   removeRenderedRecord(record) {
@@ -642,6 +645,7 @@ export class MarkdownAnnotationsController {
         return;
       }
       if (resolved.notice) new Notice(resolved.notice);
+      if (!resolved.range) return;
       const anchor = {
         ...captureAnchor(source, resolved.range.from, resolved.range.to),
         renderedText: resolved.renderedText,

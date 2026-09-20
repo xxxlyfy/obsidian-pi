@@ -8,6 +8,10 @@ import {
 } from "./annotation-model.mjs";
 
 export class AnnotationStore {
+  /**
+   * @param {any} [rawData]
+   * @param {(data: any) => void} [onChange]
+   */
   constructor(rawData, onChange = () => {}) {
     this.data = normalizeAnnotationData(rawData);
     this.onChange = onChange;

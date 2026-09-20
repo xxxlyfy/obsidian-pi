@@ -299,7 +299,8 @@ async function listFiles(folder, extension, includeHidden = false) {
       .map((entry) => entry.name)
       .sort();
   } catch (error) {
-    if (error?.code === "ENOENT") return [];
+    const code = /** @type {NodeJS.ErrnoException} */ (error)?.code;
+    if (code === "ENOENT") return [];
     throw error;
   }
 }
@@ -310,8 +311,9 @@ async function removeEmptyDirectory(directory, boundary) {
     try {
       await fs.promises.rmdir(current);
     } catch (error) {
-      if (error?.code === "ENOENT") return;
-      if (["ENOTEMPTY", "EEXIST"].includes(error?.code)) return;
+      const code = /** @type {NodeJS.ErrnoException} */ (error)?.code;
+      if (code === "ENOENT") return;
+      if (code === "ENOTEMPTY" || code === "EEXIST") return;
       throw error;
     }
     current = path.dirname(current);
@@ -327,6 +329,9 @@ async function exists(filePath) {
   }
 }
 
+/**
+ * @returns {{ threads: any[], managedFiles: string[], warnings: string[], currentThreadId?: string }}
+ */
 function emptyResult() {
   return { threads: [], managedFiles: [], warnings: [] };
 }

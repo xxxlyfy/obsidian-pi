@@ -90,7 +90,8 @@ async function replaceFile(sourcePath, destinationPath) {
   try {
     await fs.promises.rename(sourcePath, destinationPath);
   } catch (error) {
-    if (!["EEXIST", "EPERM"].includes(error?.code)) throw error;
+    const code = /** @type {NodeJS.ErrnoException} */ (error)?.code;
+    if (code !== "EEXIST" && code !== "EPERM") throw error;
     await fs.promises.rm(destinationPath, { force: true });
     await fs.promises.rename(sourcePath, destinationPath);
   }

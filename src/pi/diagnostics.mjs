@@ -12,14 +12,32 @@ const NODE_RUNTIME_MISSING_PATTERNS = [
   /spawn\s+node\s+ENOENT/i
 ];
 
+/**
+ * @typedef {object} PiCliFailureDetails
+ * @property {string} [context]
+ * @property {unknown} [error]
+ * @property {string} [stderr]
+ * @property {string} [stdout]
+ * @property {number | null} [exitCode]
+ */
+
+/**
+ * @param {PiCliFailureDetails} [options]
+ */
 export function createPiCliError(options = {}) {
   return new Error(formatPiCliFailure(options));
 }
 
+/**
+ * @param {PiCliFailureDetails} [options]
+ */
 export function formatPiCliFailure(options = {}) {
   return diagnosePiCliFailure(options).message;
 }
 
+/**
+ * @param {PiCliFailureDetails} [options]
+ */
 export function diagnosePiCliFailure({
   context = "Could not run Pi CLI",
   error,
@@ -43,10 +61,18 @@ export function isNodeRuntimeMissing(text = "") {
   return NODE_RUNTIME_MISSING_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+/**
+ * @param {unknown} error
+ */
 export function isPiCliMissing(error) {
-  return error && error.code === "ENOENT";
+  return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT";
 }
 
+/**
+ * @param {unknown} error
+ * @param {string} [stderr]
+ * @param {string} [stdout]
+ */
 function getCombinedErrorText(error, stderr, stdout) {
   return [getErrorMessage(error), stderr, stdout]
     .filter(Boolean)
@@ -55,6 +81,9 @@ function getCombinedErrorText(error, stderr, stdout) {
     .join("\n");
 }
 
+/**
+ * @param {unknown} error
+ */
 function getErrorMessage(error) {
   if (!error) return "";
   return error instanceof Error ? error.message : String(error);
