@@ -43,18 +43,18 @@ describe("plugin settings helpers", () => {
         availableModels: [model]
       })
     ).toEqual({
-      "": "Medium",
-      low: "Low",
-      medium: "Medium",
-      high: "High",
-      max: "Max - deepest"
+      "": "中",
+      low: "低",
+      medium: "中",
+      high: "高",
+      max: "最高（最深）"
     });
     expect(
       getReasoningOptions({
         ...DEFAULT_SETTINGS,
         effectiveReasoning: "high"
       })
-    ).toEqual({ "": "High" });
+    ).toEqual({ "": "高" });
   });
 
   it("does not offer another model's thinking levels for an unknown custom slug", () => {
@@ -67,7 +67,7 @@ describe("plugin settings helpers", () => {
         effectiveReasoning: "high",
         availableModels: [model]
       })
-    ).toEqual({ "": "High" });
+    ).toEqual({ "": "高" });
   });
 
   it("resolves reasoning defaults", () => {
@@ -127,6 +127,9 @@ describe("plugin settings helpers", () => {
         availableModels: [model]
       })
     ).toBe(model);
-    expect(getToolModeOptions()).toHaveProperty("full-agent", "Full agent — edit/write and shell");
+    expect(getToolModeOptions()).toHaveProperty(
+      "full-agent",
+      "完整智能体 — 可编辑和写入，并可执行 shell"
+    );
   });
 });

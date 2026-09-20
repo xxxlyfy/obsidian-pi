@@ -1,13 +1,13 @@
 export const CUSTOM_MODEL_VALUE = "__custom";
 
 const REASONING_LABELS = {
-  off: "Off",
-  minimal: "Minimal - may be unavailable with tools",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "XHigh",
-  max: "Max - deepest"
+  off: "关闭",
+  minimal: "最低（使用工具时可能不可用）",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  max: "最高（最深）"
 };
 
 export const DEFAULT_SETTINGS = {
@@ -82,7 +82,7 @@ export function getReasoningOptions(settings) {
     : settings.effectiveReasoning || model?.defaultReasoningLevel;
   const effective = resolvedDefault
     ? (REASONING_LABELS[resolvedDefault] ?? resolvedDefault)
-    : "Automatic";
+    : "自动";
 
   if (supportedReasoningLevels.length === 0) return { "": effective };
 
@@ -122,11 +122,15 @@ function getReasoningModelInfo(settings) {
 
 export function getToolModeOptions() {
   return {
-    chat: "Chat — no Pi CLI tools",
-    "read-only": "Review — read/search/list only",
-    edit: "Edit — edit/write, no shell",
-    "full-agent": "Full agent — edit/write and shell"
+    chat: "对话 — 不启用 Pi CLI 工具",
+    "read-only": "审阅 — 仅读取、搜索、列出",
+    edit: "编辑 — 可编辑和写入，不可执行 shell",
+    "full-agent": "完整智能体 — 可编辑和写入，并可执行 shell"
   };
+}
+
+export function formatReasoningLevel(value) {
+  return REASONING_LABELS[value] ?? value;
 }
 
 function normalizeString(value) {

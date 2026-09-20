@@ -33,7 +33,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
       this.getCustomInstructionsDefinition(),
       {
         type: "group",
-        heading: "Advanced",
+        heading: "高级",
         items: [this.getCustomModelDefinition()]
       },
       {
@@ -43,12 +43,12 @@ export class PiAgentSettingTab extends PluginSettingTab {
       },
       {
         type: "group",
-        heading: "Skills",
+        heading: "技能",
         items: [this.getDefaultSkillsDefinition(), this.getAdditionalSkillsDefinition()]
       },
       {
         type: "group",
-        heading: "Context and file access",
+        heading: "上下文与文件访问",
         items: [this.getIgnoredFoldersDefinition()]
       }
     ];
@@ -83,17 +83,17 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getModelDefinition() {
     return {
-      name: "Model",
-      desc: "Provider/model from Pi's built-in and custom model registry. Use default to follow ~/.pi/agent/settings.json or .pi/settings.json.",
+      name: "模型",
+      desc: "来自 Pi 内置及自定义模型注册表的「提供商/模型」。选择默认将遵循 ~/.pi/agent/settings.json 或 .pi/settings.json。",
       render: (setting) =>
         setting
           .addButton((button) =>
             button
               .setButtonText(this.getModelButtonLabel())
-              .setTooltip("Choose model")
+              .setTooltip("选择模型")
               .onClick(async () => {
                 const label = this.getModelButtonLabel();
-                button.setButtonText("Loading…");
+                button.setButtonText("加载中…");
                 button.setDisabled(true);
                 try {
                   await this.plugin.ensureRuntimeModelState();
@@ -113,10 +113,10 @@ export class PiAgentSettingTab extends PluginSettingTab {
           )
           .addButton((button) =>
             button
-              .setButtonText("Refresh")
-              .setTooltip("Refresh models from Pi")
+              .setButtonText("刷新")
+              .setTooltip("从 Pi 刷新模型")
               .onClick(async () => {
-                button.setButtonText("Refreshing...");
+                button.setButtonText("刷新中…");
                 button.setDisabled(true);
                 try {
                   await this.plugin.refreshModelCatalog(true);
@@ -131,16 +131,16 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getThinkingDefinition() {
     return {
-      name: "Thinking level",
-      desc: "Controls reasoning effort only. Values come from the selected model returned by Pi.",
+      name: "思考级别",
+      desc: "仅控制推理强度。可选值由 Pi 返回的所选模型决定。",
       render: (setting) =>
         setting.addButton((button) =>
           button
             .setButtonText(this.getReasoningButtonLabel())
-            .setTooltip("Choose thinking level")
+            .setTooltip("选择思考级别")
             .onClick(async () => {
               const label = this.getReasoningButtonLabel();
-              button.setButtonText("Loading…");
+              button.setButtonText("加载中…");
               button.setDisabled(true);
               try {
                 await this.plugin.ensureRuntimeModelState();
@@ -162,8 +162,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getToolModeDefinition() {
     return {
-      name: "Tool mode",
-      desc: "Controls which Pi CLI tools are enabled. Tool modes are not an operating-system sandbox.",
+      name: "工具模式",
+      desc: "控制启用哪些 Pi CLI 工具。工具模式并非操作系统级沙箱。",
       render: (setting) =>
         setting.addDropdown((dropdown) =>
           dropdown
@@ -174,10 +174,10 @@ export class PiAgentSettingTab extends PluginSettingTab {
                 (value === "edit" || value === "full-agent" || value === "workspace-write") &&
                 !this.plugin.settings.acknowledgedToolRisk &&
                 !(await confirmWithModal(this.app, {
-                  title: "Enable write tools?",
+                  title: "启用写入工具？",
                   message:
-                    "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
-                  confirmText: "Enable tools",
+                    "Pi 工具模式并非操作系统级沙箱。编辑和完整智能体模式可以修改库或项目文件，完整智能体模式还可以执行 shell 命令。",
+                  confirmText: "启用工具",
                   warning: true
                 }))
               ) {
@@ -197,15 +197,13 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getDesktopNotificationsDefinition() {
     return {
-      name: "Desktop completion notifications",
-      desc: "Notify when an agent run finishes while Obsidian is unfocused.",
+      name: "桌面完成通知",
+      desc: "当 Obsidian 处于非焦点状态且智能体运行结束时发送通知。",
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.desktopNotifications).onChange(async (value) => {
             if (value && !(await requestDesktopNotificationPermission())) {
-              new Notice(
-                "Desktop notifications are unavailable or not permitted. You can enable them in your operating-system notification settings."
-              );
+              new Notice("桌面通知不可用或未获授权。你可以在操作系统的通知设置中启用它们。");
             }
             this.plugin.settings.desktopNotifications = value;
             await this.plugin.saveSettings();
@@ -216,12 +214,12 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getCustomInstructionsDefinition() {
     return {
-      name: "Custom instructions",
-      desc: "Vault-specific instructions added to every Pi run.",
+      name: "自定义指令",
+      desc: "添加到每次 Pi 运行中的、针对当前库的指令。",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
-            .setPlaceholder("Prefer PARA folders. Keep project notes concise.")
+            .setPlaceholder("优先使用 PARA 文件夹。保持项目笔记简洁。")
             .setValue(this.plugin.settings.customInstructions)
             .onChange(async (value) => {
               this.plugin.settings.customInstructions = value;
@@ -233,14 +231,14 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getCustomModelDefinition() {
     return {
-      name: "Custom model slug",
-      desc: "Fallback for a provider/model slug that Pi does not expose in its catalog. Custom slugs are only selectable here.",
+      name: "自定义模型标识",
+      desc: "当 Pi 的模型目录中没有所需的「提供商/模型」标识时使用的备用项。自定义标识只能在此处选用。",
       render: (setting) => {
         let useCustomButton;
         setting
           .addText((text) =>
             text
-              .setPlaceholder("Provider/model")
+              .setPlaceholder("提供商/模型")
               .setValue(this.plugin.settings.customModel)
               .onChange(async (value) => {
                 this.plugin.settings.customModel = value.trim();
@@ -252,7 +250,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
             useCustomButton = button;
             button
               .setButtonText(
-                this.plugin.settings.model === CUSTOM_MODEL_VALUE ? "Using custom" : "Use custom"
+                this.plugin.settings.model === CUSTOM_MODEL_VALUE ? "使用中" : "使用自定义"
               )
               .setDisabled(!this.plugin.settings.customModel)
               .onClick(async () => {
@@ -268,8 +266,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getPiExecutableDefinition() {
     return {
-      name: "Pi executable path",
-      desc: "Optional path to the Pi CLI. Leave empty to auto-detect common install locations. Supports ~ and environment variables like ${USER}.",
+      name: "Pi 可执行文件路径",
+      desc: "可选的 Pi CLI 路径。留空则自动检测常见安装位置。支持 ~ 以及诸如 ${USER} 的环境变量。",
       render: (setting) =>
         setting.addText((text) =>
           text
@@ -285,11 +283,11 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getPiInstallationDefinition() {
     return {
-      name: "Check Pi installation",
-      desc: "Verify that Obsidian can run the Pi CLI from its current environment.",
+      name: "检查 Pi 安装",
+      desc: "验证 Obsidian 能否在当前环境中运行 Pi CLI。",
       render: (setting) =>
         setting.addButton((button) =>
-          button.setButtonText("Check").onClick(() => {
+          button.setButtonText("检查").onClick(() => {
             void this.plugin.checkPiInstallation(true);
           })
         )
@@ -298,8 +296,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getDefaultSkillsDefinition() {
     return {
-      name: "Include default Pi skills",
-      desc: "Load skills discovered by Pi from global and vault/project skill locations. Turn this off to use only the additional skill folders below.",
+      name: "包含 Pi 默认技能",
+      desc: "加载 Pi 从全局及库或项目技能位置发现的技能。关闭后仅使用下方的附加技能文件夹。",
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle
@@ -314,8 +312,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getAdditionalSkillsDefinition() {
     return {
-      name: "Additional skill folders",
-      desc: "One trusted skill file or folder per line. Supports absolute and vault-relative paths.",
+      name: "附加技能文件夹",
+      desc: "每行一个受信任的技能文件或文件夹，支持绝对路径和库相对路径。",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -336,8 +334,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getIgnoredFoldersDefinition() {
     return {
-      name: "Ignored folders/directories",
-      desc: "Comma-separated folder prefixes that Pi pre-attached context and retrieval should ignore.",
+      name: "忽略的文件夹/目录",
+      desc: "以逗号分隔的文件夹前缀；Pi 在预附加上下文和检索时会忽略这些目录。",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -356,25 +354,22 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getModelButtonLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
-      return this.plugin.settings.customModel || "Custom model";
+      return this.plugin.settings.customModel || "自定义模型";
     }
     const selected = getSelectedModelInfo(this.plugin.settings);
     if (selected) return selected.displayName;
     const effective = this.plugin.settings.availableModels.find(
       (model) => model.slug === this.plugin.settings.effectiveModel
     );
-    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi default";
+    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi 默认";
   }
 
   getReasoningButtonLabel() {
+    const options = this.getReasoningOptions();
     const value = this.getReasoningDropdownValue();
-    if (value) return this.getReasoningOptions()[value] || value;
+    if (value) return options[value] || value;
     const resolved = getResolvedReasoning(this.plugin.settings);
-    return resolved === "pi-default"
-      ? "Loading thinking…"
-      : resolved === "xhigh"
-        ? "XHigh"
-        : resolved.charAt(0).toUpperCase() + resolved.slice(1);
+    return resolved === "pi-default" ? "加载思考级别…" : options[""] || resolved;
   }
 
   getReasoningOptions() {

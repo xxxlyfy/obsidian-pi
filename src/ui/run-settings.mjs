@@ -1,6 +1,7 @@
 import { Notice, setIcon } from "obsidian";
 import {
   CUSTOM_MODEL_VALUE,
+  formatReasoningLevel,
   getResolvedReasoning,
   getSelectedModelInfo
 } from "../plugin/settings.mjs";
@@ -167,10 +168,6 @@ export class RunSettingsControls {
 
   formatDefaultReasoningLabel() {
     const reasoning = getResolvedReasoning(this.plugin.settings);
-    return reasoning === "pi-default" ? "Loading thinking…" : this.formatReasoningLabel(reasoning);
-  }
-
-  formatReasoningLabel(reasoning) {
-    return reasoning === "xhigh" ? "XHigh" : reasoning.charAt(0).toUpperCase() + reasoning.slice(1);
+    return reasoning === "pi-default" ? "加载思考级别…" : formatReasoningLevel(reasoning);
   }
 }

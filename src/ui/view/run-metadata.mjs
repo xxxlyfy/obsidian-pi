@@ -4,7 +4,10 @@ export function getCurrentRunMetadata(settings, runtimeState) {
   return {
     model: getDisplayedModel(settings, runtimeState),
     reasoning:
-      runtimeState?.thinkingLevel || settings.reasoningEffort || settings.effectiveReasoning || "Pi default",
+      runtimeState?.thinkingLevel ||
+      settings.reasoningEffort ||
+      settings.effectiveReasoning ||
+      "Pi default",
     toolMode: settings.sandboxMode,
     toolModeLabel: formatToolModeLabel(settings.sandboxMode)
   };
@@ -12,12 +15,12 @@ export function getCurrentRunMetadata(settings, runtimeState) {
 
 export function formatToolModeLabel(toolMode) {
   return toolMode === "chat"
-    ? "Chat"
+    ? "对话"
     : toolMode === "edit" || toolMode === "workspace-write"
-      ? "Edit"
+      ? "编辑"
       : toolMode === "full-agent"
-        ? "Full agent"
-        : "Review";
+        ? "完整智能体"
+        : "审阅";
 }
 
 function getDisplayedModel(settings, runtimeState) {

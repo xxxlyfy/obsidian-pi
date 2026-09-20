@@ -59,10 +59,10 @@ export function getModelPickerPrimary(item) {
 
 export function getModelPickerSecondary(item) {
   const capabilities = [
-    item.isDefault ? "Pi default" : "",
-    item.model.reasoning ? "thinking" : "",
-    item.model.supportsImages ? "images" : "",
-    item.model.contextWindow ? `${formatTokenAmount(item.model.contextWindow)} context` : ""
+    item.isDefault ? "Pi 默认" : "",
+    item.model.reasoning ? "思考" : "",
+    item.model.supportsImages ? "图片" : "",
+    item.model.contextWindow ? `${formatTokenAmount(item.model.contextWindow)} 上下文` : ""
   ].filter(Boolean);
   return [item.model.slug, ...capabilities].join(" · ");
 }

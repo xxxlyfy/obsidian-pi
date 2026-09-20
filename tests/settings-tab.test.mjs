@@ -56,17 +56,17 @@ describe("Pi agent settings tab API compatibility", () => {
     const items = flattenDefinitions(definitions);
 
     expect(items.map((item) => item.name)).toEqual([
-      "Model",
-      "Thinking level",
-      "Tool mode",
-      "Desktop completion notifications",
-      "Custom instructions",
-      "Custom model slug",
-      "Pi executable path",
-      "Check Pi installation",
-      "Include default Pi skills",
-      "Additional skill folders",
-      "Ignored folders/directories"
+      "模型",
+      "思考级别",
+      "工具模式",
+      "桌面完成通知",
+      "自定义指令",
+      "自定义模型标识",
+      "Pi 可执行文件路径",
+      "检查 Pi 安装",
+      "包含 Pi 默认技能",
+      "附加技能文件夹",
+      "忽略的文件夹/目录"
     ]);
     expect(items.every((item) => typeof item.render === "function")).toBe(true);
   });

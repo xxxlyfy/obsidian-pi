@@ -33,7 +33,7 @@ describe("native model picker state", () => {
     expect(items.map((item) => item.value)).toEqual([""]);
     expect(getModelPickerPrimary(items[0])).toBe("GPT-5");
     expect(getModelPickerSecondary(items[0])).toBe(
-      "openai/gpt-5 · Pi default · thinking · images · 200K context"
+      "openai/gpt-5 · Pi 默认 · 思考 · 图片 · 200K 上下文"
     );
     expect(
       buildModelPickerItems({ ...resolvedSettings, effectiveModel: "missing/model" })[0].value

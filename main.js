@@ -1864,13 +1864,13 @@ function truncate(value, limit) {
 // src/plugin/settings.mjs
 var CUSTOM_MODEL_VALUE = "__custom";
 var REASONING_LABELS = {
-  off: "Off",
-  minimal: "Minimal - may be unavailable with tools",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "XHigh",
-  max: "Max - deepest"
+  off: "\u5173\u95ED",
+  minimal: "\u6700\u4F4E\uFF08\u4F7F\u7528\u5DE5\u5177\u65F6\u53EF\u80FD\u4E0D\u53EF\u7528\uFF09",
+  low: "\u4F4E",
+  medium: "\u4E2D",
+  high: "\u9AD8",
+  xhigh: "\u6781\u9AD8",
+  max: "\u6700\u9AD8\uFF08\u6700\u6DF1\uFF09"
 };
 var DEFAULT_SETTINGS = {
   model: "",
@@ -1930,7 +1930,7 @@ function getReasoningOptions(settings) {
     : settings.effectiveReasoning || model?.defaultReasoningLevel;
   const effective = resolvedDefault
     ? (REASONING_LABELS[resolvedDefault] ?? resolvedDefault)
-    : "Automatic";
+    : "\u81EA\u52A8";
   if (supportedReasoningLevels.length === 0) return { "": effective };
   const options = { "": effective };
   for (const reasoningLevel of supportedReasoningLevels) {
@@ -1961,11 +1961,15 @@ function getReasoningModelInfo(settings) {
 }
 function getToolModeOptions() {
   return {
-    chat: "Chat \u2014 no Pi CLI tools",
-    "read-only": "Review \u2014 read/search/list only",
-    edit: "Edit \u2014 edit/write, no shell",
-    "full-agent": "Full agent \u2014 edit/write and shell"
+    chat: "\u5BF9\u8BDD \u2014 \u4E0D\u542F\u7528 Pi CLI \u5DE5\u5177",
+    "read-only": "\u5BA1\u9605 \u2014 \u4EC5\u8BFB\u53D6\u3001\u641C\u7D22\u3001\u5217\u51FA",
+    edit: "\u7F16\u8F91 \u2014 \u53EF\u7F16\u8F91\u548C\u5199\u5165\uFF0C\u4E0D\u53EF\u6267\u884C shell",
+    "full-agent":
+      "\u5B8C\u6574\u667A\u80FD\u4F53 \u2014 \u53EF\u7F16\u8F91\u548C\u5199\u5165\uFF0C\u5E76\u53EF\u6267\u884C shell"
   };
+}
+function formatReasoningLevel(value) {
+  return REASONING_LABELS[value] ?? value;
 }
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -4968,10 +4972,12 @@ function getModelPickerPrimary(item) {
 }
 function getModelPickerSecondary(item) {
   const capabilities = [
-    item.isDefault ? "Pi default" : "",
-    item.model.reasoning ? "thinking" : "",
-    item.model.supportsImages ? "images" : "",
-    item.model.contextWindow ? `${formatTokenAmount(item.model.contextWindow)} context` : ""
+    item.isDefault ? "Pi \u9ED8\u8BA4" : "",
+    item.model.reasoning ? "\u601D\u8003" : "",
+    item.model.supportsImages ? "\u56FE\u7247" : "",
+    item.model.contextWindow
+      ? `${formatTokenAmount(item.model.contextWindow)} \u4E0A\u4E0B\u6587`
+      : ""
   ].filter(Boolean);
   return [item.model.slug, ...capabilities].join(" \xB7 ");
 }
@@ -5063,12 +5069,14 @@ var ModelPickerModal = class extends import_obsidian5.FuzzySuggestModal {
     this.settings = settings;
     this.onChoose = onChoose;
     this.limit = 1e3;
-    this.emptyStateText = "No Pi models match this search.";
-    this.setPlaceholder("Search models by name, provider, slug, or capability\u2026");
+    this.emptyStateText = "\u6CA1\u6709\u5339\u914D\u7684 Pi \u6A21\u578B\u3002";
+    this.setPlaceholder(
+      "\u6309\u540D\u79F0\u3001\u63D0\u4F9B\u5546\u3001\u6807\u8BC6\u6216\u80FD\u529B\u641C\u7D22\u6A21\u578B\u2026"
+    );
     this.setInstructions([
-      { command: "\u2191\u2193", purpose: "navigate" },
-      { command: "\u21B5", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "\u2191\u2193", purpose: "\u5BFC\u822A" },
+      { command: "\u21B5", purpose: "\u9009\u62E9" },
+      { command: "esc", purpose: "\u5173\u95ED" }
     ]);
   }
   getItems() {
@@ -5086,7 +5094,7 @@ var ModelPickerModal = class extends import_obsidian5.FuzzySuggestModal {
     copy.createDiv({ cls: "pi-agent-suggestion-detail", text: getModelPickerSecondary(item) });
     el.setAttribute(
       "aria-label",
-      `${getModelPickerPrimary(item)}, ${getModelPickerSecondary(item)}${this.settings.model === item.value ? ", selected" : ""}`
+      `${getModelPickerPrimary(item)}, ${getModelPickerSecondary(item)}${this.settings.model === item.value ? ", \u5DF2\u9009\u4E2D" : ""}`
     );
   }
   onChooseItem(item) {
@@ -5100,12 +5108,13 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
-    this.emptyStateText = "Pi did not resolve thinking levels for this model.";
-    this.setPlaceholder("Choose thinking level\u2026");
+    this.emptyStateText =
+      "Pi \u672A\u89E3\u6790\u51FA\u8BE5\u6A21\u578B\u7684\u601D\u8003\u7EA7\u522B\u3002";
+    this.setPlaceholder("\u9009\u62E9\u601D\u8003\u7EA7\u522B\u2026");
     this.setInstructions([
-      { command: "\u2191\u2193", purpose: "navigate" },
-      { command: "\u21B5", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "\u2191\u2193", purpose: "\u5BFC\u822A" },
+      { command: "\u21B5", purpose: "\u9009\u62E9" },
+      { command: "esc", purpose: "\u5173\u95ED" }
     ]);
   }
   getSuggestions(query) {
@@ -5122,8 +5131,9 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
       return [
         {
           value,
-          primary: value === "" ? formatReasoningLabel(resolved) : label,
-          secondary: value === "" ? `Effective for ${formatEffectiveModel(this.settings)}` : ""
+          primary: label,
+          secondary:
+            value === "" ? `\u5BF9 ${formatEffectiveModel(this.settings)} \u751F\u6548` : ""
         }
       ];
     });
@@ -5135,7 +5145,7 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     }
     el.setAttribute(
       "aria-label",
-      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.reasoningEffort === item.value ? ", selected" : ""}`
+      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.reasoningEffort === item.value ? ", \u5DF2\u9009\u4E2D" : ""}`
     );
   }
   onChooseSuggestion(item) {
@@ -5149,12 +5159,12 @@ var ToolModePickerModal = class extends import_obsidian5.SuggestModal {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
-    this.emptyStateText = "No Pi tool modes available.";
-    this.setPlaceholder("Choose tool mode\u2026");
+    this.emptyStateText = "\u6CA1\u6709\u53EF\u7528\u7684 Pi \u5DE5\u5177\u6A21\u5F0F\u3002";
+    this.setPlaceholder("\u9009\u62E9\u5DE5\u5177\u6A21\u5F0F\u2026");
     this.setInstructions([
-      { command: "\u2191\u2193", purpose: "navigate" },
-      { command: "\u21B5", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "\u2191\u2193", purpose: "\u5BFC\u822A" },
+      { command: "\u21B5", purpose: "\u9009\u62E9" },
+      { command: "esc", purpose: "\u5173\u95ED" }
     ]);
   }
   getSuggestions(query) {
@@ -5176,7 +5186,7 @@ var ToolModePickerModal = class extends import_obsidian5.SuggestModal {
     }
     el.setAttribute(
       "aria-label",
-      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.sandboxMode === item.value ? ", selected" : ""}`
+      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.sandboxMode === item.value ? ", \u5DF2\u9009\u4E2D" : ""}`
     );
   }
   onChooseSuggestion(item) {
@@ -5189,10 +5199,6 @@ function formatEffectiveModel(settings) {
   const slug = settings.model || settings.effectiveModel;
   const model = settings.availableModels.find((candidate) => candidate.slug === slug);
   return model?.displayName || slug;
-}
-function formatReasoningLabel(value) {
-  if (value === "xhigh") return "XHigh";
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 // src/ui/desktop-notifications.mjs
@@ -5295,7 +5301,7 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
       this.getCustomInstructionsDefinition(),
       {
         type: "group",
-        heading: "Advanced",
+        heading: "\u9AD8\u7EA7",
         items: [this.getCustomModelDefinition()]
       },
       {
@@ -5305,12 +5311,12 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
       },
       {
         type: "group",
-        heading: "Skills",
+        heading: "\u6280\u80FD",
         items: [this.getDefaultSkillsDefinition(), this.getAdditionalSkillsDefinition()]
       },
       {
         type: "group",
-        heading: "Context and file access",
+        heading: "\u4E0A\u4E0B\u6587\u4E0E\u6587\u4EF6\u8BBF\u95EE",
         items: [this.getIgnoredFoldersDefinition()]
       }
     ];
@@ -5341,17 +5347,17 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getModelDefinition() {
     return {
-      name: "Model",
-      desc: "Provider/model from Pi's built-in and custom model registry. Use default to follow ~/.pi/agent/settings.json or .pi/settings.json.",
+      name: "\u6A21\u578B",
+      desc: "\u6765\u81EA Pi \u5185\u7F6E\u53CA\u81EA\u5B9A\u4E49\u6A21\u578B\u6CE8\u518C\u8868\u7684\u300C\u63D0\u4F9B\u5546/\u6A21\u578B\u300D\u3002\u9009\u62E9\u9ED8\u8BA4\u5C06\u9075\u5FAA ~/.pi/agent/settings.json \u6216 .pi/settings.json\u3002",
       render: (setting) =>
         setting
           .addButton((button) =>
             button
               .setButtonText(this.getModelButtonLabel())
-              .setTooltip("Choose model")
+              .setTooltip("\u9009\u62E9\u6A21\u578B")
               .onClick(async () => {
                 const label = this.getModelButtonLabel();
-                button.setButtonText("Loading\u2026");
+                button.setButtonText("\u52A0\u8F7D\u4E2D\u2026");
                 button.setDisabled(true);
                 try {
                   await this.plugin.ensureRuntimeModelState();
@@ -5373,10 +5379,10 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
           )
           .addButton((button) =>
             button
-              .setButtonText("Refresh")
-              .setTooltip("Refresh models from Pi")
+              .setButtonText("\u5237\u65B0")
+              .setTooltip("\u4ECE Pi \u5237\u65B0\u6A21\u578B")
               .onClick(async () => {
-                button.setButtonText("Refreshing...");
+                button.setButtonText("\u5237\u65B0\u4E2D\u2026");
                 button.setDisabled(true);
                 try {
                   await this.plugin.refreshModelCatalog(true);
@@ -5392,16 +5398,16 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getThinkingDefinition() {
     return {
-      name: "Thinking level",
-      desc: "Controls reasoning effort only. Values come from the selected model returned by Pi.",
+      name: "\u601D\u8003\u7EA7\u522B",
+      desc: "\u4EC5\u63A7\u5236\u63A8\u7406\u5F3A\u5EA6\u3002\u53EF\u9009\u503C\u7531 Pi \u8FD4\u56DE\u7684\u6240\u9009\u6A21\u578B\u51B3\u5B9A\u3002",
       render: (setting) =>
         setting.addButton((button) =>
           button
             .setButtonText(this.getReasoningButtonLabel())
-            .setTooltip("Choose thinking level")
+            .setTooltip("\u9009\u62E9\u601D\u8003\u7EA7\u522B")
             .onClick(async () => {
               const label = this.getReasoningButtonLabel();
-              button.setButtonText("Loading\u2026");
+              button.setButtonText("\u52A0\u8F7D\u4E2D\u2026");
               button.setDisabled(true);
               try {
                 await this.plugin.ensureRuntimeModelState();
@@ -5422,8 +5428,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getToolModeDefinition() {
     return {
-      name: "Tool mode",
-      desc: "Controls which Pi CLI tools are enabled. Tool modes are not an operating-system sandbox.",
+      name: "\u5DE5\u5177\u6A21\u5F0F",
+      desc: "\u63A7\u5236\u542F\u7528\u54EA\u4E9B Pi CLI \u5DE5\u5177\u3002\u5DE5\u5177\u6A21\u5F0F\u5E76\u975E\u64CD\u4F5C\u7CFB\u7EDF\u7EA7\u6C99\u7BB1\u3002",
       render: (setting) =>
         setting.addDropdown((dropdown) =>
           dropdown
@@ -5434,10 +5440,10 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
                 (value === "edit" || value === "full-agent" || value === "workspace-write") &&
                 !this.plugin.settings.acknowledgedToolRisk &&
                 !(await confirmWithModal(this.app, {
-                  title: "Enable write tools?",
+                  title: "\u542F\u7528\u5199\u5165\u5DE5\u5177\uFF1F",
                   message:
-                    "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
-                  confirmText: "Enable tools",
+                    "Pi \u5DE5\u5177\u6A21\u5F0F\u5E76\u975E\u64CD\u4F5C\u7CFB\u7EDF\u7EA7\u6C99\u7BB1\u3002\u7F16\u8F91\u548C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u53EF\u4EE5\u4FEE\u6539\u5E93\u6216\u9879\u76EE\u6587\u4EF6\uFF0C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u8FD8\u53EF\u4EE5\u6267\u884C shell \u547D\u4EE4\u3002",
+                  confirmText: "\u542F\u7528\u5DE5\u5177",
                   warning: true
                 }))
               ) {
@@ -5455,14 +5461,14 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getDesktopNotificationsDefinition() {
     return {
-      name: "Desktop completion notifications",
-      desc: "Notify when an agent run finishes while Obsidian is unfocused.",
+      name: "\u684C\u9762\u5B8C\u6210\u901A\u77E5",
+      desc: "\u5F53 Obsidian \u5904\u4E8E\u975E\u7126\u70B9\u72B6\u6001\u4E14\u667A\u80FD\u4F53\u8FD0\u884C\u7ED3\u675F\u65F6\u53D1\u9001\u901A\u77E5\u3002",
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.desktopNotifications).onChange(async (value) => {
             if (value && !(await requestDesktopNotificationPermission())) {
               new import_obsidian6.Notice(
-                "Desktop notifications are unavailable or not permitted. You can enable them in your operating-system notification settings."
+                "\u684C\u9762\u901A\u77E5\u4E0D\u53EF\u7528\u6216\u672A\u83B7\u6388\u6743\u3002\u4F60\u53EF\u4EE5\u5728\u64CD\u4F5C\u7CFB\u7EDF\u7684\u901A\u77E5\u8BBE\u7F6E\u4E2D\u542F\u7528\u5B83\u4EEC\u3002"
               );
             }
             this.plugin.settings.desktopNotifications = value;
@@ -5473,12 +5479,14 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getCustomInstructionsDefinition() {
     return {
-      name: "Custom instructions",
-      desc: "Vault-specific instructions added to every Pi run.",
+      name: "\u81EA\u5B9A\u4E49\u6307\u4EE4",
+      desc: "\u6DFB\u52A0\u5230\u6BCF\u6B21 Pi \u8FD0\u884C\u4E2D\u7684\u3001\u9488\u5BF9\u5F53\u524D\u5E93\u7684\u6307\u4EE4\u3002",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
-            .setPlaceholder("Prefer PARA folders. Keep project notes concise.")
+            .setPlaceholder(
+              "\u4F18\u5148\u4F7F\u7528 PARA \u6587\u4EF6\u5939\u3002\u4FDD\u6301\u9879\u76EE\u7B14\u8BB0\u7B80\u6D01\u3002"
+            )
             .setValue(this.plugin.settings.customInstructions)
             .onChange(async (value) => {
               this.plugin.settings.customInstructions = value;
@@ -5489,14 +5497,14 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getCustomModelDefinition() {
     return {
-      name: "Custom model slug",
-      desc: "Fallback for a provider/model slug that Pi does not expose in its catalog. Custom slugs are only selectable here.",
+      name: "\u81EA\u5B9A\u4E49\u6A21\u578B\u6807\u8BC6",
+      desc: "\u5F53 Pi \u7684\u6A21\u578B\u76EE\u5F55\u4E2D\u6CA1\u6709\u6240\u9700\u7684\u300C\u63D0\u4F9B\u5546/\u6A21\u578B\u300D\u6807\u8BC6\u65F6\u4F7F\u7528\u7684\u5907\u7528\u9879\u3002\u81EA\u5B9A\u4E49\u6807\u8BC6\u53EA\u80FD\u5728\u6B64\u5904\u9009\u7528\u3002",
       render: (setting) => {
         let useCustomButton;
         setting
           .addText((text) =>
             text
-              .setPlaceholder("Provider/model")
+              .setPlaceholder("\u63D0\u4F9B\u5546/\u6A21\u578B")
               .setValue(this.plugin.settings.customModel)
               .onChange(async (value) => {
                 this.plugin.settings.customModel = value.trim();
@@ -5508,7 +5516,9 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
             useCustomButton = button;
             button
               .setButtonText(
-                this.plugin.settings.model === CUSTOM_MODEL_VALUE ? "Using custom" : "Use custom"
+                this.plugin.settings.model === CUSTOM_MODEL_VALUE
+                  ? "\u4F7F\u7528\u4E2D"
+                  : "\u4F7F\u7528\u81EA\u5B9A\u4E49"
               )
               .setDisabled(!this.plugin.settings.customModel)
               .onClick(async () => {
@@ -5523,8 +5533,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getPiExecutableDefinition() {
     return {
-      name: "Pi executable path",
-      desc: "Optional path to the Pi CLI. Leave empty to auto-detect common install locations. Supports ~ and environment variables like ${USER}.",
+      name: "Pi \u53EF\u6267\u884C\u6587\u4EF6\u8DEF\u5F84",
+      desc: "\u53EF\u9009\u7684 Pi CLI \u8DEF\u5F84\u3002\u7559\u7A7A\u5219\u81EA\u52A8\u68C0\u6D4B\u5E38\u89C1\u5B89\u88C5\u4F4D\u7F6E\u3002\u652F\u6301 ~ \u4EE5\u53CA\u8BF8\u5982 ${USER} \u7684\u73AF\u5883\u53D8\u91CF\u3002",
       render: (setting) =>
         setting.addText((text) =>
           text
@@ -5539,11 +5549,11 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getPiInstallationDefinition() {
     return {
-      name: "Check Pi installation",
-      desc: "Verify that Obsidian can run the Pi CLI from its current environment.",
+      name: "\u68C0\u67E5 Pi \u5B89\u88C5",
+      desc: "\u9A8C\u8BC1 Obsidian \u80FD\u5426\u5728\u5F53\u524D\u73AF\u5883\u4E2D\u8FD0\u884C Pi CLI\u3002",
       render: (setting) =>
         setting.addButton((button) =>
-          button.setButtonText("Check").onClick(() => {
+          button.setButtonText("\u68C0\u67E5").onClick(() => {
             void this.plugin.checkPiInstallation(true);
           })
         )
@@ -5551,8 +5561,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getDefaultSkillsDefinition() {
     return {
-      name: "Include default Pi skills",
-      desc: "Load skills discovered by Pi from global and vault/project skill locations. Turn this off to use only the additional skill folders below.",
+      name: "\u5305\u542B Pi \u9ED8\u8BA4\u6280\u80FD",
+      desc: "\u52A0\u8F7D Pi \u4ECE\u5168\u5C40\u53CA\u5E93\u6216\u9879\u76EE\u6280\u80FD\u4F4D\u7F6E\u53D1\u73B0\u7684\u6280\u80FD\u3002\u5173\u95ED\u540E\u4EC5\u4F7F\u7528\u4E0B\u65B9\u7684\u9644\u52A0\u6280\u80FD\u6587\u4EF6\u5939\u3002",
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle
@@ -5566,8 +5576,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getAdditionalSkillsDefinition() {
     return {
-      name: "Additional skill folders",
-      desc: "One trusted skill file or folder per line. Supports absolute and vault-relative paths.",
+      name: "\u9644\u52A0\u6280\u80FD\u6587\u4EF6\u5939",
+      desc: "\u6BCF\u884C\u4E00\u4E2A\u53D7\u4FE1\u4EFB\u7684\u6280\u80FD\u6587\u4EF6\u6216\u6587\u4EF6\u5939\uFF0C\u652F\u6301\u7EDD\u5BF9\u8DEF\u5F84\u548C\u5E93\u76F8\u5BF9\u8DEF\u5F84\u3002",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -5587,8 +5597,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getIgnoredFoldersDefinition() {
     return {
-      name: "Ignored folders/directories",
-      desc: "Comma-separated folder prefixes that Pi pre-attached context and retrieval should ignore.",
+      name: "\u5FFD\u7565\u7684\u6587\u4EF6\u5939/\u76EE\u5F55",
+      desc: "\u4EE5\u9017\u53F7\u5206\u9694\u7684\u6587\u4EF6\u5939\u524D\u7F00\uFF1BPi \u5728\u9884\u9644\u52A0\u4E0A\u4E0B\u6587\u548C\u68C0\u7D22\u65F6\u4F1A\u5FFD\u7565\u8FD9\u4E9B\u76EE\u5F55\u3002",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -5606,24 +5616,23 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getModelButtonLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
-      return this.plugin.settings.customModel || "Custom model";
+      return this.plugin.settings.customModel || "\u81EA\u5B9A\u4E49\u6A21\u578B";
     }
     const selected = getSelectedModelInfo(this.plugin.settings);
     if (selected) return selected.displayName;
     const effective = this.plugin.settings.availableModels.find(
       (model) => model.slug === this.plugin.settings.effectiveModel
     );
-    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi default";
+    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi \u9ED8\u8BA4";
   }
   getReasoningButtonLabel() {
+    const options = this.getReasoningOptions();
     const value = this.getReasoningDropdownValue();
-    if (value) return this.getReasoningOptions()[value] || value;
+    if (value) return options[value] || value;
     const resolved = getResolvedReasoning(this.plugin.settings);
     return resolved === "pi-default"
-      ? "Loading thinking\u2026"
-      : resolved === "xhigh"
-        ? "XHigh"
-        : resolved.charAt(0).toUpperCase() + resolved.slice(1);
+      ? "\u52A0\u8F7D\u601D\u8003\u7EA7\u522B\u2026"
+      : options[""] || resolved;
   }
   getReasoningOptions() {
     return getReasoningOptions(this.plugin.settings);
@@ -7708,12 +7717,12 @@ function getCurrentRunMetadata(settings, runtimeState) {
 }
 function formatToolModeLabel(toolMode) {
   return toolMode === "chat"
-    ? "Chat"
+    ? "\u5BF9\u8BDD"
     : toolMode === "edit" || toolMode === "workspace-write"
-      ? "Edit"
+      ? "\u7F16\u8F91"
       : toolMode === "full-agent"
-        ? "Full agent"
-        : "Review";
+        ? "\u5B8C\u6574\u667A\u80FD\u4F53"
+        : "\u5BA1\u9605";
 }
 function getDisplayedModel(settings, runtimeState) {
   const runtimeSlug = runtimeState?.model
@@ -7874,11 +7883,8 @@ var RunSettingsControls = class {
   formatDefaultReasoningLabel() {
     const reasoning = getResolvedReasoning(this.plugin.settings);
     return reasoning === "pi-default"
-      ? "Loading thinking\u2026"
-      : this.formatReasoningLabel(reasoning);
-  }
-  formatReasoningLabel(reasoning) {
-    return reasoning === "xhigh" ? "XHigh" : reasoning.charAt(0).toUpperCase() + reasoning.slice(1);
+      ? "\u52A0\u8F7D\u601D\u8003\u7EA7\u522B\u2026"
+      : formatReasoningLevel(reasoning);
   }
 };
 

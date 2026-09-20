@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.21
+
+- Translated the plugin settings interface to Simplified Chinese: all settings names and descriptions, the Advanced/Pi CLI/Skills/Context groups, buttons and tooltips, dropdown and thinking-level options, placeholders, the write-tools confirmation, and the desktop-notification notice. The model and thinking pickers and the tool mode labels shown in the composer and message metadata were translated for consistency.
+
 ## 0.0.20
 
 - Doubled the chat composer input height: the textarea now rests at a taller two-line height and can grow up to 320px as you type.

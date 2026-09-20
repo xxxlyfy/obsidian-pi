@@ -17,12 +17,12 @@ export class ModelPickerModal extends FuzzySuggestModal {
     this.settings = settings;
     this.onChoose = onChoose;
     this.limit = 1000;
-    this.emptyStateText = "No Pi models match this search.";
-    this.setPlaceholder("Search models by name, provider, slug, or capability…");
+    this.emptyStateText = "没有匹配的 Pi 模型。";
+    this.setPlaceholder("按名称、提供商、标识或能力搜索模型…");
     this.setInstructions([
-      { command: "↑↓", purpose: "navigate" },
-      { command: "↵", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "↑↓", purpose: "导航" },
+      { command: "↵", purpose: "选择" },
+      { command: "esc", purpose: "关闭" }
     ]);
   }
 
@@ -44,7 +44,7 @@ export class ModelPickerModal extends FuzzySuggestModal {
     el.setAttribute(
       "aria-label",
       `${getModelPickerPrimary(item)}, ${getModelPickerSecondary(item)}${
-        this.settings.model === item.value ? ", selected" : ""
+        this.settings.model === item.value ? ", 已选中" : ""
       }`
     );
   }
@@ -61,12 +61,12 @@ export class ThinkingPickerModal extends SuggestModal {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
-    this.emptyStateText = "Pi did not resolve thinking levels for this model.";
-    this.setPlaceholder("Choose thinking level…");
+    this.emptyStateText = "Pi 未解析出该模型的思考级别。";
+    this.setPlaceholder("选择思考级别…");
     this.setInstructions([
-      { command: "↑↓", purpose: "navigate" },
-      { command: "↵", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "↑↓", purpose: "导航" },
+      { command: "↵", purpose: "选择" },
+      { command: "esc", purpose: "关闭" }
     ]);
   }
 
@@ -85,8 +85,8 @@ export class ThinkingPickerModal extends SuggestModal {
       return [
         {
           value,
-          primary: value === "" ? formatReasoningLabel(resolved) : label,
-          secondary: value === "" ? `Effective for ${formatEffectiveModel(this.settings)}` : ""
+          primary: label,
+          secondary: value === "" ? `对 ${formatEffectiveModel(this.settings)} 生效` : ""
         }
       ];
     });
@@ -100,7 +100,7 @@ export class ThinkingPickerModal extends SuggestModal {
     el.setAttribute(
       "aria-label",
       `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${
-        this.settings.reasoningEffort === item.value ? ", selected" : ""
+        this.settings.reasoningEffort === item.value ? ", 已选中" : ""
       }`
     );
   }
@@ -117,12 +117,12 @@ export class ToolModePickerModal extends SuggestModal {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
-    this.emptyStateText = "No Pi tool modes available.";
-    this.setPlaceholder("Choose tool mode…");
+    this.emptyStateText = "没有可用的 Pi 工具模式。";
+    this.setPlaceholder("选择工具模式…");
     this.setInstructions([
-      { command: "↑↓", purpose: "navigate" },
-      { command: "↵", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "↑↓", purpose: "导航" },
+      { command: "↵", purpose: "选择" },
+      { command: "esc", purpose: "关闭" }
     ]);
   }
 
@@ -148,7 +148,7 @@ export class ToolModePickerModal extends SuggestModal {
     el.setAttribute(
       "aria-label",
       `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${
-        this.settings.sandboxMode === item.value ? ", selected" : ""
+        this.settings.sandboxMode === item.value ? ", 已选中" : ""
       }`
     );
   }
@@ -164,9 +164,4 @@ function formatEffectiveModel(settings) {
   const slug = settings.model || settings.effectiveModel;
   const model = settings.availableModels.find((candidate) => candidate.slug === slug);
   return model?.displayName || slug;
-}
-
-function formatReasoningLabel(value) {
-  if (value === "xhigh") return "XHigh";
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
