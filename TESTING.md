@@ -33,7 +33,7 @@ Then open the vault, reload or disable/re-enable Pi Agent, and keep the develope
 
 ## Pi setup and compatibility
 
-- [ ] **Pending:** Run **Pi Agent: Check Pi installation** and confirm Pi is at least 0.80.0 (last full compatibility test: 0.80.7; latest smoke test: 0.86.0).
+- [ ] **Pending:** Run **Pi Agent: Check Pi installation** and confirm Pi is at least 0.80.0 (last compatibility test: 0.86.0).
 - [ ] **Pending:** Point **Pi 可执行文件路径** (Pi executable path) at a missing executable and an older/fake version; confirm actionable missing, runtime, and upgrade diagnostics, then restore it.
 - [ ] **Pending:** Confirm required unsupported RPC commands fail with a capability/upgrade diagnostic and optional capability probes use only their declared fallback.
 - [ ] **Pending:** Refresh settings and confirm no unhandled console errors.
