@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.20
+
+- Doubled the chat composer input height: the textarea now rests at a taller two-line height and can grow up to 320px as you type.
+
 ## 0.0.19
 
 - Stopped the composer **Model** control from truncating long model names: the model label can now expand (up to 240px) and shrinks with an ellipsis only when space is tight, while **Think** and **Mode** keep their compact labels.

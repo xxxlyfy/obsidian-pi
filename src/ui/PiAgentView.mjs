@@ -791,7 +791,9 @@ export class PiAgentView extends f.ItemView {
   resizeInput() {
     if (!this.inputEl) return;
     this.inputEl.setCssProps({ height: "auto" });
-    this.inputEl.setCssProps({ height: `${Math.min(this.inputEl.scrollHeight, 160)}px` });
+    this.inputEl.setCssProps({
+      height: `${Math.min(Math.max(this.inputEl.scrollHeight, 64), 320)}px`
+    });
   }
   getCurrentThreadId() {
     var e;
