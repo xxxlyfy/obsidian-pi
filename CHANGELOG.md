@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.17
+
+- Increased the spacing between the composer run settings controls (**Model**, **Think**, **Mode**) and the composer bar buttons so they no longer sit too close together.
+
 ## 0.0.16
 
 - Moved the composer **Mode** control to the end of the run settings row, after **Model** and **Think**.

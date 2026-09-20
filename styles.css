@@ -128,7 +128,7 @@
   align-items: center;
   display: flex;
   flex: 1 1 auto;
-  gap: 2px;
+  gap: 10px;
   min-width: 0;
   overflow: hidden;
 }
@@ -524,12 +524,12 @@
 .pi-agent-composer-bar {
   align-items: center;
   display: flex;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
 
 .pi-agent-composer-bar.is-compact {
-  gap: 3px;
+  gap: 6px;
 }
 
 .pi-agent-composer-bar.is-compact .pi-agent-run-setting {
