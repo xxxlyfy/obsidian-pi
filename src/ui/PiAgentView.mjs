@@ -544,31 +544,6 @@ export class PiAgentView extends f.ItemView {
       this.renderThreadListIfVisible();
     }
   }
-  finishCanceledRun() {
-    this.running = false;
-    this.canceling = false;
-    this.streamingAssistantContent = "";
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.streamingItemEl = undefined;
-    this.streamingTextEl = undefined;
-    this.activityText = "";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = undefined;
-    this.clearPendingActivityTimer();
-    this.clearStreamingRenderTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = undefined;
-    if (this.runningThreadId) this.plugin.endAnnotationProcessingForThread(this.runningThreadId);
-    this.runningThreadId = undefined;
-    this.plugin.cancelPiRun();
-    this.renderPromptQueue();
-    this.setRunningState(false);
-    this.renderMessages();
-    this.renderToolBadges();
-  }
   cleanupComposerBarObserver() {
     if (this.composerBarCleanup) {
       this.composerBarCleanup();
@@ -985,7 +960,6 @@ export class PiAgentView extends f.ItemView {
     };
     this.activeRuns.set(threadId, run);
     this.syncCurrentRunFlags();
-    this.runningThreadId = threadId;
     this.running = this.isCurrentThread(threadId);
     this.canceling = false;
     this.activityText = "Preparing context";
@@ -1025,7 +999,9 @@ export class PiAgentView extends f.ItemView {
             this.streamingThinkingContent = run.thinking;
             this.thinkingDisclosureExpanded = run.thinkingExpanded;
             this.thinkingDisclosureUserSet = run.thinkingUserSet;
-            this.handleRunEvent(event);
+            this.handleRunEvent(event, threadId);
+            this.syncRunActivity(threadId);
+            this.syncRunContextUsage(threadId);
             if (thinkingDelta) {
               this.liveThinkingSetExpanded?.(run.thinkingExpanded);
               this.appendStreamingThinkingDelta(thinkingDelta);
@@ -1132,7 +1108,6 @@ export class PiAgentView extends f.ItemView {
       this.currentRunContextUsage = undefined;
       if (this.isCurrentThread(threadId)) this.nativePiQueue = undefined;
       this.renderPromptQueue();
-      this.runningThreadId = undefined;
       this.setRunningState(this.running);
       if (this.isCurrentThread(threadId)) {
         this.renderMessages();

@@ -7613,10 +7613,9 @@ function applyActivity(text, kind, detail = "", stickyUntil = 0) {
     this.clearPendingActivityTimer();
   }
   if (!isUnchanged && !this.updateActivityDom()) this.renderMessages();
-  this.syncRunActivity();
 }
-function syncRunActivity() {
-  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : void 0;
+function syncRunActivity(threadId) {
+  const run = threadId ? this.activeRuns.get(threadId) : void 0;
   if (run)
     run.activity = {
       text: this.activityText,
@@ -7625,8 +7624,8 @@ function syncRunActivity() {
       stickyUntil: this.activityStickyUntil
     };
 }
-function syncRunContextUsage() {
-  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : void 0;
+function syncRunContextUsage(threadId) {
+  const run = threadId ? this.activeRuns.get(threadId) : void 0;
   if (run) run.contextUsage = this.currentRunContextUsage;
 }
 function queuePendingActivity(text, kind, detail = "") {
@@ -7678,13 +7677,13 @@ function updateActivityDom() {
   if (this.activityLabelEl.textContent !== label) this.activityLabelEl.setText(label);
   return true;
 }
-function captureContextUsage(event) {
+function captureContextUsage(event, threadId) {
   let tokenUsage = extractEventTokenUsage(event?.raw),
     contextUsage = this.getContextUsageForTokens(tokenUsage);
   if (contextUsage) {
-    if (this.runningThreadId) this.invalidatedContextThreadIds.delete(this.runningThreadId);
+    if (threadId) this.invalidatedContextThreadIds.delete(threadId);
     this.currentRunContextUsage = { contextUsage, tokenUsage };
-    this.syncRunContextUsage();
+    this.syncRunContextUsage(threadId);
     this.updateActivityDom();
     this.renderToolBadges();
   }
@@ -7695,9 +7694,9 @@ function getContextUsageForTokens(tokenUsage) {
   const contextWindow = modelInfo?.contextWindow ?? tokenUsage?.contextWindow;
   return createContextUsage(tokenUsage, contextWindow);
 }
-function handleRunEvent(event) {
+function handleRunEvent(event, threadId) {
   let type = this.normalizeRunEventType(event.type);
-  this.captureContextUsage(event);
+  this.captureContextUsage(event, threadId);
   if (type === "queue_update") {
     this.nativePiQueue = {
       steering: Array.isArray(event.raw?.steering) ? event.raw.steering : [],
@@ -7721,9 +7720,9 @@ function handleRunEvent(event) {
           this.currentRunContextUsage.tokenUsage
         )
       : "";
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
+    if (threadId) this.invalidatedContextThreadIds.add(threadId);
     this.currentRunContextUsage = void 0;
-    this.syncRunContextUsage();
+    this.syncRunContextUsage(threadId);
     this.renderToolBadges();
     this.setActivity("Compacting context", "context", detail);
     return;
@@ -7738,12 +7737,12 @@ function handleRunEvent(event) {
       return;
     }
     let tokensBefore = event.raw && event.raw.result ? event.raw.result.tokensBefore : void 0;
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
+    if (threadId) this.invalidatedContextThreadIds.add(threadId);
     this.currentRunContextUsage = {
       compacted: true,
       contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow
     };
-    this.syncRunContextUsage();
+    this.syncRunContextUsage(threadId);
     this.renderToolBadges();
     this.setActivity(
       event.raw && event.raw.willRetry ? "Compacted context, retrying" : "Finishing",
@@ -8922,31 +8921,6 @@ var PiAgentView = class extends f4.ItemView {
       this.renderThreadListIfVisible();
     }
   }
-  finishCanceledRun() {
-    this.running = false;
-    this.canceling = false;
-    this.streamingAssistantContent = "";
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.streamingItemEl = void 0;
-    this.streamingTextEl = void 0;
-    this.activityText = "";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
-    this.clearPendingActivityTimer();
-    this.clearStreamingRenderTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
-    if (this.runningThreadId) this.plugin.endAnnotationProcessingForThread(this.runningThreadId);
-    this.runningThreadId = void 0;
-    this.plugin.cancelPiRun();
-    this.renderPromptQueue();
-    this.setRunningState(false);
-    this.renderMessages();
-    this.renderToolBadges();
-  }
   cleanupComposerBarObserver() {
     if (this.composerBarCleanup) {
       this.composerBarCleanup();
@@ -9365,7 +9339,6 @@ var PiAgentView = class extends f4.ItemView {
     };
     this.activeRuns.set(threadId, run);
     this.syncCurrentRunFlags();
-    this.runningThreadId = threadId;
     this.running = this.isCurrentThread(threadId);
     this.canceling = false;
     this.activityText = "Preparing context";
@@ -9405,7 +9378,9 @@ var PiAgentView = class extends f4.ItemView {
             this.streamingThinkingContent = run.thinking;
             this.thinkingDisclosureExpanded = run.thinkingExpanded;
             this.thinkingDisclosureUserSet = run.thinkingUserSet;
-            this.handleRunEvent(event);
+            this.handleRunEvent(event, threadId);
+            this.syncRunActivity(threadId);
+            this.syncRunContextUsage(threadId);
             if (thinkingDelta) {
               this.liveThinkingSetExpanded?.(run.thinkingExpanded);
               this.appendStreamingThinkingDelta(thinkingDelta);
@@ -9512,7 +9487,6 @@ var PiAgentView = class extends f4.ItemView {
       this.currentRunContextUsage = void 0;
       if (this.isCurrentThread(threadId)) this.nativePiQueue = void 0;
       this.renderPromptQueue();
-      this.runningThreadId = void 0;
       this.setRunningState(this.running);
       if (this.isCurrentThread(threadId)) {
         this.renderMessages();

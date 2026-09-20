@@ -33,11 +33,11 @@ declare module "../ui/PiAgentView.mjs" {
     clearPendingActivityTimer(): void;
     flushPendingActivity(): void;
     updateActivityDom(): boolean;
-    captureContextUsage(event: any): void;
-    syncRunActivity(): void;
-    syncRunContextUsage(): void;
+    captureContextUsage(event: any, threadId?: string): void;
+    syncRunActivity(threadId?: string): void;
+    syncRunContextUsage(threadId?: string): void;
     getContextUsageForTokens(tokenUsage: any): any;
-    handleRunEvent(event: any): void;
+    handleRunEvent(event: any, threadId?: string): void;
     normalizeRunEventType(type: string): string;
     trackActiveTool(event: any): void;
     untrackActiveTool(event: any): void;

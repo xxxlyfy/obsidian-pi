@@ -26,7 +26,6 @@ function createView(run) {
   return {
     activeRuns: new Map(run ? [["t1", run]] : []),
     getCurrentThreadId: () => "t1",
-    runningThreadId: "t1",
     streamingAssistantContent: "",
     streamingThinkingContent: "",
     thinkingDisclosureExpanded: false,
@@ -81,7 +80,7 @@ describe("per-thread live run UI state", () => {
     view.activityDetail = "waiting";
     view.activityStickyUntil = 42;
 
-    syncRunActivity.call(view);
+    syncRunActivity.call(view, "t1");
 
     expect(run.activity).toEqual({
       text: "Thinking",
@@ -96,8 +95,36 @@ describe("per-thread live run UI state", () => {
     const view = createView(run);
     view.currentRunContextUsage = { compacted: true };
 
-    syncRunContextUsage.call(view);
+    syncRunContextUsage.call(view, "t1");
 
     expect(run.contextUsage).toEqual({ compacted: true });
+  });
+
+  it("writes activity and context usage to the event's thread, not the last started run", () => {
+    const runA = {};
+    const runB = {};
+    const view = createView(runA);
+    view.activeRuns = new Map([
+      ["t1", runA],
+      ["t2", runB]
+    ]);
+    view.activityText = "Responding";
+    view.activityKind = "answer";
+    view.activityDetail = "";
+    view.activityStickyUntil = 0;
+    view.currentRunContextUsage = { tokens: 5 };
+
+    syncRunActivity.call(view, "t1");
+    syncRunContextUsage.call(view, "t1");
+
+    expect(runA.activity).toEqual({
+      text: "Responding",
+      kind: "answer",
+      detail: "",
+      stickyUntil: 0
+    });
+    expect(runA.contextUsage).toEqual({ tokens: 5 });
+    expect(runB.activity).toBeUndefined();
+    expect(runB.contextUsage).toBeUndefined();
   });
 });

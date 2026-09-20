@@ -39,12 +39,14 @@ export function applyActivity(text, kind, detail = "", stickyUntil = 0) {
     this.clearPendingActivityTimer();
   }
   if (!isUnchanged && !this.updateActivityDom()) this.renderMessages();
-  this.syncRunActivity();
 }
 
-/** @this {import("./PiAgentView.mjs").PiAgentView} */
-export function syncRunActivity() {
-  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : undefined;
+/**
+ * @this {import("./PiAgentView.mjs").PiAgentView}
+ * @param {string | undefined} threadId
+ */
+export function syncRunActivity(threadId) {
+  const run = threadId ? this.activeRuns.get(threadId) : undefined;
   if (run)
     run.activity = {
       text: this.activityText,
@@ -54,9 +56,12 @@ export function syncRunActivity() {
     };
 }
 
-/** @this {import("./PiAgentView.mjs").PiAgentView} */
-export function syncRunContextUsage() {
-  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : undefined;
+/**
+ * @this {import("./PiAgentView.mjs").PiAgentView}
+ * @param {string | undefined} threadId
+ */
+export function syncRunContextUsage(threadId) {
+  const run = threadId ? this.activeRuns.get(threadId) : undefined;
   if (run) run.contextUsage = this.currentRunContextUsage;
 }
 
@@ -119,14 +124,18 @@ export function updateActivityDom() {
   return true;
 }
 
-/** @this {import("./PiAgentView.mjs").PiAgentView} */
-export function captureContextUsage(event) {
+/**
+ * @this {import("./PiAgentView.mjs").PiAgentView}
+ * @param {any} event
+ * @param {string | undefined} threadId
+ */
+export function captureContextUsage(event, threadId) {
   let tokenUsage = extractEventTokenUsage(event?.raw),
     contextUsage = this.getContextUsageForTokens(tokenUsage);
   if (contextUsage) {
-    if (this.runningThreadId) this.invalidatedContextThreadIds.delete(this.runningThreadId);
+    if (threadId) this.invalidatedContextThreadIds.delete(threadId);
     this.currentRunContextUsage = { contextUsage, tokenUsage };
-    this.syncRunContextUsage();
+    this.syncRunContextUsage(threadId);
     this.updateActivityDom();
     this.renderToolBadges();
   }
@@ -140,10 +149,14 @@ export function getContextUsageForTokens(tokenUsage) {
   return createContextUsage(tokenUsage, contextWindow);
 }
 
-/** @this {import("./PiAgentView.mjs").PiAgentView} */
-export function handleRunEvent(event) {
+/**
+ * @this {import("./PiAgentView.mjs").PiAgentView}
+ * @param {any} event
+ * @param {string | undefined} threadId
+ */
+export function handleRunEvent(event, threadId) {
   let type = this.normalizeRunEventType(event.type);
-  this.captureContextUsage(event);
+  this.captureContextUsage(event, threadId);
   if (type === "queue_update") {
     this.nativePiQueue = {
       steering: Array.isArray(event.raw?.steering) ? event.raw.steering : [],
@@ -167,9 +180,9 @@ export function handleRunEvent(event) {
           this.currentRunContextUsage.tokenUsage
         )
       : "";
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
+    if (threadId) this.invalidatedContextThreadIds.add(threadId);
     this.currentRunContextUsage = undefined;
-    this.syncRunContextUsage();
+    this.syncRunContextUsage(threadId);
     this.renderToolBadges();
     this.setActivity("Compacting context", "context", detail);
     return;
@@ -184,12 +197,12 @@ export function handleRunEvent(event) {
       return;
     }
     let tokensBefore = event.raw && event.raw.result ? event.raw.result.tokensBefore : undefined;
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
+    if (threadId) this.invalidatedContextThreadIds.add(threadId);
     this.currentRunContextUsage = {
       compacted: true,
       contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow
     };
-    this.syncRunContextUsage();
+    this.syncRunContextUsage(threadId);
     this.renderToolBadges();
     this.setActivity(
       event.raw && event.raw.willRetry ? "Compacted context, retrying" : "Finishing",
