@@ -11,13 +11,13 @@ import { PiCommandCatalog } from "../pi/command-catalog.mjs";
 import { createExtensionUiHandler } from "../pi/extension-ui.mjs";
 import { PiModelCatalog } from "../pi/model-catalog.mjs";
 import { getCompactInstructions, PiRunner } from "../pi/runner.mjs";
-import { CUSTOM_MODEL_VALUE as b, DEFAULT_SETTINGS as H, normalizeSettings } from "./settings.mjs";
+import { CUSTOM_MODEL_VALUE, DEFAULT_SETTINGS, normalizeSettings } from "./settings.mjs";
 import { PiAgentSettingTab } from "./settings-tab.mjs";
 import {
-  PI_AGENT_DISPLAY_NAME as Ce,
-  PI_AGENT_ICON_ID as I,
-  PI_AGENT_ICON_SVG as O,
-  PI_AGENT_VIEW_TYPE as T
+  PI_AGENT_DISPLAY_NAME,
+  PI_AGENT_ICON_ID,
+  PI_AGENT_ICON_SVG,
+  PI_AGENT_VIEW_TYPE
 } from "./constants.mjs";
 import { ApprovalModal } from "../ui/modals/approval-modal.mjs";
 import { PiSetupModal } from "../ui/modals/pi-setup-modal.mjs";
@@ -123,7 +123,7 @@ function previewSuggestedFrontmatter(markdown, patch) {
 export class PiAgentPlugin extends P.Plugin {
   constructor() {
     super(...arguments);
-    this.settings = H;
+    this.settings = DEFAULT_SETTINGS;
     this.messages = [];
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
@@ -155,7 +155,7 @@ export class PiAgentPlugin extends P.Plugin {
     if (this.settings.desktopNotifications)
       void requestDesktopNotificationPermission().catch(() => {});
 
-    (0, P.addIcon)(I, O);
+    (0, P.addIcon)(PI_AGENT_ICON_ID, PI_AGENT_ICON_SVG);
     this.extensionStatusEl = this.addStatusBarItem();
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
@@ -170,8 +170,8 @@ export class PiAgentPlugin extends P.Plugin {
     this.refreshCurrentContextFile();
 
     this.registerEvent(
-      this.app.workspace.on("file-open", (e) => {
-        this.setCurrentContextFile(e);
+      this.app.workspace.on("file-open", (file) => {
+        this.setCurrentContextFile(file);
       })
     );
     this.registerEvent(
@@ -196,8 +196,8 @@ export class PiAgentPlugin extends P.Plugin {
         if (file.extension === "md") this.annotationStore.deletePath(file.path);
       })
     );
-    this.registerView(T, (e) => new PiAgentView(e, this));
-    this.addRibbonIcon(I, `Open ${Ce}`, () => {
+    this.registerView(PI_AGENT_VIEW_TYPE, (leaf) => new PiAgentView(leaf, this));
+    this.addRibbonIcon(PI_AGENT_ICON_ID, `Open ${PI_AGENT_DISPLAY_NAME}`, () => {
       this.activateView();
     });
     this.addCommand({
@@ -225,8 +225,8 @@ export class PiAgentPlugin extends P.Plugin {
     this.addCommand({
       id: "ask-about-current-note",
       name: "Ask about current note",
-      checkCallback: (e) =>
-        this.runWithActiveMarkdownNote(e, () => {
+      checkCallback: (checking) =>
+        this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
             "Use the active note as context. Summarize the key facts, assumptions, and useful follow-up questions."
           );
@@ -235,8 +235,8 @@ export class PiAgentPlugin extends P.Plugin {
     this.addCommand({
       id: "research-around-current-note",
       name: "Research around current note",
-      checkCallback: (e) =>
-        this.runWithActiveMarkdownNote(e, () => {
+      checkCallback: (checking) =>
+        this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
             "Research around the active note using backlinks, outgoing links, unresolved links, tags, and search results. Return concise findings with vault references."
           );
@@ -245,16 +245,16 @@ export class PiAgentPlugin extends P.Plugin {
     this.addCommand({
       id: "suggest-frontmatter",
       name: "Suggest frontmatter for current note",
-      checkCallback: (e) =>
-        this.runWithActiveMarkdownNote(e, () => {
+      checkCallback: (checking) =>
+        this.runWithActiveMarkdownNote(checking, () => {
           this.suggestFrontmatterForCurrentNote();
         })
     });
     this.addCommand({
       id: "draft-base-from-current-note",
       name: "Draft base from current note context",
-      checkCallback: (e) =>
-        this.runWithActiveMarkdownNote(e, () => {
+      checkCallback: (checking) =>
+        this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
             "Draft an Obsidian Base for notes related to the active note. Infer useful fields from frontmatter, tags, backlinks, and linked notes."
           );
@@ -386,14 +386,14 @@ export class PiAgentPlugin extends P.Plugin {
     }, 800);
   }
   checkPiInstallation(showSuccess) {
-    return checkPiInstallation(this.settings.piExecutablePath).then((e) => {
-      if (e.ok) {
-        showSuccess && new P.Notice(`Pi CLI is available: ${e.version || e.message}`);
-        return e;
+    return checkPiInstallation(this.settings.piExecutablePath).then((result) => {
+      if (result.ok) {
+        showSuccess && new P.Notice(`Pi CLI is available: ${result.version || result.message}`);
+        return result;
       }
 
-      showSuccess ? new P.Notice(e.message) : new PiSetupModal(this, e).open();
-      return e;
+      showSuccess ? new P.Notice(result.message) : new PiSetupModal(this, result).open();
+      return result;
     });
   }
   async refreshModelCatalog(showNotice = false, force = true) {
@@ -471,7 +471,7 @@ export class PiAgentPlugin extends P.Plugin {
     return result;
   }
   refreshOpenModelControls() {
-    for (const leaf of this.app.workspace.getLeavesOfType(T)) {
+    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
       leaf.view?.runSettings?.refresh?.();
     }
     this.settingsTab?.display?.();
@@ -498,16 +498,16 @@ export class PiAgentPlugin extends P.Plugin {
   getPiCommands() {
     return this.piCommands;
   }
-  addMessage(e) {
-    return this.addMessageToThread(this.threadHistory.currentThreadId, e);
+  addMessage(message) {
+    return this.addMessageToThread(this.threadHistory.currentThreadId, message);
   }
-  addMessageToThread(e, t) {
-    let n = this.threadHistory.addMessageToThread(e, t);
-    return n ? (this.syncCurrentThreadState(), this.saveThreadHistory(), !0) : !1;
+  addMessageToThread(threadId, message) {
+    let added = this.threadHistory.addMessageToThread(threadId, message);
+    return added ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true) : false;
   }
-  startNewThread(e) {
-    let t = this.threadHistory.startNewThread(e);
-    return (this.syncCurrentThreadState(), this.saveThreadHistory(), t);
+  startNewThread(title) {
+    let thread = this.threadHistory.startNewThread(title);
+    return (this.syncCurrentThreadState(), this.saveThreadHistory(), thread);
   }
   async forkCurrentThread() {
     const current = this.getCurrentThread();
@@ -536,8 +536,8 @@ export class PiAgentPlugin extends P.Plugin {
   getCurrentThread() {
     return this.threadHistory.getCurrentThread();
   }
-  listThreads(e) {
-    return this.threadHistory.listThreads(e);
+  listThreads(options) {
+    return this.threadHistory.listThreads(options);
   }
   async getThreadSessionStats(threadId) {
     const thread = this.threadHistory.getThread(threadId);
@@ -561,13 +561,13 @@ export class PiAgentPlugin extends P.Plugin {
       runner.getSessionEntries(thread.piSessionId, since)
     );
   }
-  getThreadDisplayMessageCount(e) {
-    let t = Array.isArray(e == null ? void 0 : e.messages) ? e.messages.length : 0,
-      n = this.countPiSessionChatMessages(e == null ? void 0 : e.piSessionId);
-    return Math.max(t, n);
+  getThreadDisplayMessageCount(thread) {
+    const messageCount = Array.isArray(thread?.messages) ? thread.messages.length : 0;
+    const sessionMessageCount = this.countPiSessionChatMessages(thread?.piSessionId);
+    return Math.max(messageCount, sessionMessageCount);
   }
-  countPiSessionChatMessages(e) {
-    const sessionPath = this.pi?.resolveSessionPath(e);
+  countPiSessionChatMessages(sessionReference) {
+    const sessionPath = this.pi?.resolveSessionPath(sessionReference);
     if (!sessionPath) return 0;
 
     let stat;
@@ -611,34 +611,34 @@ export class PiAgentPlugin extends P.Plugin {
       return 0;
     }
   }
-  switchThread(e) {
-    return this.threadHistory.switchThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), !0)
-      : !1;
+  switchThread(threadId) {
+    return this.threadHistory.switchThread(threadId)
+      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      : false;
   }
-  archiveThread(e = this.threadHistory.currentThreadId) {
-    return this.threadHistory.archiveThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), !0)
-      : !1;
+  archiveThread(threadId = this.threadHistory.currentThreadId) {
+    return this.threadHistory.archiveThread(threadId)
+      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      : false;
   }
-  unarchiveThread(e) {
-    return this.threadHistory.unarchiveThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), !0)
-      : !1;
+  unarchiveThread(threadId) {
+    return this.threadHistory.unarchiveThread(threadId)
+      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      : false;
   }
-  archiveThreads(e) {
-    const archivedIds = this.threadHistory.archiveThreads(e);
+  archiveThreads(threadIds) {
+    const archivedIds = this.threadHistory.archiveThreads(threadIds);
     if (archivedIds.length > 0) {
       this.syncCurrentThreadState();
       this.saveThreadHistory();
     }
     return { archivedIds, archivedCount: archivedIds.length };
   }
-  deleteThread(e, options = {}) {
-    const thread = this.threadHistory.getThread(e);
+  deleteThread(threadId, options = {}) {
+    const thread = this.threadHistory.getThread(threadId);
     if (!thread) return false;
 
-    const runner = this.threadRunners.get(e);
+    const runner = this.threadRunners.get(threadId);
     if (runner?.isRunning) return false;
 
     let sessionPath;
@@ -651,7 +651,7 @@ export class PiAgentPlugin extends P.Plugin {
         .listThreads({ includeArchived: true })
         .some(
           (other) =>
-            other.id !== e &&
+            other.id !== threadId &&
             other.piSessionId &&
             resolver.resolveSessionPath(other.piSessionId) === sessionPath
         );
@@ -659,7 +659,7 @@ export class PiAgentPlugin extends P.Plugin {
     }
 
     runner?.rpcClient?.dispose();
-    this.threadRunners.delete(e);
+    this.threadRunners.delete(threadId);
     if (sessionPath) {
       try {
         fs.unlinkSync(sessionPath);
@@ -669,7 +669,7 @@ export class PiAgentPlugin extends P.Plugin {
       }
     }
 
-    return this.threadHistory.deleteThread(e)
+    return this.threadHistory.deleteThread(threadId)
       ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
       : false;
   }
@@ -705,28 +705,30 @@ export class PiAgentPlugin extends P.Plugin {
     };
   }
   clearArchivedThreads() {
-    let e = this.threadHistory.clearArchivedThreads();
-    return e === 0 ? 0 : (this.syncCurrentThreadState(), this.saveThreadHistory(), e);
+    let clearedCount = this.threadHistory.clearArchivedThreads();
+    return clearedCount === 0
+      ? 0
+      : (this.syncCurrentThreadState(), this.saveThreadHistory(), clearedCount);
   }
-  renameThread(e, t) {
-    const thread = this.threadHistory.getThread(e);
-    const renamed = this.threadHistory.renameThread(e, t);
+  renameThread(threadId, title) {
+    const thread = this.threadHistory.getThread(threadId);
+    const renamed = this.threadHistory.renameThread(threadId, title);
     if (!renamed) return false;
 
     this.syncCurrentThreadState();
     this.saveThreadHistory();
     if (thread?.piSessionId) {
-      const sessionName = this.threadHistory.getThread(e)?.title ?? t;
-      void this.withSessionRunner(e, (runner) =>
+      const sessionName = this.threadHistory.getThread(threadId)?.title ?? title;
+      void this.withSessionRunner(threadId, (runner) =>
         runner.setSessionName(thread.piSessionId, sessionName)
       ).catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
     }
     return true;
   }
-  toggleThreadFavorite(e) {
-    return this.threadHistory.toggleThreadFavorite(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), !0)
-      : !1;
+  toggleThreadFavorite(threadId) {
+    return this.threadHistory.toggleThreadFavorite(threadId)
+      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      : false;
   }
   getExtensionUiHandler() {
     this.extensionUiHandler ??= createExtensionUiHandler({
@@ -773,84 +775,92 @@ export class PiAgentPlugin extends P.Plugin {
     this.refreshExtensionUiViews();
   }
   setExtensionEditorText(text) {
-    const leaf = this.app.workspace.getLeavesOfType(T)[0];
+    const leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0];
     leaf?.view?.setExtensionEditorText?.(String(text ?? ""));
   }
   refreshExtensionUiViews() {
-    for (const leaf of this.app.workspace.getLeavesOfType(T)) {
+    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
       leaf.view?.renderExtensionWidgets?.();
       leaf.updateHeader?.();
     }
   }
   refreshAnnotationBadges() {
-    for (const leaf of this.app.workspace.getLeavesOfType(T)) leaf.view?.renderToolBadges?.();
+    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE))
+      leaf.view?.renderToolBadges?.();
   }
   async activateView() {
-    var n;
-    let t = (n = this.app.workspace.getLeavesOfType(T)[0]) != null ? n : null;
-    if (!t) {
-      if (((t = this.app.workspace.getRightLeaf(!1)), !t)) {
+    let leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0] ?? null;
+    if (!leaf) {
+      leaf = this.app.workspace.getRightLeaf(false);
+      if (!leaf) {
         new P.Notice("Could not open Pi view.");
         return;
       }
-      await t.setViewState({ type: T, active: !0 });
+      await leaf.setViewState({ type: PI_AGENT_VIEW_TYPE, active: true });
     }
-    this.app.workspace.revealLeaf(t);
+    this.app.workspace.revealLeaf(leaf);
   }
-  async runPiPrompt(e, t, n, i = this.pi, images = [], promptContext) {
-    var p;
-    if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
+  async runPiPrompt(prompt, callbacks, threadId, runner = this.pi, images = [], promptContext) {
+    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     if (
       ((!this.graph || !this.contextBuilder || !this.pi) && this.rebuildServices(),
       !this.graph || !this.contextBuilder || !this.pi)
     )
       throw new Error("Pi services are not available.");
-    let s = this.getEditorSelection();
+    const selection = this.getEditorSelection();
     if (
-      e.trim().startsWith("/") &&
-      getCompactInstructions(e) === undefined &&
+      prompt.trim().startsWith("/") &&
+      getCompactInstructions(prompt) === undefined &&
       !this.commandCatalogLoaded
     )
       await this.refreshCommandCatalog(false);
-    let a =
-      getCompactInstructions(e) === undefined
-        ? (promptContext ?? (await this.contextBuilder.build(e, s)))
-        : void 0;
-    if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
-    if (isContextShowPrompt(e)) {
+    const context =
+      getCompactInstructions(prompt) === undefined
+        ? (promptContext ?? (await this.contextBuilder.build(prompt, selection)))
+        : undefined;
+    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (isContextShowPrompt(prompt)) {
       return {
-        finalResponse: formatContextShowResponse(a?.inspection),
-        sessionId: n,
-        threadId: n,
+        finalResponse: formatContextShowResponse(context?.inspection),
+        sessionId: threadId,
+        threadId: threadId,
         events: [],
         contextUsage: undefined,
         contextCompacted: false,
         tokenUsage: undefined
       };
     }
-    let o = n ? this.threadHistory.getThread(n) : this.threadHistory.getCurrentThread();
-    if (!o) throw new Error("Chat thread no longer exists.");
-    if (!i) throw new Error("Pi runner is not available.");
-    let l = getPriorThreadHistory(o.messages, e);
-    if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
-    a &&
-      ((p = t == null ? void 0 : t.onEvent) == null ||
-        p.call(t, {
-          type: "context_ready",
-          raw: {
-            searchResults: a.searchResults.length,
-            linkedNeighborhood: a.linkedNeighborhood.length
-          }
-        }));
-    if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
-    let h = await i.run(e, a, o.piSessionId, l, t, images);
-    return (
-      h.sessionId &&
-        (this.threadHistory.setThreadPiSessionId(o.id, h.sessionId),
-        this.syncCurrentThreadState(),
-        this.saveThreadHistory()),
-      h
+    const thread = threadId
+      ? this.threadHistory.getThread(threadId)
+      : this.threadHistory.getCurrentThread();
+    if (!thread) throw new Error("Chat thread no longer exists.");
+    if (!runner) throw new Error("Pi runner is not available.");
+    const history = getPriorThreadHistory(thread.messages, prompt);
+    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (context) {
+      callbacks?.onEvent?.({
+        type: "context_ready",
+        raw: {
+          searchResults: context.searchResults.length,
+          linkedNeighborhood: context.linkedNeighborhood.length
+        }
+      });
+    }
+    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    const result = await runner.run(
+      prompt,
+      context,
+      thread.piSessionId,
+      history,
+      callbacks,
+      images
     );
+    if (result.sessionId) {
+      this.threadHistory.setThreadPiSessionId(thread.id, result.sessionId);
+      this.syncCurrentThreadState();
+      this.saveThreadHistory();
+    }
+    return result;
   }
   setPromptEnricher(callback) {
     this.promptEnricher = typeof callback === "function" ? callback : undefined;
@@ -909,37 +919,41 @@ export class PiAgentPlugin extends P.Plugin {
     this.saveThreadHistory();
   }
   async ensureModelCatalogLoaded() {
-    this.settings.availableModels.length === 0 && (await this.refreshModelCatalog(!1));
+    this.settings.availableModels.length === 0 && (await this.refreshModelCatalog(false));
   }
-  getModelInfoForTokenUsage(e) {
-    if (!e) return;
-    let t = e.modelId || (e.provider && e.model ? `${e.provider}/${e.model}` : "");
-    if (t) {
-      let n = this.settings.availableModels.find((s) => s.slug === t);
-      if (n) return n;
+  getModelInfoForTokenUsage(tokenUsage) {
+    if (!tokenUsage) return undefined;
+    const modelId =
+      tokenUsage.modelId ||
+      (tokenUsage.provider && tokenUsage.model ? `${tokenUsage.provider}/${tokenUsage.model}` : "");
+    if (modelId) {
+      const match = this.settings.availableModels.find((model) => model.slug === modelId);
+      if (match) return match;
     }
-    return e.model
-      ? this.settings.availableModels.find((n) => n.slug.endsWith(`/${e.model}`))
-      : void 0;
+    return tokenUsage.model
+      ? this.settings.availableModels.find((model) => model.slug.endsWith(`/${tokenUsage.model}`))
+      : undefined;
   }
-  getSelectedModelInfo(e) {
-    let t = this.getModelInfoForTokenUsage(e);
-    if (t) return t;
-    let n = this.settings.model === b ? this.settings.customModel : this.settings.model;
-    n || (n = this.settings.effectiveModel);
-    return n ? this.settings.availableModels.find((s) => s.slug === n) : void 0;
+  getSelectedModelInfo(tokenUsage) {
+    const tokenUsageModel = this.getModelInfoForTokenUsage(tokenUsage);
+    if (tokenUsageModel) return tokenUsageModel;
+    let modelId =
+      this.settings.model === CUSTOM_MODEL_VALUE ? this.settings.customModel : this.settings.model;
+    if (!modelId) modelId = this.settings.effectiveModel;
+    return modelId
+      ? this.settings.availableModels.find((model) => model.slug === modelId)
+      : undefined;
   }
-  async inspectPiContext(e) {
+  async inspectPiContext(prompt) {
     if (((!this.graph || !this.contextBuilder) && this.rebuildServices(), !this.contextBuilder))
       throw new Error("Pi context builder is not available.");
-    return this.contextBuilder.inspectContext(e, this.getEditorSelection());
+    return this.contextBuilder.inspectContext(prompt, this.getEditorSelection());
   }
   getCurrentContextFile() {
     return (this.refreshCurrentContextFile(), this.currentContextFile);
   }
-  cancelPiRun(e) {
-    var t;
-    (e != null ? e : (t = this.pi) != null ? t : void 0)?.cancelCurrentRun();
+  cancelPiRun(runner) {
+    (runner ?? this.pi)?.cancelCurrentRun();
   }
   createPiRunner(threadId = this.getCurrentThread().id) {
     (!this.graph || !this.contextBuilder) && this.rebuildServices();
@@ -1075,8 +1089,8 @@ export class PiAgentPlugin extends P.Plugin {
     this.messages = this.threadHistory.getCurrentMessages();
   }
   saveThreadHistory() {
-    this.savePluginData().catch((e) => {
-      console.warn("Pi Agent: failed to save thread history", e);
+    this.savePluginData().catch((error) => {
+      console.warn("Pi Agent: failed to save thread history", error);
     });
   }
   saveAnnotations() {
@@ -1104,26 +1118,26 @@ export class PiAgentPlugin extends P.Plugin {
   refreshCurrentContextFile() {
     this.setCurrentContextFile(this.app.workspace.getActiveFile());
   }
-  setCurrentContextFile(e) {
-    this.currentContextFile = e && e.extension === "md" ? e : void 0;
+  setCurrentContextFile(file) {
+    this.currentContextFile = file && file.extension === "md" ? file : undefined;
   }
-  runWithActiveMarkdownNote(e, t) {
-    let n = this.app.workspace.getActiveFile(),
-      s = !!n && n.extension === "md";
-    if (e) return s;
-    if (!s) {
+  runWithActiveMarkdownNote(checking, action) {
+    const activeFile = this.app.workspace.getActiveFile();
+    const isMarkdown = !!activeFile && activeFile.extension === "md";
+    if (checking) return isMarkdown;
+    if (!isMarkdown) {
       new P.Notice("Open a markdown note first.");
-      return !1;
+      return false;
     }
-    t();
-    return !0;
+    action();
+    return true;
   }
-  async runCommandPrompt(e) {
+  async runCommandPrompt(prompt) {
     await this.activateView();
-    let t = this.app.workspace.getLeavesOfType(T)[0],
-      n = t == null ? void 0 : t.view;
-    if (n instanceof PiAgentView) {
-      n.startPrompt(e);
+    const leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0];
+    const view = leaf?.view;
+    if (view instanceof PiAgentView) {
+      view.startPrompt(prompt);
       return;
     }
     new P.Notice("Could not open Pi view.");
@@ -1134,7 +1148,7 @@ export class PiAgentPlugin extends P.Plugin {
       return;
     }
     await this.activateView();
-    const view = this.app.workspace.getLeavesOfType(T)[0]?.view;
+    const view = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0]?.view;
     if (!(view instanceof PiAgentView)) {
       new P.Notice("Could not open Pi view.");
       return;
@@ -1149,74 +1163,67 @@ export class PiAgentPlugin extends P.Plugin {
     }
   }
   async suggestFrontmatterForCurrentNote() {
-    var o;
     this.graph || this.rebuildServices();
-    let e = (o = this.graph) == null ? void 0 : o.getActiveFile();
-    if (!e) {
+    const file = this.graph?.getActiveFile();
+    if (!file) {
       new P.Notice("Open a markdown note first.");
       return;
     }
-    let t = await this.app.vault.cachedRead(e),
-      n = new Date().toISOString().slice(0, 10),
-      s = previewSuggestedFrontmatter(t, {
+    const content = await this.app.vault.cachedRead(file);
+    const today = new Date().toISOString().slice(0, 10);
+    const after = previewSuggestedFrontmatter(content, {
+      type: "note",
+      status: "draft",
+      updated: today,
+      tags: this.inferTags(file, content)
+    });
+    const patch = {
+      id: `${Date.now()}-${file.path}`,
+      path: file.path,
+      before: content,
+      after,
+      reason: "Add baseline Pi-suggested frontmatter",
+      frontmatterPatch: {
         type: "note",
         status: "draft",
-        updated: n,
-        tags: this.inferTags(e, t)
-      }),
-      a = {
-        id: `${Date.now()}-${e.path}`,
-        path: e.path,
-        before: t,
-        after: s,
-        reason: "Add baseline Pi-suggested frontmatter",
-        frontmatterPatch: {
-          type: "note",
-          status: "draft",
-          updated: n,
-          tags: this.inferTags(e, t)
-        }
-      };
-    new ApprovalModal(this, a, () => {}).open();
+        updated: today,
+        tags: this.inferTags(file, content)
+      }
+    };
+    new ApprovalModal(this, patch, () => {}).open();
   }
-  inferTags(e, t) {
-    var a, o, l;
-    let n = new Set(),
-      s = (a = e.parent) == null ? void 0 : a.path;
-    if (s && s !== "/") {
-      n.add(
-        (l = (o = s.split("/").pop()) == null ? void 0 : o.toLowerCase().replace(/\s+/g, "-")) !=
-          null
-          ? l
-          : ""
-      );
+  inferTags(file, content) {
+    const tags = new Set();
+    const folderPath = file.parent?.path;
+    if (folderPath && folderPath !== "/") {
+      const folderName = folderPath.split("/").pop();
+      if (folderName) tags.add(folderName.toLowerCase().replace(/\s+/g, "-"));
     }
-    for (let d of t.matchAll(/#([A-Za-z0-9/_-]+)/g)) n.add(d[1]);
-    return [...n].filter(Boolean).slice(0, 6);
+    for (const match of content.matchAll(/#([A-Za-z0-9/_-]+)/g)) tags.add(match[1]);
+    return [...tags].filter(Boolean).slice(0, 6);
   }
   getEditorSelection() {
-    var n;
-    let e = this.app.workspace.activeEditor,
-      t = e == null ? void 0 : e.editor;
-    return (n = t == null ? void 0 : t.getSelection()) != null ? n : "";
+    const activeEditor = this.app.workspace.activeEditor;
+    return activeEditor?.editor?.getSelection() ?? "";
   }
   getVaultBasePath() {
-    var t;
-    let e = this.app.vault.adapter;
-    return (t = e.getBasePath) == null ? void 0 : t.call(e);
+    return this.app.vault.adapter.getBasePath?.();
   }
   getPluginDirectory() {
-    var a;
-    let e = this.getVaultBasePath();
-    if (!e) return;
+    const basePath = this.getVaultBasePath();
+    if (!basePath) return undefined;
     const configDir = this.app.vault.configDir;
-    let t = (a = this.manifest.dir) != null ? a : `plugins/${this.manifest.id}`,
-      n = e.replace(/\/+$/, ""),
-      s = t.replace(/^\/+/, "");
-    if (s.startsWith(`${configDir}/`)) {
-      return n.endsWith(`/${configDir}`) ? `${n}/${s.slice(configDir.length + 1)}` : `${n}/${s}`;
+    const relativeDir = this.manifest.dir ?? `plugins/${this.manifest.id}`;
+    const normalizedBase = basePath.replace(/\/+$/, "");
+    const normalizedDir = relativeDir.replace(/^\/+/, "");
+    if (normalizedDir.startsWith(`${configDir}/`)) {
+      return normalizedBase.endsWith(`/${configDir}`)
+        ? `${normalizedBase}/${normalizedDir.slice(configDir.length + 1)}`
+        : `${normalizedBase}/${normalizedDir}`;
     }
-    return n.endsWith(`/${configDir}`) ? `${n}/${s}` : `${n}/${configDir}/${s}`;
+    return normalizedBase.endsWith(`/${configDir}`)
+      ? `${normalizedBase}/${normalizedDir}`
+      : `${normalizedBase}/${configDir}/${normalizedDir}`;
   }
 }
 function isStoredChatHistory(history) {
@@ -1237,11 +1244,12 @@ function historiesMatch(left, right) {
 function isLegacyBareModelId(model) {
   return !model.includes("/") && model !== "__custom";
 }
-function getPriorThreadHistory(r, i) {
-  let e = r[r.length - 1];
+function getPriorThreadHistory(messages, prompt) {
+  let lastMessage = messages[messages.length - 1];
   const isCurrentAttachmentOnlyMessage =
-    i === "" && /^\[\d+ attached (?:image|file)s?\]$/.test(e?.content || "");
-  return e?.role === "user" && (e.content === i || isCurrentAttachmentOnlyMessage)
-    ? r.slice(0, -1)
-    : r;
+    prompt === "" && /^\[\d+ attached (?:image|file)s?\]$/.test(lastMessage?.content || "");
+  return lastMessage?.role === "user" &&
+    (lastMessage.content === prompt || isCurrentAttachmentOnlyMessage)
+    ? messages.slice(0, -1)
+    : messages;
 }
