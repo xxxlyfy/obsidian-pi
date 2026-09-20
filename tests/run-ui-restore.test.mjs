@@ -20,7 +20,8 @@ vi.mock("obsidian", () => ({
 }));
 
 const { PiAgentView } = await import("../src/ui/PiAgentView.mjs");
-const { syncRunActivity, syncRunContextUsage } = await import("../src/ui/run-activity-state.mjs");
+const { syncRunActivity, syncRunContextUsage, trackActiveTool, untrackActiveTool } =
+  await import("../src/ui/run-activity-state.mjs");
 
 function createView(run) {
   return {
@@ -176,5 +177,40 @@ describe("per-thread live run UI state", () => {
 
     expect(snapshot.sourcePath).toBeUndefined();
     expect(snapshot.annotations.map((annotation) => annotation.id)).toEqual(["b1"]);
+  });
+
+  it("restores tool activity for a background run when switching back", () => {
+    const view = createView({
+      assistantContent: "",
+      thinking: "",
+      thinkingExpanded: false,
+      thinkingUserSet: false,
+      activeToolCalls: new Map([["key-1", { name: "grep", args: { q: "x" } }]]),
+      activity: { text: "Reading", kind: "read", detail: "", stickyUntil: 0 }
+    });
+    view.formatActiveToolStatus = () => ({
+      label: "Running 1 action",
+      kind: "search",
+      detail: "grep"
+    });
+
+    PiAgentView.prototype.restoreActiveRunUiState.call(view);
+
+    expect(view.activeToolCalls.size).toBe(1);
+    expect(view.activityText).toBe("Running 1 action");
+    expect(view.activityKind).toBe("search");
+    expect(view.activityDetail).toBe("grep");
+  });
+
+  it("tracks tool events into a specific run's tool map", () => {
+    const calls = new Map();
+    const view = { activeToolCalls: new Map() };
+
+    trackActiveTool.call(view, { toolCallId: "t1", toolName: "grep", toolArgs: { q: "x" } }, calls);
+    expect(calls.size).toBe(1);
+    expect(view.activeToolCalls.size).toBe(0);
+
+    untrackActiveTool.call(view, { toolCallId: "t1" }, calls);
+    expect(calls.size).toBe(0);
   });
 });

@@ -287,17 +287,25 @@ export function normalizeRunEventType(type) {
       : type;
 }
 
-/** @this {import("./PiAgentView.mjs").PiAgentView} */
-export function trackActiveTool(event) {
+/**
+ * @this {import("./PiAgentView.mjs").PiAgentView}
+ * @param {any} event
+ * @param {Map<string, any>} [toolCalls]
+ */
+export function trackActiveTool(event, toolCalls) {
   let key = getToolEventKey(event),
     name = String(event.toolName || event.message || "tool"),
     args = event.toolArgs || {};
-  this.activeToolCalls.set(key, { name: name, args: args });
+  (toolCalls ?? this.activeToolCalls).set(key, { name: name, args: args });
 }
 
-/** @this {import("./PiAgentView.mjs").PiAgentView} */
-export function untrackActiveTool(event) {
-  this.activeToolCalls.delete(getToolEventKey(event));
+/**
+ * @this {import("./PiAgentView.mjs").PiAgentView}
+ * @param {any} event
+ * @param {Map<string, any>} [toolCalls]
+ */
+export function untrackActiveTool(event, toolCalls) {
+  (toolCalls ?? this.activeToolCalls).delete(getToolEventKey(event));
 }
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */

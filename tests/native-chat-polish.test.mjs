@@ -247,6 +247,7 @@ describe("native chat polish", () => {
   it("keeps live run output per thread so switching back restores it", () => {
     expect(viewSource).toContain("run.assistantContent += delta");
     expect(viewSource).toContain("this.restoreActiveRunUiState()");
+    expect(viewSource).toContain("this.trackActiveTool(event, run.activeToolCalls)");
   });
 
   it("keeps guarded bulk deletion directly visible and removes archive-all", () => {

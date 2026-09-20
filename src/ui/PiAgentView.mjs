@@ -830,6 +830,14 @@ export class PiAgentView extends f.ItemView {
       this.activityDetail = run.activity.detail;
       this.activityStickyUntil = run.activity.stickyUntil ?? 0;
     }
+    this.activeToolCalls = new Map(run.activeToolCalls ?? []);
+    if (this.activeToolCalls.size > 0) {
+      const status = this.formatActiveToolStatus();
+      this.activityText = status.label;
+      this.activityKind = status.kind;
+      this.activityDetail = status.detail;
+      this.activityStickyUntil = 0;
+    }
   }
   runAnnotationPrompt(prompt, sourcePath) {
     return this.runPrompt(prompt, undefined, [], undefined, [], undefined, sourcePath);
@@ -880,9 +888,8 @@ export class PiAgentView extends f.ItemView {
       }
       return;
     }
-    let delivery;
-    try {
-      delivery = await this.plugin.enrichPromptDelivery(
+    const buildDelivery = () =>
+      this.plugin.enrichPromptDelivery(
         {
           prompt,
           images,
@@ -892,6 +899,16 @@ export class PiAgentView extends f.ItemView {
         },
         { mode: "prompt", threadId: threadId }
       );
+    const deliverySourcePath = annotationSnapshot.sourcePath;
+    let delivery;
+    try {
+      delivery = await buildDelivery();
+      if (
+        annotationSnapshot.sourcePath !== deliverySourcePath &&
+        !delivery.promptContext?.activeNote
+      ) {
+        delivery = await buildDelivery();
+      }
     } catch (error) {
       if (queuedId) {
         this.promptQueue = this.promptQueue.map((item) =>
@@ -958,6 +975,7 @@ export class PiAgentView extends f.ItemView {
       skillName: getSkillCommandName(prompt),
       assistantContent: "",
       annotationSnapshot,
+      activeToolCalls: new Map(),
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
@@ -1022,6 +1040,10 @@ export class PiAgentView extends f.ItemView {
             const toolError = formatToolError(event);
             if (toolError && run.toolErrors[run.toolErrors.length - 1] !== toolError)
               run.toolErrors.push(toolError);
+            const eventType = this.normalizeRunEventType(event.type);
+            if (eventType === "tool_start" || eventType === "tool_update")
+              this.trackActiveTool(event, run.activeToolCalls);
+            else if (eventType === "tool_end") this.untrackActiveTool(event, run.activeToolCalls);
             this.handleSuccessfulToolMutation(event, threadId);
             if (!this.isCurrentThread(threadId)) return;
             this.streamingThinkingContent = run.thinking;

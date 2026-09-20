@@ -39,8 +39,8 @@ declare module "../ui/PiAgentView.mjs" {
     getContextUsageForTokens(tokenUsage: any): any;
     handleRunEvent(event: any, threadId?: string): void;
     normalizeRunEventType(type: string): string;
-    trackActiveTool(event: any): void;
-    untrackActiveTool(event: any): void;
+    trackActiveTool(event: any, toolCalls?: Map<string, any>): void;
+    untrackActiveTool(event: any, toolCalls?: Map<string, any>): void;
     formatActiveToolStatus(): { label: string; kind: string; detail: string };
     showThreadList(): void;
     renderThreadList(): void;

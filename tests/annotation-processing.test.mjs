@@ -104,5 +104,7 @@ describe("annotation processing UX", () => {
     expect(viewSource).toContain("run.annotationSnapshot");
     expect(viewSource).toContain("const unsent = annotationSnapshot.annotations;");
     expect(viewSource).toContain("contextFilePath: annotationSnapshot.sourcePath");
+    expect(viewSource).toContain("const buildDelivery = () =>");
+    expect(viewSource).toContain("annotationSnapshot.sourcePath !== deliverySourcePath");
   });
 });
