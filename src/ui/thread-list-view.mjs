@@ -5,11 +5,13 @@ import { formatBulkDeleteResult, planBulkThreadDeletion } from "./thread-bulk-ac
 
 const PI_BRAND_NAME = "Pi";
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function showThreadList() {
   this.showingThreadList = true;
   this.renderThreadList();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderThreadList() {
   let root = this.containerEl.children[1],
     threads = this.plugin.listThreads({ includeArchived: true }),
@@ -63,6 +65,7 @@ export function renderThreadList() {
       );
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderThreadListRow(listEl, thread, isCurrent) {
   let row = listEl.createDiv({
       cls: `pi-agent-thread-list-row${isCurrent ? " is-current" : ""}`
@@ -125,6 +128,7 @@ export function renderThreadListRow(listEl, thread, isCurrent) {
   });
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function deleteChats() {
   const threads = this.plugin.listThreads({ includeArchived: true });
   const plan = planBulkThreadDeletion(threads, [...this.activeRuns.keys()]);
@@ -155,6 +159,7 @@ export async function deleteChats() {
   this.renderThreadList();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
   let menu = new f.Menu();
   menu.addItem((item) =>
@@ -225,6 +230,7 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
   menu.showAtMouseEvent(event);
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function startThreadListRename(thread, titleEl) {
   let input = document.createElement("input");
   input.addClass("pi-agent-thread-list-title-input");
@@ -252,12 +258,14 @@ export function startThreadListRename(thread, titleEl) {
   input.select();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function toggleThreadFavorite(thread) {
   this.plugin.toggleThreadFavorite(thread.id)
     ? this.renderThreadList()
     : new f.Notice("Chat thread was not found.");
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function deleteThreadFromList(thread) {
   if (this.isThreadRunning(thread.id)) {
     new f.Notice("Wait for the agent run to finish before deleting this chat.");
@@ -273,6 +281,7 @@ export async function deleteThreadFromList(thread) {
   }
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function formatThreadMeta(thread, isCurrent) {
   let messageCount = this.plugin.getThreadDisplayMessageCount
       ? this.plugin.getThreadDisplayMessageCount(thread)

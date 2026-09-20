@@ -12,21 +12,23 @@ import {
   modelSupportsImages
 } from "./prompt-payload.mjs";
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function enqueuePrompt(
   prompt,
-  threadId = this.plugin.getCurrentThread().id,
+  threadId,
   images = [],
   attachments = [],
   annotations = [],
   contextFilePath
 ) {
+  const targetThreadId = threadId ?? this.plugin.getCurrentThread().id;
   const item = this.plugin.enqueueLocalPrompt({
     prompt,
     images,
     attachments,
     annotations,
     contextFilePath,
-    threadId
+    threadId: targetThreadId
   });
   if (!item) return;
   this.promptQueue = this.plugin.getLocalPromptQueue();
@@ -40,6 +42,7 @@ export function enqueuePrompt(
   );
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function runNextQueuedPrompt() {
   if (this.canceling || this.plugin.isLocalPromptQueuePaused() || this.steeringPromptIds.size > 0)
     return;
@@ -62,6 +65,7 @@ export function runNextQueuedPrompt() {
   );
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function removeQueuedPrompt(id) {
   const item = this.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending") return;
@@ -72,6 +76,7 @@ export function removeQueuedPrompt(id) {
   this.setRunningState(this.running);
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function retrieveQueuedPrompt(id) {
   const item = this.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending" || !this.isCurrentThread(item.threadId)) return;
@@ -84,6 +89,7 @@ export function retrieveQueuedPrompt(id) {
   this.inputEl?.focus();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function steerQueuedPrompt(id) {
   const taken = takeLocalPrompt(this.promptQueue, id);
   if (!taken.item) return;
@@ -122,6 +128,7 @@ export async function steerQueuedPrompt(id) {
   this.runNextQueuedPrompt();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderPromptQueue() {
   if (!this.promptQueueEl) return;
   const root = this.promptQueueEl;

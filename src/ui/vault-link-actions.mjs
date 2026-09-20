@@ -4,8 +4,15 @@ const EXTERNAL_LINK_PATTERN = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i;
 const LEGACY_LINE_PATTERN = /^(.*):(\d+)$/;
 
 /**
+ * @typedef {{ kind: "invalid" } | { kind: "external", linkText: string } | { kind: "internal", linkText: string, line?: number }} VaultLinkTarget
+ */
+
+/**
  * Classify a link without normalizing its path. Obsidian remains responsible
  * for aliases, relative paths, case matching, spaces, and subpaths.
+ *
+ * @param {any} value
+ * @returns {VaultLinkTarget}
  */
 export function classifyVaultLinkTarget(value) {
   if (typeof value !== "string") return { kind: "invalid" };
@@ -26,6 +33,7 @@ export function classifyVaultLinkTarget(value) {
   return { kind: "internal", linkText };
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function openVaultLink(value, newLeaf = false) {
   const target =
     typeof value === "string"
@@ -71,6 +79,7 @@ export function getLinkLabel(value) {
   return linkText.split("/").pop() ?? linkText;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function getLinkSourcePath() {
   return (
     this.plugin.getCurrentContextFile()?.path ??
@@ -79,6 +88,7 @@ export function getLinkSourcePath() {
   );
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function revealLine(leaf, line) {
   if (!leaf || !Number.isInteger(line) || line < 1) return;
   const window =
@@ -100,6 +110,11 @@ function resolveActiveWindow() {
   return typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
 }
 
+/**
+ * @this {import("./PiAgentView.mjs").PiAgentView}
+ * @param {string} value
+ * @param {boolean | string} [newLeaf]
+ */
 export async function openVaultPath(value, newLeaf = "tab") {
   return this.openVaultLink(value, newLeaf === true || newLeaf === "tab");
 }

@@ -4,13 +4,6 @@
     "checkJs": true,
     "noImplicitAny": false
   },
-  "include": [
-    "src/types/**/*.d.ts",
-    "src/pi/**/*.mjs",
-    "src/threads/**/*.mjs",
-    "src/annotations/**/*.mjs",
-    "src/shared/**/*.mjs",
-    "src/context/**/*.mjs"
-  ],
+  "include": ["src/types/**/*.d.ts", "src/**/*.mjs"],
   "exclude": ["main.js", "node_modules"]
 }

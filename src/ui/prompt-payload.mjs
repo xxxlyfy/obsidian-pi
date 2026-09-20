@@ -256,7 +256,7 @@ export function isSupportedTextFile(fileName, mimeType = "") {
 }
 
 export function createPromptTextAttachment(
-  { bytes, fileName, mimeType = "", source = "local", path, originalSize },
+  { bytes, fileName, mimeType = "", source = "local", path = undefined, originalSize = undefined },
   remainingBytes = MAX_TOTAL_TEXT_ATTACHMENT_BYTES
 ) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
@@ -270,11 +270,8 @@ export function createPromptTextAttachment(
   if (allowed === 0) throw new Error("The 192 KiB text attachment budget is already full.");
   let decoded;
   let decodeBytes;
-  for (
-    let trim = 0;
-    trim <= (Number.isFinite(originalSize) && originalSize > data.length ? 3 : 0);
-    trim += 1
-  ) {
+  const reportedSize = Number.isFinite(originalSize) ? Number(originalSize) : data.length;
+  for (let trim = 0; trim <= (reportedSize > data.length ? 3 : 0); trim += 1) {
     try {
       decodeBytes = trim === 0 ? data : data.slice(0, -trim);
       decoded = new TextDecoder("utf-8", { fatal: true }).decode(decodeBytes);
@@ -293,8 +290,8 @@ export function createPromptTextAttachment(
         fileName,
         mimeType: mimeType || "text/plain",
         content,
-        originalSize: Number.isFinite(originalSize) ? originalSize : data.length,
-        truncated: (Number.isFinite(originalSize) ? originalSize : data.length) > allowed,
+        originalSize: reportedSize,
+        truncated: reportedSize > allowed,
         source,
         path
       }

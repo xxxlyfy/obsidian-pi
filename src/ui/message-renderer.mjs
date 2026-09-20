@@ -2,6 +2,7 @@ import * as f from "obsidian";
 
 const STREAM_RENDER_INTERVAL_MS = 80;
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderMessages() {
   this.syncCurrentRunFlags();
   if (!this.messagesEl) return;
@@ -39,6 +40,7 @@ export function restoreMessagesScroll(messagesEl, stickToBottom, previousScrollT
     : (messagesEl.scrollTop = Math.min(previousScrollTop, messagesEl.scrollHeight));
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderEmptyState() {
   if (!this.messagesEl) return;
   let iconEl = this.messagesEl
@@ -47,6 +49,7 @@ export function renderEmptyState() {
   (0, f.setIcon)(iconEl, "messages-square");
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderMessage(message, index) {
   if (!this.messagesEl) return;
   let messageEl = this.messagesEl.createDiv({
@@ -125,6 +128,7 @@ export function renderThinkingDisclosure(
   };
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function handleMessageLinkClick(event) {
   const link = event?.target?.closest?.("a.internal-link");
   if (!link) return false;
@@ -136,6 +140,7 @@ export function handleMessageLinkClick(event) {
   return true;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderPlainMessageContent(container, content) {
   container.empty();
   container.addClass("markdown-rendered");
@@ -165,11 +170,13 @@ export function renderPlainMessageContent(container, content) {
   });
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function unloadMessageRenderComponents() {
   for (const component of this.messageRenderComponents.splice(0)) component.unload();
   this.messageRenderComponentByElement = new WeakMap();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderStreamingAssistantMessage() {
   if (!this.messagesEl) return;
   const item = this.messagesEl.createDiv({
@@ -200,6 +207,7 @@ export function renderStreamingAssistantMessage() {
   this.renderStreamingAnswer();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderStreamingAnswer() {
   if (!this.streamingTextEl) return;
   if (!this.streamingTextEl.isConnected && this.streamingTextEl.isConnected !== undefined) return;
@@ -207,11 +215,13 @@ export function renderStreamingAnswer() {
   this.streamingTextEl.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderStreamingThinking() {
   if (!this.liveThinkingTextEl?.isConnected) return;
   this.liveThinkingTextEl.setText(this.streamingThinkingContent || "");
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function scheduleStreamingRender() {
   if (this.streamingRenderTimer) return;
   const elapsed = Date.now() - (this.lastStreamingRenderAt || 0);
@@ -222,6 +232,7 @@ export function scheduleStreamingRender() {
   }, delay);
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function flushStreamingRender() {
   this.lastStreamingRenderAt = Date.now();
   if (!this.running) return;
@@ -239,11 +250,13 @@ export function flushStreamingRender() {
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function clearStreamingRenderTimer() {
   if (this.streamingRenderTimer) window.clearTimeout(this.streamingRenderTimer);
   this.streamingRenderTimer = undefined;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderActivityMessage() {
   if (!this.messagesEl) return;
   const item = this.messagesEl.createDiv({
@@ -268,6 +281,7 @@ export function renderActivityMessage() {
   this.liveThinkingSetExpanded = rendered.setExpanded;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderRoleLabel(parent, role, message, index) {
   let roleEl = parent.createDiv({ cls: "pi-agent-message-role" }),
     titleEl = roleEl.createSpan({ cls: "pi-agent-message-role-title" }),

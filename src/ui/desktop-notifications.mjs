@@ -1,6 +1,9 @@
 export async function requestDesktopNotificationPermission(NotificationApi) {
+  const activeWindow = /** @type {Window & typeof globalThis | undefined} */ (
+    resolveActiveWindow()
+  );
   const activeNotificationApi =
-    NotificationApi === undefined ? resolveActiveWindow()?.Notification : NotificationApi;
+    NotificationApi === undefined ? activeWindow?.Notification : NotificationApi;
   if (typeof activeNotificationApi !== "function") return false;
   if (activeNotificationApi.permission === "granted") return true;
   if (
@@ -30,11 +33,13 @@ export function showDesktopRunNotification({
   sentRunIds,
   body,
   onClick,
-  NotificationApi,
-  documentRef,
-  windowRef
+  NotificationApi = undefined,
+  documentRef = undefined,
+  windowRef = undefined
 }) {
-  const activeWindow = resolveActiveWindow();
+  const activeWindow = /** @type {Window & typeof globalThis | undefined} */ (
+    resolveActiveWindow()
+  );
   const activeNotificationApi =
     NotificationApi === undefined ? activeWindow?.Notification : NotificationApi;
   const activeDocument = documentRef === undefined ? activeWindow?.document : documentRef;

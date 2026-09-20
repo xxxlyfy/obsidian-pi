@@ -11,19 +11,19 @@ export function restorePersistedLocalPromptQueue(queue, steering) {
 
 export function normalizeLocalPromptQueue(value, options = {}) {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      const normalized = createQueuedPrompt(item);
-      if (!normalized) return undefined;
-      return {
+  return value.flatMap((item) => {
+    const normalized = createQueuedPrompt(item);
+    if (!normalized) return [];
+    return [
+      {
         ...normalized,
         state:
           options.preserveState && ["pending", "steering", "delivering"].includes(item.state)
             ? item.state
             : "pending"
-      };
-    })
-    .filter(Boolean);
+      }
+    ];
+  });
 }
 
 export function enqueueLocalPrompt(queue, item) {

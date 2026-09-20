@@ -123,14 +123,22 @@ function previewSuggestedFrontmatter(markdown, patch) {
   return previewFrontmatterPatch(markdown, patch);
 }
 export class PiAgentPlugin extends P.Plugin {
-  constructor() {
-    super(...arguments);
+  /**
+   * @param {import("obsidian").App} app
+   * @param {import("obsidian").PluginManifest} manifest
+   */
+  constructor(app, manifest) {
+    super(app, manifest);
     this.settings = DEFAULT_SETTINGS;
     this.messages = [];
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = new Map();
+    /** @type {any} */
+    this.extensionUiHandler = undefined;
+    /** @type {Map<string, { mtimeMs: number, size: number, count: number }> | undefined} */
+    this.piSessionCountCache = undefined;
     this.piCommands = [];
     this.commandCatalogLoaded = false;
     this.commandCatalogRefreshPromise = undefined;
@@ -183,7 +191,7 @@ export class PiAgentPlugin extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
-        if (file.extension !== "md") return;
+        if (!(file instanceof P.TFile) || file.extension !== "md") return;
         this.migrateQueuedAnnotationPaths(oldPath, file.path);
         if (
           this.annotationStore.list(oldPath).length > 0 &&
@@ -196,7 +204,7 @@ export class PiAgentPlugin extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file.extension !== "md") return;
+        if (!(file instanceof P.TFile) || file.extension !== "md") return;
         this.annotationStore.deletePath(file.path);
         this.invalidateQueuedAnnotationPaths(file.path);
       })
@@ -477,7 +485,8 @@ export class PiAgentPlugin extends P.Plugin {
   }
   refreshOpenModelControls() {
     for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      leaf.view?.runSettings?.refresh?.();
+      const view = /** @type {any} */ (leaf.view);
+      view?.runSettings?.refresh?.();
     }
     this.settingsTab?.display?.();
   }
@@ -781,19 +790,24 @@ export class PiAgentPlugin extends P.Plugin {
   }
   setExtensionEditorText(text) {
     const leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0];
-    leaf?.view?.setExtensionEditorText?.(String(text ?? ""));
+    const view = /** @type {any} */ (leaf?.view);
+    view?.setExtensionEditorText?.(String(text ?? ""));
   }
   refreshExtensionUiViews() {
     for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      leaf.view?.renderExtensionWidgets?.();
-      leaf.updateHeader?.();
+      const view = /** @type {any} */ (leaf.view);
+      view?.renderExtensionWidgets?.();
+      /** @type {any} */ (leaf).updateHeader?.();
     }
   }
   refreshAnnotationBadges() {
-    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE))
-      leaf.view?.renderToolBadges?.();
+    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
+      const view = /** @type {any} */ (leaf.view);
+      view?.renderToolBadges?.();
+    }
   }
   async activateView() {
+    /** @type {import("obsidian").WorkspaceLeaf | null} */
     let leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0] ?? null;
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false);
@@ -821,7 +835,8 @@ export class PiAgentPlugin extends P.Plugin {
       await this.refreshCommandCatalog(false);
     const context =
       getCompactInstructions(prompt) === undefined
-        ? (promptContext ?? (await this.contextBuilder.build(prompt, selection)))
+        ? (promptContext ??
+          (await /** @type {ContextBuilder} */ (this.contextBuilder).build(prompt, selection)))
         : undefined;
     if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     if (isContextShowPrompt(prompt)) {
@@ -873,7 +888,7 @@ export class PiAgentPlugin extends P.Plugin {
   async enrichPromptDelivery(delivery, context) {
     const enriched = await applyPromptEnricher(delivery, this.promptEnricher, context);
     const hasAnnotationSnapshot = Object.prototype.hasOwnProperty.call(enriched, "annotations");
-    const promptContext = await this.contextBuilder.build(
+    const promptContext = await /** @type {ContextBuilder} */ (this.contextBuilder).build(
       enriched.prompt,
       this.getEditorSelection(),
       {
@@ -1094,12 +1109,16 @@ export class PiAgentPlugin extends P.Plugin {
     // Resolve against the exact current file at prompt time. Prefer an open
     // editor because vault reads can lag behind an unsaved CodeMirror change.
     const activeEditor = this.app.workspace.activeEditor;
-    let content = activeEditor?.file?.path === path ? activeEditor.editor?.getValue?.() : undefined;
+    let content =
+      activeEditor && activeEditor.file?.path === path
+        ? activeEditor.editor?.getValue?.()
+        : undefined;
     if (typeof content !== "string") {
-      const openLeaf = this.app.workspace
-        .getLeavesOfType("markdown")
-        .find((leaf) => leaf.view?.file?.path === path && leaf.view?.editor?.getValue);
-      content = openLeaf?.view?.editor?.getValue?.();
+      const openLeaf = this.app.workspace.getLeavesOfType("markdown").find((leaf) => {
+        const view = /** @type {any} */ (leaf.view);
+        return view?.file?.path === path && view?.editor?.getValue;
+      });
+      content = /** @type {any} */ (openLeaf?.view)?.editor?.getValue?.();
     }
     if (typeof content !== "string") content = await this.app.vault.read(file);
     return this.annotationStore.reanchorPath(path, content);
@@ -1226,7 +1245,7 @@ export class PiAgentPlugin extends P.Plugin {
     return activeEditor?.editor?.getSelection() ?? "";
   }
   getVaultBasePath() {
-    return this.app.vault.adapter.getBasePath?.();
+    return /** @type {any} */ (this.app.vault.adapter).getBasePath?.();
   }
   getPluginDirectory() {
     const basePath = this.getVaultBasePath();

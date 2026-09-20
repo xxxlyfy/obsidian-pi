@@ -14,6 +14,7 @@ import {
 
 const ACTIVITY_STICKY_MS = 1200;
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function setActivity(text, kind, detail = "") {
   let now = Date.now(),
     sticky = isStickyActivityKind(kind),
@@ -25,6 +26,7 @@ export function setActivity(text, kind, detail = "") {
   this.applyActivity(text, kind, detail, sticky ? now + ACTIVITY_STICKY_MS : 0);
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function applyActivity(text, kind, detail = "", stickyUntil = 0) {
   let isUnchanged =
     this.activityText === text && this.activityKind === kind && this.activityDetail === detail;
@@ -39,11 +41,13 @@ export function applyActivity(text, kind, detail = "", stickyUntil = 0) {
   if (!isUnchanged && !this.updateActivityDom()) this.renderMessages();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function queuePendingActivity(text, kind, detail = "") {
   this.pendingActivity = { text: text, kind: kind, detail: detail };
   this.schedulePendingActivity();
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function schedulePendingActivity() {
   if (this.pendingActivityTimer) return;
   let delay = Math.max(0, this.activityStickyUntil - Date.now());
@@ -53,11 +57,13 @@ export function schedulePendingActivity() {
   }, delay);
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function clearPendingActivityTimer() {
   if (this.pendingActivityTimer) window.clearTimeout(this.pendingActivityTimer);
   this.pendingActivityTimer = undefined;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function flushPendingActivity() {
   if (!this.pendingActivity || Date.now() < this.activityStickyUntil) {
     this.pendingActivity && this.schedulePendingActivity();
@@ -72,6 +78,7 @@ export function flushPendingActivity() {
   this.applyActivity(pending.text, pending.kind, pending.detail);
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function updateActivityDom() {
   if (
     !this.running ||
@@ -93,6 +100,7 @@ export function updateActivityDom() {
   return true;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function captureContextUsage(event) {
   let tokenUsage = extractEventTokenUsage(event?.raw),
     contextUsage = this.getContextUsageForTokens(tokenUsage);
@@ -104,6 +112,7 @@ export function captureContextUsage(event) {
   }
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function getContextUsageForTokens(tokenUsage) {
   if (!tokenUsage) return;
   const modelInfo = this.plugin.getSelectedModelInfo(tokenUsage);
@@ -111,6 +120,7 @@ export function getContextUsageForTokens(tokenUsage) {
   return createContextUsage(tokenUsage, contextWindow);
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function handleRunEvent(event) {
   let type = this.normalizeRunEventType(event.type);
   this.captureContextUsage(event);
@@ -242,6 +252,7 @@ export function normalizeRunEventType(type) {
       : type;
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function trackActiveTool(event) {
   let key = getToolEventKey(event),
     name = String(event.toolName || event.message || "tool"),
@@ -249,10 +260,12 @@ export function trackActiveTool(event) {
   this.activeToolCalls.set(key, { name: name, args: args });
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function untrackActiveTool(event) {
   this.activeToolCalls.delete(getToolEventKey(event));
 }
 
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function formatActiveToolStatus() {
   let tools = [...this.activeToolCalls.values()];
   if (tools.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };

@@ -1891,13 +1891,17 @@ var DEFAULT_SETTINGS = {
   reasoningEffort: "",
   sandboxMode: "read-only",
   acknowledgedToolRisk: false,
-  availableModels: [],
+  availableModels:
+    /** @type {any[]} */
+    [],
   dryRun: false,
   ignoredFolders: [".git", "node_modules", "Templates"],
   customInstructions: "",
   piExecutablePath: "",
   includeDefaultSkills: true,
-  additionalSkillFolders: [],
+  additionalSkillFolders:
+    /** @type {string[]} */
+    [],
   effectiveModel: "",
   effectiveReasoning: "",
   dismissedPiSetup: false,
@@ -2139,6 +2143,11 @@ var ContextBuilder = class {
     this.getPiCommands = getPiCommands;
     this.annotationProvider = annotationProvider;
   }
+  /**
+   * @param {any} prompt
+   * @param {string} [selection]
+   * @param {any} [options]
+   */
   async build(prompt, selection = "", options = void 0) {
     const userPrompt = String(prompt ?? "");
     const parsedPrompt = parsePromptReferences(userPrompt);
@@ -4172,7 +4181,7 @@ function isSupportedTextFile(fileName, mimeType = "") {
   return SUPPORTED_TEXT_EXTENSIONS.includes(extension || base);
 }
 function createPromptTextAttachment(
-  { bytes, fileName, mimeType = "", source = "local", path: path6, originalSize },
+  { bytes, fileName, mimeType = "", source = "local", path: path6 = void 0, originalSize = void 0 },
   remainingBytes = MAX_TOTAL_TEXT_ATTACHMENT_BYTES
 ) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
@@ -4186,11 +4195,8 @@ function createPromptTextAttachment(
   if (allowed === 0) throw new Error("The 192 KiB text attachment budget is already full.");
   let decoded;
   let decodeBytes;
-  for (
-    let trim = 0;
-    trim <= (Number.isFinite(originalSize) && originalSize > data.length ? 3 : 0);
-    trim += 1
-  ) {
+  const reportedSize = Number.isFinite(originalSize) ? Number(originalSize) : data.length;
+  for (let trim = 0; trim <= (reportedSize > data.length ? 3 : 0); trim += 1) {
     try {
       decodeBytes = trim === 0 ? data : data.slice(0, -trim);
       decoded = new import_node_util.TextDecoder("utf-8", { fatal: true }).decode(decodeBytes);
@@ -4207,8 +4213,8 @@ function createPromptTextAttachment(
         fileName,
         mimeType: mimeType || "text/plain",
         content,
-        originalSize: Number.isFinite(originalSize) ? originalSize : data.length,
-        truncated: (Number.isFinite(originalSize) ? originalSize : data.length) > allowed,
+        originalSize: reportedSize,
+        truncated: reportedSize > allowed,
         source,
         path: path6
       }
@@ -5153,7 +5159,9 @@ function normalizeProviderId(providerOrModel) {
 function resolveProviderBrand(providerOrModel) {
   const provider = normalizeProviderId(providerOrModel);
   const brand = PROVIDER_BRANDS.find((candidate) => candidate.match.test(provider));
-  return brand ? { ...brand, provider } : { name: provider || "Model provider", provider };
+  return brand
+    ? { ...brand, provider }
+    : { name: provider || "Model provider", provider, icon: void 0, mark: void 0 };
 }
 function renderProviderIcon(container, providerOrModel) {
   const brand = resolveProviderBrand(providerOrModel);
@@ -5263,8 +5271,11 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
 
 // src/ui/desktop-notifications.mjs
 async function requestDesktopNotificationPermission(NotificationApi) {
+  const activeWindow =
+    /** @type {Window & typeof globalThis | undefined} */
+    resolveActiveWindow5();
   const activeNotificationApi =
-    NotificationApi === void 0 ? resolveActiveWindow5()?.Notification : NotificationApi;
+    NotificationApi === void 0 ? activeWindow?.Notification : NotificationApi;
   if (typeof activeNotificationApi !== "function") return false;
   if (activeNotificationApi.permission === "granted") return true;
   if (
@@ -5291,11 +5302,13 @@ function showDesktopRunNotification({
   sentRunIds,
   body,
   onClick,
-  NotificationApi,
-  documentRef,
-  windowRef
+  NotificationApi = void 0,
+  documentRef = void 0,
+  windowRef = void 0
 }) {
-  const activeWindow = resolveActiveWindow5();
+  const activeWindow =
+    /** @type {Window & typeof globalThis | undefined} */
+    resolveActiveWindow5();
   const activeNotificationApi =
     NotificationApi === void 0 ? activeWindow?.Notification : NotificationApi;
   const activeDocument = documentRef === void 0 ? activeWindow?.document : documentRef;
@@ -5982,11 +5995,14 @@ var ExtensionUiModal = class extends import_obsidian9.Modal {
     if (this.request.method === "editor") field.value = String(this.request.prefill ?? "");
     else field.setAttr("placeholder", String(this.request.placeholder ?? ""));
     field.addEventListener("keydown", (event) => {
+      const keyboardEvent =
+        /** @type {KeyboardEvent} */
+        event;
       if (
-        event.key === "Enter" &&
-        (this.request.method !== "editor" || event.metaKey || event.ctrlKey)
+        keyboardEvent.key === "Enter" &&
+        (this.request.method !== "editor" || keyboardEvent.metaKey || keyboardEvent.ctrlKey)
       ) {
-        event.preventDefault();
+        keyboardEvent.preventDefault();
         this.finish(field.value);
       }
     });
@@ -6236,19 +6252,19 @@ function restorePersistedLocalPromptQueue(queue, steering) {
 }
 function normalizeLocalPromptQueue(value, options = {}) {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      const normalized = createQueuedPrompt(item);
-      if (!normalized) return void 0;
-      return {
+  return value.flatMap((item) => {
+    const normalized = createQueuedPrompt(item);
+    if (!normalized) return [];
+    return [
+      {
         ...normalized,
         state:
           options.preserveState && ["pending", "steering", "delivering"].includes(item.state)
             ? item.state
             : "pending"
-      };
-    })
-    .filter(Boolean);
+      }
+    ];
+  });
 }
 function enqueueLocalPrompt(queue, item) {
   const normalized = createQueuedPrompt(item);
@@ -6319,19 +6335,20 @@ function nextDeliverablePrompt(queue, isThreadRunning) {
 // src/ui/prompt-queue.mjs
 function enqueuePrompt(
   prompt,
-  threadId = this.plugin.getCurrentThread().id,
+  threadId,
   images = [],
   attachments = [],
   annotations = [],
   contextFilePath
 ) {
+  const targetThreadId = threadId ?? this.plugin.getCurrentThread().id;
   const item = this.plugin.enqueueLocalPrompt({
     prompt,
     images,
     attachments,
     annotations,
     contextFilePath,
-    threadId
+    threadId: targetThreadId
   });
   if (!item) return;
   this.promptQueue = this.plugin.getLocalPromptQueue();
@@ -9281,7 +9298,9 @@ var PiAgentView = class extends f4.ItemView {
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
-      toolErrors: []
+      toolErrors:
+        /** @type {string[]} */
+        []
     };
     let skipQueueDrain = false;
     const addUserMessage = () => {
@@ -10402,14 +10421,20 @@ function previewSuggestedFrontmatter(markdown, patch) {
   return previewFrontmatterPatch(markdown, patch);
 }
 var PiAgentPlugin = class extends P.Plugin {
-  constructor() {
-    super(...arguments);
+  /**
+   * @param {import("obsidian").App} app
+   * @param {import("obsidian").PluginManifest} manifest
+   */
+  constructor(app, manifest) {
+    super(app, manifest);
     this.settings = DEFAULT_SETTINGS;
     this.messages = [];
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = /* @__PURE__ */ new Map();
+    this.extensionUiHandler = void 0;
+    this.piSessionCountCache = void 0;
     this.piCommands = [];
     this.commandCatalogLoaded = false;
     this.commandCatalogRefreshPromise = void 0;
@@ -10454,7 +10479,7 @@ var PiAgentPlugin = class extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
-        if (file.extension !== "md") return;
+        if (!(file instanceof P.TFile) || file.extension !== "md") return;
         this.migrateQueuedAnnotationPaths(oldPath, file.path);
         if (
           this.annotationStore.list(oldPath).length > 0 &&
@@ -10467,7 +10492,7 @@ var PiAgentPlugin = class extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file.extension !== "md") return;
+        if (!(file instanceof P.TFile) || file.extension !== "md") return;
         this.annotationStore.deletePath(file.path);
         this.invalidateQueuedAnnotationPaths(file.path);
       })
@@ -10737,7 +10762,10 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   refreshOpenModelControls() {
     for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      leaf.view?.runSettings?.refresh?.();
+      const view =
+        /** @type {any} */
+        leaf.view;
+      view?.runSettings?.refresh?.();
     }
     this.settingsTab?.display?.();
   }
@@ -11027,17 +11055,27 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   setExtensionEditorText(text) {
     const leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0];
-    leaf?.view?.setExtensionEditorText?.(String(text ?? ""));
+    const view =
+      /** @type {any} */
+      leaf?.view;
+    view?.setExtensionEditorText?.(String(text ?? ""));
   }
   refreshExtensionUiViews() {
     for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      leaf.view?.renderExtensionWidgets?.();
+      const view =
+        /** @type {any} */
+        leaf.view;
+      view?.renderExtensionWidgets?.();
       leaf.updateHeader?.();
     }
   }
   refreshAnnotationBadges() {
-    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE))
-      leaf.view?.renderToolBadges?.();
+    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
+      const view =
+        /** @type {any} */
+        leaf.view;
+      view?.renderToolBadges?.();
+    }
   }
   async activateView() {
     let leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0] ?? null;
@@ -11067,7 +11105,9 @@ var PiAgentPlugin = class extends P.Plugin {
       await this.refreshCommandCatalog(false);
     const context =
       getCompactInstructions(prompt) === void 0
-        ? (promptContext ?? (await this.contextBuilder.build(prompt, selection)))
+        ? (promptContext ??
+          (await /** @type {ContextBuilder} */
+          this.contextBuilder.build(prompt, selection)))
         : void 0;
     if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     if (isContextShowPrompt(prompt)) {
@@ -11119,14 +11159,11 @@ var PiAgentPlugin = class extends P.Plugin {
   async enrichPromptDelivery(delivery, context) {
     const enriched = await applyPromptEnricher(delivery, this.promptEnricher, context);
     const hasAnnotationSnapshot = Object.prototype.hasOwnProperty.call(enriched, "annotations");
-    const promptContext = await this.contextBuilder.build(
-      enriched.prompt,
-      this.getEditorSelection(),
-      {
-        ...(hasAnnotationSnapshot ? { annotations: enriched.annotations } : {}),
-        activeNotePath: enriched.contextFilePath
-      }
-    );
+    const promptContext = await /** @type {ContextBuilder} */
+    this.contextBuilder.build(enriched.prompt, this.getEditorSelection(), {
+      ...(hasAnnotationSnapshot ? { annotations: enriched.annotations } : {}),
+      activeNotePath: enriched.contextFilePath
+    });
     return { ...enriched, promptContext };
   }
   getLocalPromptQueue() {
@@ -11336,12 +11373,18 @@ var PiAgentPlugin = class extends P.Plugin {
     const file = this.app.vault.getAbstractFileByPath(path6);
     if (!(file instanceof P.TFile) || file.extension !== "md") return annotations;
     const activeEditor = this.app.workspace.activeEditor;
-    let content = activeEditor?.file?.path === path6 ? activeEditor.editor?.getValue?.() : void 0;
+    let content =
+      activeEditor && activeEditor.file?.path === path6
+        ? activeEditor.editor?.getValue?.()
+        : void 0;
     if (typeof content !== "string") {
-      const openLeaf = this.app.workspace
-        .getLeavesOfType("markdown")
-        .find((leaf) => leaf.view?.file?.path === path6 && leaf.view?.editor?.getValue);
-      content = openLeaf?.view?.editor?.getValue?.();
+      const openLeaf = this.app.workspace.getLeavesOfType("markdown").find((leaf) => {
+        const view =
+          /** @type {any} */
+          leaf.view;
+        return view?.file?.path === path6 && view?.editor?.getValue;
+      });
+      content = /** @type {any} */ openLeaf?.view?.editor?.getValue?.();
     }
     if (typeof content !== "string") content = await this.app.vault.read(file);
     return this.annotationStore.reanchorPath(path6, content);
@@ -11468,7 +11511,10 @@ var PiAgentPlugin = class extends P.Plugin {
     return activeEditor?.editor?.getSelection() ?? "";
   }
   getVaultBasePath() {
-    return this.app.vault.adapter.getBasePath?.();
+    return (
+      /** @type {any} */
+      this.app.vault.adapter.getBasePath?.()
+    );
   }
   getPluginDirectory() {
     const basePath = this.getVaultBasePath();

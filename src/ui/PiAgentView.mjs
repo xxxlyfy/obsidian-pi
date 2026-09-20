@@ -940,7 +940,7 @@ export class PiAgentView extends f.ItemView {
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
-      toolErrors: []
+      toolErrors: /** @type {string[]} */ ([])
     };
     let skipQueueDrain = false;
     const addUserMessage = () => {

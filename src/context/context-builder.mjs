@@ -28,6 +28,11 @@ export class ContextBuilder {
     this.annotationProvider = annotationProvider;
   }
 
+  /**
+   * @param {any} prompt
+   * @param {string} [selection]
+   * @param {any} [options]
+   */
   async build(prompt, selection = "", options = undefined) {
     const userPrompt = String(prompt ?? "");
     const parsedPrompt = parsePromptReferences(userPrompt);
