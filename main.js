@@ -9167,6 +9167,11 @@ var PiAgentView = class extends f4.ItemView {
   renderThreadListIfVisible() {
     if (this.showingThreadList) this.renderThreadList();
   }
+  refreshLocalPromptQueue() {
+    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.renderPromptQueue();
+    this.setRunningState(this.running);
+  }
   restoreActiveRunUiState() {
     const threadId = this.getCurrentThreadId();
     const run = threadId ? this.activeRuns.get(threadId) : void 0;
@@ -11211,12 +11216,22 @@ var PiAgentPlugin = class extends P.Plugin {
     this.localPromptQueue = migrateLocalPromptPaths(this.localPromptQueue, oldPath, newPath);
     this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
     this.saveThreadHistory();
+    this.refreshOpenQueueViews();
   }
   invalidateQueuedAnnotationPaths(path6) {
     if (!path6) return;
     this.localPromptQueue = invalidateLocalPromptPaths(this.localPromptQueue, path6);
     this.localPromptSteering = invalidateLocalPromptPaths(this.localPromptSteering, path6);
     this.saveThreadHistory();
+    this.refreshOpenQueueViews();
+  }
+  refreshOpenQueueViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
+      const view =
+        /** @type {any} */
+        leaf.view;
+      view?.refreshLocalPromptQueue?.();
+    }
   }
   enqueueLocalPrompt(item) {
     this.localPromptQueue = enqueueLocalPrompt(this.localPromptQueue, item);

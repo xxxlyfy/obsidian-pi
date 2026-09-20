@@ -930,12 +930,20 @@ export class PiAgentPlugin extends P.Plugin {
     this.localPromptQueue = migrateLocalPromptPaths(this.localPromptQueue, oldPath, newPath);
     this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
     this.saveThreadHistory();
+    this.refreshOpenQueueViews();
   }
   invalidateQueuedAnnotationPaths(path) {
     if (!path) return;
     this.localPromptQueue = invalidateLocalPromptPaths(this.localPromptQueue, path);
     this.localPromptSteering = invalidateLocalPromptPaths(this.localPromptSteering, path);
     this.saveThreadHistory();
+    this.refreshOpenQueueViews();
+  }
+  refreshOpenQueueViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
+      const view = /** @type {any} */ (leaf.view);
+      view?.refreshLocalPromptQueue?.();
+    }
   }
   enqueueLocalPrompt(item) {
     this.localPromptQueue = enqueueLocalPrompt(this.localPromptQueue, item);

@@ -127,4 +127,20 @@ describe("per-thread live run UI state", () => {
     expect(runB.activity).toBeUndefined();
     expect(runB.contextUsage).toBeUndefined();
   });
+
+  it("refreshes the view queue from plugin state after a path migration", () => {
+    const view = {
+      promptQueue: [{ id: "stale" }],
+      running: true,
+      plugin: { getLocalPromptQueue: () => [{ id: "fresh" }] },
+      renderPromptQueue: vi.fn(),
+      setRunningState: vi.fn()
+    };
+
+    PiAgentView.prototype.refreshLocalPromptQueue.call(view);
+
+    expect(view.promptQueue).toEqual([{ id: "fresh" }]);
+    expect(view.renderPromptQueue).toHaveBeenCalledOnce();
+    expect(view.setRunningState).toHaveBeenCalledWith(true);
+  });
 });

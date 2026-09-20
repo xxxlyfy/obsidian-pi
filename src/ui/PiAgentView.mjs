@@ -790,6 +790,11 @@ export class PiAgentView extends f.ItemView {
   renderThreadListIfVisible() {
     if (this.showingThreadList) this.renderThreadList();
   }
+  refreshLocalPromptQueue() {
+    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.renderPromptQueue();
+    this.setRunningState(this.running);
+  }
   restoreActiveRunUiState() {
     const threadId = this.getCurrentThreadId();
     const run = threadId ? this.activeRuns.get(threadId) : undefined;
