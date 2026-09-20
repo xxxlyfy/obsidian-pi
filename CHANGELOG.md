@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.24
+
+- Fixed the composer **Think** and **Mode** controls not reflecting changes: the in-place refresh called its icon helper without the control, which threw and aborted every label update. The Think menu now also labels the Pi default option distinctly (for example "默认（中）") so it is no longer duplicated with an explicit level such as "中".
+
 ## 0.0.23
 
 - Removed the flash when changing **Model**, **Think**, or **Mode** from the composer: the run settings controls now update their label and icon in place instead of rebuilding the whole row, and the model/thinking menus no longer show a transient loading label or refetch the catalog when it is already cached.

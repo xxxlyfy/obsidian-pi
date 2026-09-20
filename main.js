@@ -7721,7 +7721,7 @@ var RunSettingsControls = class {
     control.labelEl.setText(label);
     control.buttonEl.setAttr("aria-label", `${name}: ${label}`);
     control.buttonEl.setAttr("title", `${name}: ${label}`);
-    this.renderControlIcon(control.iconEl, icon);
+    this.renderControlIcon(control.iconEl, icon, control);
   }
   populate(containerEl) {
     this.addPickerSetting(
@@ -7763,9 +7763,10 @@ var RunSettingsControls = class {
         await this.ensureCatalog();
         const menu = new import_obsidian15.Menu();
         for (const [value, label] of Object.entries(getReasoningOptions(this.plugin.settings))) {
+          const title = value === "" ? `\u9ED8\u8BA4\uFF08${label}\uFF09` : label;
           menu.addItem((menuItem) =>
             menuItem
-              .setTitle(label)
+              .setTitle(title)
               .setChecked(this.plugin.settings.reasoningEffort === value)
               .onClick(async () => {
                 this.plugin.settings.reasoningEffort = value;
@@ -7844,6 +7845,7 @@ var RunSettingsControls = class {
     });
   }
   renderControlIcon(iconEl, icon, control) {
+    if (!control) return;
     const key = icon?.provider ? `provider:${icon.provider}` : `icon:${icon}`;
     if (control.iconKey === key && iconEl.childElementCount > 0) return;
     control.iconKey = key;
