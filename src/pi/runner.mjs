@@ -153,8 +153,10 @@ export class PiRunner {
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
+    let client;
     try {
-      const { client, session } = await this.getOrCreateRpcClient(sessionId);
+      let session;
+      ({ client, session } = await this.getOrCreateRpcClient(sessionId));
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
       const runtimeState = await client.request("get_state").catch(() => undefined);
@@ -168,6 +170,7 @@ export class PiRunner {
         settleRun = resolve;
         rejectRun = reject;
       });
+      completion.catch(() => {});
       const updateRunState = (nextRunState) => {
         if (nextRunState) runState = { ...runState, ...nextRunState };
       };
@@ -219,6 +222,13 @@ export class PiRunner {
     } catch (error) {
       if (this.cancelRequested || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
+      if (error?.piRpcUncertain) {
+        await this.recoverUncertainRpcClient(client);
+        throw new Error(
+          `Pi RPC ${error.piRpcRequestType ?? "request"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          { cause: error }
+        );
+      }
       throw error;
     } finally {
       this.cancelRequested = false;
@@ -227,13 +237,36 @@ export class PiRunner {
     }
   }
 
+  async recoverUncertainRpcClient(client) {
+    if (!client) return;
+    await client.abort?.();
+    client.dispose?.();
+    await client.waitForExit?.();
+    if (this.rpcClient === client) {
+      this.rpcClient = undefined;
+      this.rpcSession = undefined;
+    }
+  }
+
   async steer(prompt, images = []) {
     if (!this.isRunning || !this.rpcClient) throw new Error("This agent run has already settled.");
+    const client = this.rpcClient;
     const rpcImages = toRpcImages(images);
-    await this.rpcClient.request("steer", {
-      message: String(prompt || ""),
-      ...(rpcImages.length > 0 ? { images: rpcImages } : {})
-    });
+    try {
+      await client.request("steer", {
+        message: String(prompt || ""),
+        ...(rpcImages.length > 0 ? { images: rpcImages } : {})
+      });
+    } catch (error) {
+      if (error?.piRpcUncertain) {
+        await this.recoverUncertainRpcClient(client);
+        throw new Error(
+          `Pi RPC ${error.piRpcRequestType ?? "steer"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          { cause: error }
+        );
+      }
+      throw error;
+    }
   }
 
   runPiCli(prompt, sessionId, callbacks) {

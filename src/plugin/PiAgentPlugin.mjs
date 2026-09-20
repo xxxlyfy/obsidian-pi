@@ -833,7 +833,6 @@ export class PiAgentPlugin extends P.Plugin {
     if (!i) throw new Error("Pi runner is not available.");
     let l = getPriorThreadHistory(o.messages, e);
     if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
-    if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
     a &&
       ((p = t == null ? void 0 : t.onEvent) == null ||
         p.call(t, {
@@ -1006,8 +1005,17 @@ export class PiAgentPlugin extends P.Plugin {
   }
   async consumeAnnotationsForPrompt(sourcePath) {
     this.annotationController?.cancelPick();
-    const explicitFile = sourcePath ? this.app.vault.getAbstractFileByPath(sourcePath) : undefined;
-    const file = explicitFile instanceof P.TFile ? explicitFile : this.getCurrentContextFile();
+    if (sourcePath) {
+      const explicitFile = this.app.vault.getAbstractFileByPath(sourcePath);
+      if (!(explicitFile instanceof P.TFile) || explicitFile.extension !== "md") {
+        new P.Notice("The annotated note no longer exists. Its annotations were not sent.");
+        return [];
+      }
+      const annotations = await this.getAnnotationsForContext(explicitFile.path);
+      if (annotations.length > 0) this.annotationStore.deletePath(explicitFile.path);
+      return annotations;
+    }
+    const file = this.getCurrentContextFile();
     if (!file) return [];
     const annotations = await this.getAnnotationsForContext(file.path);
     if (annotations.length > 0) this.annotationStore.deletePath(file.path);

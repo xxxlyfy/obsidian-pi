@@ -537,4 +537,86 @@ describe("PiRunner", () => {
     expect(runner.resolveSessionPath(foreignSessionPath)).toBeUndefined();
     expect(runner.resolveSessionPath("../foreign.jsonl")).toBeUndefined();
   });
+
+  it("restarts the RPC client when a stateful prompt request times out", async () => {
+    const listeners = new Set();
+    const rpcClient = {
+      start: vi.fn(async () => {}),
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async request(type) {
+        if (type === "get_state") return undefined;
+        const error = new Error("Pi RPC prompt timed out after 30000ms.");
+        error.piRpcUncertain = true;
+        error.piRpcRequestType = "prompt";
+        throw error;
+      },
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(),
+      waitForExit: vi.fn(async () => {})
+    };
+    const runner = new PiRunner(
+      DEFAULT_SETTINGS,
+      { formatPrompt: (prompt) => prompt },
+      "/vault",
+      createTempDir(),
+      rpcClient
+    );
+
+    await expect(runner.runPiRpc("hello", undefined)).rejects.toThrow(
+      "Pi RPC prompt timed out. The agent process was restarted"
+    );
+
+    expect(rpcClient.abort).toHaveBeenCalledOnce();
+    expect(rpcClient.dispose).toHaveBeenCalledOnce();
+    expect(rpcClient.waitForExit).toHaveBeenCalledOnce();
+    expect(runner.rpcClient).toBeUndefined();
+    expect(runner.isRunning).toBe(false);
+  });
+
+  it("ends the active run when a steer request times out", async () => {
+    const listeners = new Set();
+    const requests = [];
+    const rpcClient = {
+      start: vi.fn(async () => {}),
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      request(type) {
+        requests.push(type);
+        if (type === "get_state") return Promise.resolve(undefined);
+        if (type === "prompt") return Promise.resolve();
+        const error = new Error("Pi RPC steer timed out after 30000ms.");
+        error.piRpcUncertain = true;
+        error.piRpcRequestType = "steer";
+        return Promise.reject(error);
+      },
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(() => {
+        for (const listener of listeners) {
+          listener({ type: "rpc_exit", error: "Pi RPC client disposed." });
+        }
+      }),
+      waitForExit: vi.fn(async () => {})
+    };
+    const runner = new PiRunner(
+      DEFAULT_SETTINGS,
+      { formatPrompt: (prompt) => prompt },
+      "/vault",
+      createTempDir(),
+      rpcClient
+    );
+
+    const run = runner.runPiRpc("inspect", undefined);
+    await vi.waitFor(() => expect(requests).toContain("prompt"));
+
+    await expect(runner.steer("again")).rejects.toThrow("Pi RPC steer timed out");
+    await expect(run).rejects.toThrow("Pi RPC client disposed.");
+
+    expect(rpcClient.dispose).toHaveBeenCalledOnce();
+    expect(runner.rpcClient).toBeUndefined();
+  });
 });

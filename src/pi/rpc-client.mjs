@@ -7,6 +7,7 @@ import { isExtensionUiDialog, isExtensionUiMethod } from "./extension-ui.mjs";
 import { MINIMUM_PI_VERSION } from "./health.mjs";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const STATEFUL_REQUEST_TYPES = new Set(["prompt", "steer"]);
 const nodeTimerHost = { setTimeout: setNodeTimeout, clearTimeout: clearNodeTimeout };
 
 function resolveActiveWindow() {
@@ -44,10 +45,31 @@ export class PiRpcClient {
     this.decoder = new StringDecoder("utf8");
     this.timerHost = options.hostWindow;
     this.disposed = false;
+    this.uncertainRequest = undefined;
   }
 
   get running() {
     return !!this.child && this.child.exitCode === null && !this.child.killed;
+  }
+
+  isUncertain() {
+    return this.uncertainRequest !== undefined;
+  }
+
+  waitForExit(timeoutMs = 2_000) {
+    const child = this.child;
+    if (!child || child.exitCode !== null) return Promise.resolve();
+    const timerHost = this.timerHost ?? resolveActiveWindow() ?? nodeTimerHost;
+    return new Promise((resolve) => {
+      let timer;
+      const finish = () => {
+        if (timer) timerHost.clearTimeout(timer);
+        child.removeListener("close", finish);
+        resolve();
+      };
+      timer = timerHost.setTimeout(finish, timeoutMs);
+      child.once("close", finish);
+    });
   }
 
   subscribe(listener) {
@@ -127,7 +149,13 @@ export class PiRpcClient {
         timeoutMs > 0
           ? timerHost.setTimeout(() => {
               this.pending.delete(id);
-              reject(new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`));
+              const error = new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`);
+              if (STATEFUL_REQUEST_TYPES.has(type)) {
+                this.uncertainRequest = { id, type };
+                error.piRpcUncertain = true;
+                error.piRpcRequestType = type;
+              }
+              reject(error);
             }, timeoutMs)
           : undefined;
 
@@ -302,9 +330,7 @@ export class PiRpcClient {
   dispose() {
     this.disposed = true;
     this.terminate();
+    this.handleExit(new Error("Pi RPC client disposed."));
     this.listeners.clear();
-    const error = new Error("Pi RPC client disposed.");
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
   }
 }

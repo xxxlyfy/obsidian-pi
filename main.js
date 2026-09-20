@@ -3244,6 +3244,7 @@ function isExtensionUiMethod(method) {
 
 // src/pi/rpc-client.mjs
 var DEFAULT_REQUEST_TIMEOUT_MS = 3e4;
+var STATEFUL_REQUEST_TYPES = /* @__PURE__ */ new Set(["prompt", "steer"]);
 var nodeTimerHost = {
   setTimeout: import_node_timers.setTimeout,
   clearTimeout: import_node_timers.clearTimeout
@@ -3276,9 +3277,28 @@ var PiRpcClient = class {
     this.decoder = new import_node_string_decoder.StringDecoder("utf8");
     this.timerHost = options.hostWindow;
     this.disposed = false;
+    this.uncertainRequest = void 0;
   }
   get running() {
     return !!this.child && this.child.exitCode === null && !this.child.killed;
+  }
+  isUncertain() {
+    return this.uncertainRequest !== void 0;
+  }
+  waitForExit(timeoutMs = 2e3) {
+    const child = this.child;
+    if (!child || child.exitCode !== null) return Promise.resolve();
+    const timerHost = this.timerHost ?? resolveActiveWindow3() ?? nodeTimerHost;
+    return new Promise((resolve) => {
+      let timer;
+      const finish = () => {
+        if (timer) timerHost.clearTimeout(timer);
+        child.removeListener("close", finish);
+        resolve();
+      };
+      timer = timerHost.setTimeout(finish, timeoutMs);
+      child.once("close", finish);
+    });
   }
   subscribe(listener) {
     this.listeners.add(listener);
@@ -3353,7 +3373,13 @@ var PiRpcClient = class {
         timeoutMs > 0
           ? timerHost.setTimeout(() => {
               this.pending.delete(id);
-              reject(new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`));
+              const error = new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`);
+              if (STATEFUL_REQUEST_TYPES.has(type)) {
+                this.uncertainRequest = { id, type };
+                error.piRpcUncertain = true;
+                error.piRpcRequestType = type;
+              }
+              reject(error);
             }, timeoutMs)
           : void 0;
       this.pending.set(id, {
@@ -3513,10 +3539,8 @@ var PiRpcClient = class {
   dispose() {
     this.disposed = true;
     this.terminate();
+    this.handleExit(new Error("Pi RPC client disposed."));
     this.listeners.clear();
-    const error = new Error("Pi RPC client disposed.");
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
   }
 };
 
@@ -4424,8 +4448,10 @@ var PiRunner = class {
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
+    let client;
     try {
-      const { client, session } = await this.getOrCreateRpcClient(sessionId);
+      let session;
+      ({ client, session } = await this.getOrCreateRpcClient(sessionId));
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       const runtimeState = await client.request("get_state").catch(() => void 0);
       const events = [];
@@ -4438,6 +4464,7 @@ var PiRunner = class {
         settleRun = resolve;
         rejectRun = reject;
       });
+      completion.catch(() => {});
       const updateRunState = (nextRunState) => {
         if (nextRunState) runState = { ...runState, ...nextRunState };
       };
@@ -4487,6 +4514,13 @@ var PiRunner = class {
     } catch (error) {
       if (this.cancelRequested || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
+      if (error?.piRpcUncertain) {
+        await this.recoverUncertainRpcClient(client);
+        throw new Error(
+          `Pi RPC ${error.piRpcRequestType ?? "request"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          { cause: error }
+        );
+      }
       throw error;
     } finally {
       this.cancelRequested = false;
@@ -4494,13 +4528,35 @@ var PiRunner = class {
       unsubscribe();
     }
   }
+  async recoverUncertainRpcClient(client) {
+    if (!client) return;
+    await client.abort?.();
+    client.dispose?.();
+    await client.waitForExit?.();
+    if (this.rpcClient === client) {
+      this.rpcClient = void 0;
+      this.rpcSession = void 0;
+    }
+  }
   async steer(prompt, images = []) {
     if (!this.isRunning || !this.rpcClient) throw new Error("This agent run has already settled.");
+    const client = this.rpcClient;
     const rpcImages = toRpcImages(images);
-    await this.rpcClient.request("steer", {
-      message: String(prompt || ""),
-      ...(rpcImages.length > 0 ? { images: rpcImages } : {})
-    });
+    try {
+      await client.request("steer", {
+        message: String(prompt || ""),
+        ...(rpcImages.length > 0 ? { images: rpcImages } : {})
+      });
+    } catch (error) {
+      if (error?.piRpcUncertain) {
+        await this.recoverUncertainRpcClient(client);
+        throw new Error(
+          `Pi RPC ${error.piRpcRequestType ?? "steer"} timed out. The agent process was restarted to avoid overlapping runs.`,
+          { cause: error }
+        );
+      }
+      throw error;
+    }
   }
   runPiCli(prompt, sessionId, callbacks) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
@@ -10966,7 +11022,6 @@ var PiAgentPlugin = class extends P.Plugin {
     if (!i) throw new Error("Pi runner is not available.");
     let l = getPriorThreadHistory(o.messages, e);
     if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
-    if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
     a &&
       ((p = t == null ? void 0 : t.onEvent) == null ||
         p.call(t, {
@@ -11140,8 +11195,17 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   async consumeAnnotationsForPrompt(sourcePath) {
     this.annotationController?.cancelPick();
-    const explicitFile = sourcePath ? this.app.vault.getAbstractFileByPath(sourcePath) : void 0;
-    const file = explicitFile instanceof P.TFile ? explicitFile : this.getCurrentContextFile();
+    if (sourcePath) {
+      const explicitFile = this.app.vault.getAbstractFileByPath(sourcePath);
+      if (!(explicitFile instanceof P.TFile) || explicitFile.extension !== "md") {
+        new P.Notice("The annotated note no longer exists. Its annotations were not sent.");
+        return [];
+      }
+      const annotations2 = await this.getAnnotationsForContext(explicitFile.path);
+      if (annotations2.length > 0) this.annotationStore.deletePath(explicitFile.path);
+      return annotations2;
+    }
+    const file = this.getCurrentContextFile();
     if (!file) return [];
     const annotations = await this.getAnnotationsForContext(file.path);
     if (annotations.length > 0) this.annotationStore.deletePath(file.path);

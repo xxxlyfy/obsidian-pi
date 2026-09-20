@@ -13,10 +13,7 @@ describe("PiRpcClient protocol framing", () => {
     client.handleStdoutChunk(bytes.subarray(17, 31));
     client.handleStdoutChunk(bytes.subarray(31));
 
-    expect(events).toEqual([
-      { type: "notice", text: "a b c" },
-      { type: "agent_settled" }
-    ]);
+    expect(events).toEqual([{ type: "notice", text: "a b c" }, { type: "agent_settled" }]);
   });
 
   it("correlates responses without emitting them as events", () => {
@@ -78,5 +75,58 @@ describe("PiRpcClient protocol framing", () => {
     client.subscribe((event) => events.push(event));
     client.handleLine("not json");
     expect(events).toEqual([{ type: "rpc_parse_error", raw: "not json" }]);
+  });
+
+  it("marks timed out stateful requests as uncertain", async () => {
+    const client = new PiRpcClient();
+    client.child = {
+      exitCode: null,
+      killed: false,
+      kill: () => {},
+      stdin: { writable: true, write: () => {} }
+    };
+
+    const error = await client
+      .request("prompt", { message: "hello" }, { timeoutMs: 5 })
+      .catch((caught) => caught);
+
+    expect(error.piRpcUncertain).toBe(true);
+    expect(error.piRpcRequestType).toBe("prompt");
+    expect(client.isUncertain()).toBe(true);
+  });
+
+  it("does not mark read-only request timeouts as uncertain", async () => {
+    const client = new PiRpcClient();
+    client.child = {
+      exitCode: null,
+      killed: false,
+      kill: () => {},
+      stdin: { writable: true, write: () => {} }
+    };
+
+    const error = await client.request("get_state", {}, { timeoutMs: 5 }).catch((caught) => caught);
+
+    expect(error.piRpcUncertain).toBeUndefined();
+    expect(client.isUncertain()).toBe(false);
+  });
+
+  it("fails in-flight requests and emits an exit event when disposed", async () => {
+    const client = new PiRpcClient();
+    const events = [];
+    client.subscribe((event) => events.push(event));
+    client.child = {
+      exitCode: null,
+      killed: false,
+      kill: () => {},
+      stdin: { writable: true, write: () => {} }
+    };
+
+    const pending = client.request("hang", {}, { timeoutMs: 0 });
+    client.dispose();
+
+    await expect(pending).rejects.toThrow("Pi RPC client disposed.");
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "rpc_exit", error: "Pi RPC client disposed." })
+    );
   });
 });
