@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.0.28
+
+- Fixed annotation sends silently falling back to the currently open note when the annotated note was renamed or deleted: the prompt now shows a notice and leaves the other note's annotations untouched instead of consuming the wrong note's annotations.
+- Pi RPC `prompt` and `steer` requests that time out are now treated as uncertain: the run aborts the agent and restarts the Pi process, so a timed-out run can no longer overlap the next one, and disposing the RPC client now ends in-flight runs instead of leaving them hanging.
+- Restored semantic names in `PiAgentPlugin` and `PiAgentView` (previously decompiled-style `e`/`t`/`n` identifiers), removed the duplicated cancellation check, and regenerated `main.js`.
+- Added staged `checkJs` type checking for the core modules (`pi`, `threads`, `annotations`, `context`, `shared`) as `typecheck:core`, wired into `npm run ci`.
+- Made the skill-path tests platform-agnostic so `npm test` passes on Windows as well as Linux.
+
 ## 0.0.27
 
 - Hardened the plugin after a full code review: settings saves that fail now surface a notice instead of an unhandled promise rejection, and fire-and-forget prompt actions (composer, command palette, prompt queue, annotations, message actions, and modals) report failures through a notice instead of failing silently.
