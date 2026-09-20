@@ -81,10 +81,10 @@ describe("annotation processing UX", () => {
   });
 
   it("starts processing with execution and clears it on mutation or run settlement", () => {
-    expect(viewSource).toContain("this.plugin.beginAnnotationProcessing(t, annotations)");
-    expect(viewSource).toContain("handleSuccessfulToolMutation(o, t)");
+    expect(viewSource).toContain("this.plugin.beginAnnotationProcessing(threadId, annotations)");
+    expect(viewSource).toContain("handleSuccessfulToolMutation(event, threadId)");
     expect(viewSource).toContain("completeAnnotationProcessingForPath(threadId, file.path)");
-    expect(viewSource).toContain("endAnnotationProcessingForThread(t)");
+    expect(viewSource).toContain("endAnnotationProcessingForThread(threadId)");
     expect(viewSource).toContain("restoreUnsentAnnotations");
     expect(queueSource).toContain("restoreConsumedAnnotations(item.annotations)");
   });
