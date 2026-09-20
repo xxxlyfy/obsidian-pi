@@ -6,6 +6,8 @@ import {
   resolveSkillPath
 } from "../src/context/skills.mjs";
 
+const vault = path.resolve("/vault");
+
 describe("configured skill paths", () => {
   it("normalizes explicitly configured paths", () => {
     expect(normalizeSkillFolderList(".pi/skills\n/opt/trusted-skills, ./more")).toEqual([
@@ -16,16 +18,14 @@ describe("configured skill paths", () => {
     expect(
       getConfiguredSkillPaths(
         { additionalSkillFolders: [".pi/skills", "/opt/trusted-skills"] },
-        "/vault"
+        vault
       )
-    ).toEqual([path.join("/vault", ".pi/skills"), path.normalize("/opt/trusted-skills")]);
+    ).toEqual([path.join(vault, ".pi/skills"), path.normalize("/opt/trusted-skills")]);
   });
 
   it("rejects home expansion and vault-relative traversal", () => {
-    expect(resolveSkillPath("~/skills", "/vault")).toBe("");
-    expect(resolveSkillPath("../outside", "/vault")).toBe("");
-    expect(resolveSkillPath("relative/skill", "/vault")).toBe(
-      path.join("/vault", "relative/skill")
-    );
+    expect(resolveSkillPath("~/skills", vault)).toBe("");
+    expect(resolveSkillPath("../outside", vault)).toBe("");
+    expect(resolveSkillPath("relative/skill", vault)).toBe(path.join(vault, "relative/skill"));
   });
 });

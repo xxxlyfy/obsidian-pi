@@ -50,7 +50,7 @@ describe("PiRunner", () => {
       "high",
       "--no-skills",
       "--skill",
-      path.join("/vault", ".pi/skills")
+      path.join(path.resolve("/vault"), ".pi/skills")
     ]);
 
     const defaultArgs = createRunner({

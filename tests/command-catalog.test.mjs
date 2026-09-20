@@ -34,10 +34,11 @@ describe("Pi RPC command catalog", () => {
   });
 
   it("passes only explicit additional skill paths alongside Pi discovery", () => {
+    const vault = path.resolve("/vault");
     expect(
       buildCommandDiscoveryArgs(
         { includeDefaultSkills: false, additionalSkillFolders: ["skills"] },
-        "/vault"
+        vault
       )
     ).toEqual([
       "--mode",
@@ -46,7 +47,7 @@ describe("Pi RPC command catalog", () => {
       "--no-tools",
       "--no-skills",
       "--skill",
-      path.join("/vault", "skills")
+      path.join(vault, "skills")
     ]);
   });
 });
