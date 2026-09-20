@@ -5144,6 +5144,47 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     });
   }
 };
+var ToolModePickerModal = class extends import_obsidian5.SuggestModal {
+  constructor(app, settings, onChoose) {
+    super(app);
+    this.settings = settings;
+    this.onChoose = onChoose;
+    this.emptyStateText = "No Pi tool modes available.";
+    this.setPlaceholder("Choose tool mode\u2026");
+    this.setInstructions([
+      { command: "\u2191\u2193", purpose: "navigate" },
+      { command: "\u21B5", purpose: "select" },
+      { command: "esc", purpose: "close" }
+    ]);
+  }
+  getSuggestions(query) {
+    const normalized = query.trim().toLowerCase();
+    return this.getItems().filter((item) =>
+      `${item.primary} ${item.secondary}`.toLowerCase().includes(normalized)
+    );
+  }
+  getItems() {
+    return Object.entries(getToolModeOptions()).map(([value, label]) => {
+      const [primary, ...rest] = String(label).split(" \u2014 ");
+      return { value, primary, secondary: rest.join(" \u2014 ") };
+    });
+  }
+  renderSuggestion(item, el) {
+    el.createDiv({ cls: "pi-agent-suggestion-title", text: item.primary });
+    if (item.secondary) {
+      el.createDiv({ cls: "pi-agent-suggestion-detail", text: item.secondary });
+    }
+    el.setAttribute(
+      "aria-label",
+      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.sandboxMode === item.value ? ", selected" : ""}`
+    );
+  }
+  onChooseSuggestion(item) {
+    Promise.resolve(this.onChoose(item.value)).catch((error) => {
+      new import_obsidian5.Notice(error instanceof Error ? error.message : String(error));
+    });
+  }
+};
 function formatEffectiveModel(settings) {
   const slug = settings.model || settings.effectiveModel;
   const model = settings.availableModels.find((candidate) => candidate.slug === slug);
@@ -7651,6 +7692,45 @@ function formatActiveToolStatus() {
 
 // src/ui/run-settings.mjs
 var import_obsidian15 = require("obsidian");
+
+// src/ui/view/run-metadata.mjs
+function getCurrentRunMetadata(settings, runtimeState) {
+  return {
+    model: getDisplayedModel(settings, runtimeState),
+    reasoning:
+      runtimeState?.thinkingLevel ||
+      settings.reasoningEffort ||
+      settings.effectiveReasoning ||
+      "Pi default",
+    toolMode: settings.sandboxMode,
+    toolModeLabel: formatToolModeLabel(settings.sandboxMode)
+  };
+}
+function formatToolModeLabel(toolMode) {
+  return toolMode === "chat"
+    ? "Chat"
+    : toolMode === "edit" || toolMode === "workspace-write"
+      ? "Edit"
+      : toolMode === "full-agent"
+        ? "Full agent"
+        : "Review";
+}
+function getDisplayedModel(settings, runtimeState) {
+  const runtimeSlug = runtimeState?.model
+    ? `${runtimeState.model.provider}/${runtimeState.model.id}`
+    : "";
+  if (runtimeSlug) {
+    const runtimeModel = settings.availableModels?.find(
+      (candidate) => candidate.slug === runtimeSlug
+    );
+    return runtimeModel?.displayName || runtimeState.model.name || runtimeSlug;
+  }
+  if (settings.model === CUSTOM_MODEL_VALUE) return settings.customModel || "Custom";
+  const model = settings.availableModels?.find((candidate) => candidate.slug === settings.model);
+  return model?.displayName || settings.model || "Pi default";
+}
+
+// src/ui/run-settings.mjs
 var RunSettingsControls = class {
   constructor(plugin) {
     this.plugin = plugin;
@@ -7665,6 +7745,36 @@ var RunSettingsControls = class {
     this.populate(this.row);
   }
   populate(containerEl) {
+    this.addPickerSetting(
+      containerEl,
+      "Mode",
+      this.getToolModeIcon(),
+      this.getToolModeLabel(),
+      async () => {
+        new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
+          if (value === this.plugin.settings.sandboxMode) return;
+          if (
+            (value === "edit" || value === "full-agent" || value === "workspace-write") &&
+            !this.plugin.settings.acknowledgedToolRisk &&
+            !(await confirmWithModal(this.plugin.app, {
+              title: "Enable write tools?",
+              message:
+                "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
+              confirmText: "Enable tools",
+              warning: true
+            }))
+          ) {
+            return;
+          }
+          this.plugin.settings.sandboxMode = value;
+          if (value === "edit" || value === "full-agent" || value === "workspace-write") {
+            this.plugin.settings.acknowledgedToolRisk = true;
+          }
+          await this.plugin.saveSettings();
+          this.plugin.refreshOpenModelControls();
+        }).open();
+      }
+    );
     this.addPickerSetting(
       containerEl,
       "Model",
@@ -7747,6 +7857,19 @@ var RunSettingsControls = class {
       effective?.slug?.split("/")[0] ||
       this.plugin.settings.effectiveModel.split("/")[0]
     );
+  }
+  getToolModeLabel() {
+    return formatToolModeLabel(this.plugin.settings.sandboxMode);
+  }
+  getToolModeIcon() {
+    const mode = this.plugin.settings.sandboxMode;
+    return mode === "chat"
+      ? "message-square"
+      : mode === "edit" || mode === "workspace-write"
+        ? "pencil"
+        : mode === "full-agent"
+          ? "terminal"
+          : "book-open";
   }
   formatDefaultReasoningLabel() {
     const reasoning = getResolvedReasoning(this.plugin.settings);
@@ -7971,43 +8094,6 @@ var ThreadActions = class {
     }
   }
 };
-
-// src/ui/view/run-metadata.mjs
-function getCurrentRunMetadata(settings, runtimeState) {
-  return {
-    model: getDisplayedModel(settings, runtimeState),
-    reasoning:
-      runtimeState?.thinkingLevel ||
-      settings.reasoningEffort ||
-      settings.effectiveReasoning ||
-      "Pi default",
-    toolMode: settings.sandboxMode,
-    toolModeLabel: formatToolModeLabel(settings.sandboxMode)
-  };
-}
-function formatToolModeLabel(toolMode) {
-  return toolMode === "chat"
-    ? "Chat"
-    : toolMode === "edit" || toolMode === "workspace-write"
-      ? "Edit"
-      : toolMode === "full-agent"
-        ? "Full agent"
-        : "Review";
-}
-function getDisplayedModel(settings, runtimeState) {
-  const runtimeSlug = runtimeState?.model
-    ? `${runtimeState.model.provider}/${runtimeState.model.id}`
-    : "";
-  if (runtimeSlug) {
-    const runtimeModel = settings.availableModels?.find(
-      (candidate) => candidate.slug === runtimeSlug
-    );
-    return runtimeModel?.displayName || runtimeState.model.name || runtimeSlug;
-  }
-  if (settings.model === CUSTOM_MODEL_VALUE) return settings.customModel || "Custom";
-  const model = settings.availableModels?.find((candidate) => candidate.slug === settings.model);
-  return model?.displayName || settings.model || "Pi default";
-}
 
 // src/ui/send-state.mjs
 function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {

@@ -4,8 +4,14 @@ import {
   getResolvedReasoning,
   getSelectedModelInfo
 } from "../plugin/settings.mjs";
-import { ModelPickerModal, ThinkingPickerModal } from "./modals/model-picker-modal.mjs";
+import { confirmWithModal } from "./modals/confirm-modal.mjs";
+import {
+  ModelPickerModal,
+  ThinkingPickerModal,
+  ToolModePickerModal
+} from "./modals/model-picker-modal.mjs";
 import { renderProviderIcon } from "./provider-icons.mjs";
+import { formatToolModeLabel } from "./view/run-metadata.mjs";
 
 export class RunSettingsControls {
   constructor(plugin) {
@@ -24,6 +30,37 @@ export class RunSettingsControls {
   }
 
   populate(containerEl) {
+    this.addPickerSetting(
+      containerEl,
+      "Mode",
+      this.getToolModeIcon(),
+      this.getToolModeLabel(),
+      async () => {
+        new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
+          if (value === this.plugin.settings.sandboxMode) return;
+          if (
+            (value === "edit" || value === "full-agent" || value === "workspace-write") &&
+            !this.plugin.settings.acknowledgedToolRisk &&
+            !(await confirmWithModal(this.plugin.app, {
+              title: "Enable write tools?",
+              message:
+                "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
+              confirmText: "Enable tools",
+              warning: true
+            }))
+          ) {
+            return;
+          }
+          this.plugin.settings.sandboxMode = value;
+          if (value === "edit" || value === "full-agent" || value === "workspace-write") {
+            this.plugin.settings.acknowledgedToolRisk = true;
+          }
+          await this.plugin.saveSettings();
+          this.plugin.refreshOpenModelControls();
+        }).open();
+      }
+    );
+
     this.addPickerSetting(
       containerEl,
       "Model",
@@ -111,6 +148,21 @@ export class RunSettingsControls {
       effective?.slug?.split("/")[0] ||
       this.plugin.settings.effectiveModel.split("/")[0]
     );
+  }
+
+  getToolModeLabel() {
+    return formatToolModeLabel(this.plugin.settings.sandboxMode);
+  }
+
+  getToolModeIcon() {
+    const mode = this.plugin.settings.sandboxMode;
+    return mode === "chat"
+      ? "message-square"
+      : mode === "edit" || mode === "workspace-write"
+        ? "pencil"
+        : mode === "full-agent"
+          ? "terminal"
+          : "book-open";
   }
 
   formatDefaultReasoningLabel() {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.15
+
+- Added a **Mode** control to the chat composer, next to **Model** and **Think**, so the Pi tool mode (Chat, Review, Edit, Full agent) can be switched without opening plugin settings. The picker shows the same options and the same one-time write-tools confirmation as the settings tab, and the change applies to subsequent runs.
+
 ## 0.0.14
 
 - Smoothed long agent responses by throttling live streaming updates and rendering streaming text as plain text instead of re-parsing the entire answer through Obsidian's Markdown renderer on every token, which was stalling the main thread and freezing the UI during long runs. Completed responses are still rendered as full Markdown.
