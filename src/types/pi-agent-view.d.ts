@@ -34,6 +34,8 @@ declare module "../ui/PiAgentView.mjs" {
     flushPendingActivity(): void;
     updateActivityDom(): boolean;
     captureContextUsage(event: any): void;
+    syncRunActivity(): void;
+    syncRunContextUsage(): void;
     getContextUsageForTokens(tokenUsage: any): any;
     handleRunEvent(event: any): void;
     normalizeRunEventType(type: string): string;

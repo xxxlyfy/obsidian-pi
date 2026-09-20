@@ -39,6 +39,25 @@ export function applyActivity(text, kind, detail = "", stickyUntil = 0) {
     this.clearPendingActivityTimer();
   }
   if (!isUnchanged && !this.updateActivityDom()) this.renderMessages();
+  this.syncRunActivity();
+}
+
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
+export function syncRunActivity() {
+  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : undefined;
+  if (run)
+    run.activity = {
+      text: this.activityText,
+      kind: this.activityKind,
+      detail: this.activityDetail,
+      stickyUntil: this.activityStickyUntil
+    };
+}
+
+/** @this {import("./PiAgentView.mjs").PiAgentView} */
+export function syncRunContextUsage() {
+  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : undefined;
+  if (run) run.contextUsage = this.currentRunContextUsage;
 }
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
@@ -107,6 +126,7 @@ export function captureContextUsage(event) {
   if (contextUsage) {
     if (this.runningThreadId) this.invalidatedContextThreadIds.delete(this.runningThreadId);
     this.currentRunContextUsage = { contextUsage, tokenUsage };
+    this.syncRunContextUsage();
     this.updateActivityDom();
     this.renderToolBadges();
   }
@@ -149,6 +169,7 @@ export function handleRunEvent(event) {
       : "";
     if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
     this.currentRunContextUsage = undefined;
+    this.syncRunContextUsage();
     this.renderToolBadges();
     this.setActivity("Compacting context", "context", detail);
     return;
@@ -168,6 +189,7 @@ export function handleRunEvent(event) {
       compacted: true,
       contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow
     };
+    this.syncRunContextUsage();
     this.renderToolBadges();
     this.setActivity(
       event.raw && event.raw.willRetry ? "Compacted context, retrying" : "Finishing",

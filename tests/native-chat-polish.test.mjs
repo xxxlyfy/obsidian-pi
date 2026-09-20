@@ -244,6 +244,11 @@ describe("native chat polish", () => {
     expect(viewSource).toContain("this.liveThinkingSetExpanded?.(run.thinkingExpanded)");
   });
 
+  it("keeps live run output per thread so switching back restores it", () => {
+    expect(viewSource).toContain("run.assistantContent += delta");
+    expect(viewSource).toContain("this.restoreActiveRunUiState()");
+  });
+
   it("keeps guarded bulk deletion directly visible and removes archive-all", () => {
     expect(threadListSource).toContain('setIcon)(deleteChatsButton, "trash-2")');
     expect(threadListSource).toContain('"aria-label": "Delete chats"');

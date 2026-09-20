@@ -7417,6 +7417,8 @@ __export(run_activity_state_exports, {
   queuePendingActivity: () => queuePendingActivity,
   schedulePendingActivity: () => schedulePendingActivity,
   setActivity: () => setActivity,
+  syncRunActivity: () => syncRunActivity,
+  syncRunContextUsage: () => syncRunContextUsage,
   trackActiveTool: () => trackActiveTool,
   untrackActiveTool: () => untrackActiveTool,
   updateActivityDom: () => updateActivityDom
@@ -7611,6 +7613,21 @@ function applyActivity(text, kind, detail = "", stickyUntil = 0) {
     this.clearPendingActivityTimer();
   }
   if (!isUnchanged && !this.updateActivityDom()) this.renderMessages();
+  this.syncRunActivity();
+}
+function syncRunActivity() {
+  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : void 0;
+  if (run)
+    run.activity = {
+      text: this.activityText,
+      kind: this.activityKind,
+      detail: this.activityDetail,
+      stickyUntil: this.activityStickyUntil
+    };
+}
+function syncRunContextUsage() {
+  const run = this.runningThreadId ? this.activeRuns.get(this.runningThreadId) : void 0;
+  if (run) run.contextUsage = this.currentRunContextUsage;
 }
 function queuePendingActivity(text, kind, detail = "") {
   this.pendingActivity = { text, kind, detail };
@@ -7667,6 +7684,7 @@ function captureContextUsage(event) {
   if (contextUsage) {
     if (this.runningThreadId) this.invalidatedContextThreadIds.delete(this.runningThreadId);
     this.currentRunContextUsage = { contextUsage, tokenUsage };
+    this.syncRunContextUsage();
     this.updateActivityDom();
     this.renderToolBadges();
   }
@@ -7705,6 +7723,7 @@ function handleRunEvent(event) {
       : "";
     if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
     this.currentRunContextUsage = void 0;
+    this.syncRunContextUsage();
     this.renderToolBadges();
     this.setActivity("Compacting context", "context", detail);
     return;
@@ -7724,6 +7743,7 @@ function handleRunEvent(event) {
       compacted: true,
       contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow
     };
+    this.syncRunContextUsage();
     this.renderToolBadges();
     this.setActivity(
       event.raw && event.raw.willRetry ? "Compacted context, retrying" : "Finishing",
@@ -8648,6 +8668,7 @@ var PiAgentView = class extends f4.ItemView {
     this.sendButtonEl = sendButton;
     sendButton.addEventListener("click", () => this.handleSendButtonClick());
     this.observeComposerBar(composerBar);
+    this.restoreActiveRunUiState();
     this.renderMessages();
     this.setRunningState(this.running);
   }
@@ -9172,6 +9193,22 @@ var PiAgentView = class extends f4.ItemView {
   renderThreadListIfVisible() {
     if (this.showingThreadList) this.renderThreadList();
   }
+  restoreActiveRunUiState() {
+    const threadId = this.getCurrentThreadId();
+    const run = threadId ? this.activeRuns.get(threadId) : void 0;
+    if (!run) return;
+    this.streamingAssistantContent = run.assistantContent || "";
+    this.streamingThinkingContent = run.thinking || "";
+    this.thinkingDisclosureExpanded = run.thinkingExpanded === true;
+    this.thinkingDisclosureUserSet = run.thinkingUserSet === true;
+    this.currentRunContextUsage = run.contextUsage;
+    if (run.activity) {
+      this.activityText = run.activity.text;
+      this.activityKind = run.activity.kind;
+      this.activityDetail = run.activity.detail;
+      this.activityStickyUntil = run.activity.stickyUntil ?? 0;
+    }
+  }
   runAnnotationPrompt(prompt, sourcePath) {
     return this.runPrompt(prompt, void 0, [], void 0, [], void 0, sourcePath);
   }
@@ -9295,6 +9332,7 @@ var PiAgentView = class extends f4.ItemView {
       accepted: false,
       notificationRunId: `${threadId}:${this.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(prompt),
+      assistantContent: "",
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
@@ -9375,6 +9413,7 @@ var PiAgentView = class extends f4.ItemView {
           },
           onTextDelta: (delta) => {
             if (!run.thinkingUserSet) run.thinkingExpanded = false;
+            run.assistantContent += delta;
             if (!this.isCurrentThread(threadId)) return;
             this.thinkingDisclosureExpanded = run.thinkingExpanded;
             this.liveThinkingSetExpanded?.(run.thinkingExpanded);

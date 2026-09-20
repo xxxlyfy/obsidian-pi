@@ -290,6 +290,7 @@ export class PiAgentView extends f.ItemView {
     this.sendButtonEl = sendButton;
     sendButton.addEventListener("click", () => this.handleSendButtonClick());
     this.observeComposerBar(composerBar);
+    this.restoreActiveRunUiState();
     this.renderMessages();
     this.setRunningState(this.running);
   }
@@ -814,6 +815,22 @@ export class PiAgentView extends f.ItemView {
   renderThreadListIfVisible() {
     if (this.showingThreadList) this.renderThreadList();
   }
+  restoreActiveRunUiState() {
+    const threadId = this.getCurrentThreadId();
+    const run = threadId ? this.activeRuns.get(threadId) : undefined;
+    if (!run) return;
+    this.streamingAssistantContent = run.assistantContent || "";
+    this.streamingThinkingContent = run.thinking || "";
+    this.thinkingDisclosureExpanded = run.thinkingExpanded === true;
+    this.thinkingDisclosureUserSet = run.thinkingUserSet === true;
+    this.currentRunContextUsage = run.contextUsage;
+    if (run.activity) {
+      this.activityText = run.activity.text;
+      this.activityKind = run.activity.kind;
+      this.activityDetail = run.activity.detail;
+      this.activityStickyUntil = run.activity.stickyUntil ?? 0;
+    }
+  }
   runAnnotationPrompt(prompt, sourcePath) {
     return this.runPrompt(prompt, undefined, [], undefined, [], undefined, sourcePath);
   }
@@ -937,6 +954,7 @@ export class PiAgentView extends f.ItemView {
       accepted: false,
       notificationRunId: `${threadId}:${this.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(prompt),
+      assistantContent: "",
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
@@ -1015,6 +1033,7 @@ export class PiAgentView extends f.ItemView {
           },
           onTextDelta: (delta) => {
             if (!run.thinkingUserSet) run.thinkingExpanded = false;
+            run.assistantContent += delta;
             if (!this.isCurrentThread(threadId)) return;
             this.thinkingDisclosureExpanded = run.thinkingExpanded;
             this.liveThinkingSetExpanded?.(run.thinkingExpanded);
