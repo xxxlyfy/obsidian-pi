@@ -160,6 +160,13 @@
   width: 15px;
 }
 
+.pi-agent-run-setting-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
 .pi-agent-provider-icon {
   align-items: center;
   color: currentColor;

@@ -7702,15 +7702,26 @@ function getDisplayedModel(settings, runtimeState) {
 var RunSettingsControls = class {
   constructor(plugin) {
     this.plugin = plugin;
+    this.controls = {};
   }
   render(containerEl) {
     this.row = containerEl.createDiv({ cls: "pi-agent-run-settings" });
+    this.controls = {};
     this.populate(this.row);
   }
   refresh() {
     if (!this.row) return;
-    this.row.empty();
-    this.populate(this.row);
+    this.updateControl("Model", { provider: this.getModelProvider() }, this.getModelLabel());
+    this.updateControl("Think", "brain", this.formatDefaultReasoningLabel());
+    this.updateControl("Mode", this.getToolModeIcon(), this.getToolModeLabel());
+  }
+  updateControl(name, icon, label) {
+    const control = this.controls?.[name];
+    if (!control || !control.buttonEl.isConnected) return;
+    control.labelEl.setText(label);
+    control.buttonEl.setAttr("aria-label", `${name}: ${label}`);
+    control.buttonEl.setAttr("title", `${name}: ${label}`);
+    this.renderControlIcon(control.iconEl, icon);
   }
   populate(containerEl) {
     this.addPickerSetting(
@@ -7719,7 +7730,7 @@ var RunSettingsControls = class {
       { provider: this.getModelProvider() },
       this.getModelLabel(),
       async (event) => {
-        await this.plugin.ensureRuntimeModelState();
+        await this.ensureCatalog();
         const menu = new import_obsidian15.Menu();
         const items = buildModelPickerItems(this.plugin.settings);
         if (items.length === 0) {
@@ -7749,7 +7760,7 @@ var RunSettingsControls = class {
       "brain",
       this.formatDefaultReasoningLabel(),
       async (event) => {
-        await this.plugin.ensureRuntimeModelState();
+        await this.ensureCatalog();
         const menu = new import_obsidian15.Menu();
         for (const [value, label] of Object.entries(getReasoningOptions(this.plugin.settings))) {
           menu.addItem((menuItem) =>
@@ -7785,6 +7796,11 @@ var RunSettingsControls = class {
       }
     );
   }
+  async ensureCatalog() {
+    if (!hasSafeRuntimeCatalog(this.plugin.settings)) {
+      await this.plugin.ensureRuntimeModelState();
+    }
+  }
   async applyToolMode(value) {
     if (value === this.plugin.settings.sandboxMode) return;
     if (
@@ -7812,25 +7828,28 @@ var RunSettingsControls = class {
       cls: `clickable-icon pi-agent-run-setting pi-agent-run-setting-${name.toLowerCase()}`,
       attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
     });
-    if (icon?.provider) renderProviderIcon(buttonEl, icon.provider);
-    else (0, import_obsidian15.setIcon)(buttonEl, icon);
+    const iconEl = buttonEl.createSpan({ cls: "pi-agent-run-setting-icon" });
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
+    const control = { buttonEl, iconEl, labelEl, iconKey: "" };
+    this.controls[name] = control;
+    this.renderControlIcon(iconEl, icon, control);
     buttonEl.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      buttonEl.disabled = true;
-      labelEl.setText("\u52A0\u8F7D\u4E2D\u2026");
       try {
         await onClick(event);
       } catch (error) {
         new import_obsidian15.Notice(error instanceof Error ? error.message : String(error));
-      } finally {
-        if (buttonEl.isConnected) {
-          buttonEl.disabled = false;
-          labelEl.setText(label);
-        }
       }
     });
+  }
+  renderControlIcon(iconEl, icon, control) {
+    const key = icon?.provider ? `provider:${icon.provider}` : `icon:${icon}`;
+    if (control.iconKey === key && iconEl.childElementCount > 0) return;
+    control.iconKey = key;
+    iconEl.empty();
+    if (icon?.provider) renderProviderIcon(iconEl, icon.provider);
+    else (0, import_obsidian15.setIcon)(iconEl, icon);
   }
   getModelLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {

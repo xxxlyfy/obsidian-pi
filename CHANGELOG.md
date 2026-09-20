@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.23
+
+- Removed the flash when changing **Model**, **Think**, or **Mode** from the composer: the run settings controls now update their label and icon in place instead of rebuilding the whole row, and the model/thinking menus no longer show a transient loading label or refetch the catalog when it is already cached.
+
 ## 0.0.22
 
 - The composer **Model**, **Think**, and **Mode** controls now open an anchored menu at the button instead of a full picker dialog, so you can switch options in place without leaving the chat view. The write-tools confirmation and settings persistence are unchanged.
