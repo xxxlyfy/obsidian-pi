@@ -1865,12 +1865,12 @@ function truncate(value, limit) {
 var CUSTOM_MODEL_VALUE = "__custom";
 var REASONING_LABELS = {
   off: "\u5173\u95ED",
-  minimal: "\u6700\u4F4E\uFF08\u4F7F\u7528\u5DE5\u5177\u65F6\u53EF\u80FD\u4E0D\u53EF\u7528\uFF09",
+  minimal: "\u6700\u4F4E",
   low: "\u4F4E",
   medium: "\u4E2D",
   high: "\u9AD8",
   xhigh: "\u6781\u9AD8",
-  max: "\u6700\u9AD8\uFF08\u6700\u6DF1\uFF09"
+  max: "\u6700\u9AD8"
 };
 var DEFAULT_SETTINGS = {
   model: "",
@@ -1970,6 +1970,24 @@ function getToolModeOptions() {
 }
 function formatReasoningLevel(value) {
   return REASONING_LABELS[value] ?? value;
+}
+function buildReasoningMenuItems(settings) {
+  const options = getReasoningOptions(settings);
+  const entries = Object.entries(options);
+  const hasLevels = entries.some(([value]) => value !== "");
+  if (!hasLevels) {
+    return entries.map(([value, label]) => ({ value, label, selected: true }));
+  }
+  const resolved = getResolvedReasoning(settings);
+  return entries
+    .filter(([value]) => value !== "")
+    .map(([value, label]) => ({
+      value,
+      label,
+      selected:
+        settings.reasoningEffort === value ||
+        (settings.reasoningEffort === "" && value === resolved)
+    }));
 }
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -5124,19 +5142,12 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     );
   }
   getItems() {
-    const options = getReasoningOptions(this.settings);
-    return Object.entries(options).flatMap(([value, label]) => {
-      const resolved = value === "" ? getResolvedReasoning(this.settings) : "";
-      if (value === "" && (resolved === "pi-default" || resolved === "cli-default")) return [];
-      return [
-        {
-          value,
-          primary: label,
-          secondary:
-            value === "" ? `\u5BF9 ${formatEffectiveModel(this.settings)} \u751F\u6548` : ""
-        }
-      ];
-    });
+    return buildReasoningMenuItems(this.settings).map((item) => ({
+      value: item.value,
+      primary: item.label,
+      secondary: "",
+      selected: item.selected
+    }));
   }
   renderSuggestion(item, el) {
     el.createDiv({ cls: "pi-agent-suggestion-title", text: item.primary });
@@ -5145,7 +5156,7 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     }
     el.setAttribute(
       "aria-label",
-      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.reasoningEffort === item.value ? ", \u5DF2\u9009\u4E2D" : ""}`
+      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${item.selected ? ", \u5DF2\u9009\u4E2D" : ""}`
     );
   }
   onChooseSuggestion(item) {
@@ -5154,11 +5165,6 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     });
   }
 };
-function formatEffectiveModel(settings) {
-  const slug = settings.model || settings.effectiveModel;
-  const model = settings.availableModels.find((candidate) => candidate.slug === slug);
-  return model?.displayName || slug;
-}
 
 // src/ui/desktop-notifications.mjs
 async function requestDesktopNotificationPermission(NotificationApi) {
@@ -7762,14 +7768,13 @@ var RunSettingsControls = class {
       async (event) => {
         await this.ensureCatalog();
         const menu = new import_obsidian15.Menu();
-        for (const [value, label] of Object.entries(getReasoningOptions(this.plugin.settings))) {
-          const title = value === "" ? `\u9ED8\u8BA4\uFF08${label}\uFF09` : label;
+        for (const item of buildReasoningMenuItems(this.plugin.settings)) {
           menu.addItem((menuItem) =>
             menuItem
-              .setTitle(title)
-              .setChecked(this.plugin.settings.reasoningEffort === value)
+              .setTitle(item.label)
+              .setChecked(item.selected)
               .onClick(async () => {
-                this.plugin.settings.reasoningEffort = value;
+                this.plugin.settings.reasoningEffort = item.value;
                 await this.plugin.saveSettings();
                 this.plugin.refreshOpenModelControls();
               })

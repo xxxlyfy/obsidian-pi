@@ -122,8 +122,9 @@ function createHarness() {
     provider: "customprov",
     id: "somemodel",
     displayName: "Custom Model",
-    defaultReasoningLevel: "medium",
-    supportedReasoningLevels: ["low", "medium", "high", "max"],
+    defaultReasoningLevel: "off",
+    supportedReasoningLevels: ["off", "low", "high", "max"],
+    thinkingLevelMap: { minimal: null, low: "low", medium: null, high: "high", max: "max" },
     reasoning: true,
     supportsImages: false,
     contextWindow: 200_000
@@ -136,7 +137,7 @@ function createHarness() {
     acknowledgedToolRisk: true,
     availableModels: [model],
     effectiveModel: model.slug,
-    effectiveReasoning: "medium"
+    effectiveReasoning: "off"
   };
   let controls;
   const plugin = {
@@ -162,7 +163,7 @@ describe("composer run settings controls", () => {
     const { controls, settings } = createHarness();
 
     expect(controls.controls.Model.labelEl.text).toBe("Custom Model");
-    expect(controls.controls.Think.labelEl.text).toBe("中");
+    expect(controls.controls.Think.labelEl.text).toBe("关闭");
     expect(controls.controls.Mode.labelEl.text).toBe("审阅");
 
     settings.sandboxMode = "full-agent";
@@ -172,15 +173,16 @@ describe("composer run settings controls", () => {
     expect(controls.controls.Think.labelEl.text).toBe("高");
   });
 
-  it("lists reasoning levels with a distinct default and applies a selection", async () => {
+  it("lists only the model's reasoning levels without a duplicate default", async () => {
     const { controls, settings } = createHarness();
 
     await controls.controls.Think.buttonEl.click();
     const menu = obsidian.menus.at(-1);
     const titles = menu.items.map((item) => item.title);
 
-    expect(titles).toEqual(["默认（中）", "低", "中", "高", "最高（最深）"]);
+    expect(titles).toEqual(["关闭", "低", "高", "最高"]);
     expect(new Set(titles).size).toBe(titles.length);
+    expect(menu.items.find((item) => item.title === "关闭").checked).toBe(true);
 
     const high = menu.items.find((item) => item.title === "高");
     await high.handler();

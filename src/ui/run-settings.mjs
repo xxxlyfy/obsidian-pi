@@ -1,8 +1,8 @@
 import { Menu, Notice, setIcon } from "obsidian";
 import {
+  buildReasoningMenuItems,
   CUSTOM_MODEL_VALUE,
   formatReasoningLevel,
-  getReasoningOptions,
   getResolvedReasoning,
   getSelectedModelInfo,
   getToolModeOptions
@@ -82,14 +82,13 @@ export class RunSettingsControls {
       async (event) => {
         await this.ensureCatalog();
         const menu = new Menu();
-        for (const [value, label] of Object.entries(getReasoningOptions(this.plugin.settings))) {
-          const title = value === "" ? `默认（${label}）` : label;
+        for (const item of buildReasoningMenuItems(this.plugin.settings)) {
           menu.addItem((menuItem) =>
             menuItem
-              .setTitle(title)
-              .setChecked(this.plugin.settings.reasoningEffort === value)
+              .setTitle(item.label)
+              .setChecked(item.selected)
               .onClick(async () => {
-                this.plugin.settings.reasoningEffort = value;
+                this.plugin.settings.reasoningEffort = item.value;
                 await this.plugin.saveSettings();
                 this.plugin.refreshOpenModelControls();
               })

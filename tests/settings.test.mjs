@@ -47,7 +47,7 @@ describe("plugin settings helpers", () => {
       low: "低",
       medium: "中",
       high: "高",
-      max: "最高（最深）"
+      max: "最高"
     });
     expect(
       getReasoningOptions({

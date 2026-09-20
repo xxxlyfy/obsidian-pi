@@ -2,12 +2,12 @@ export const CUSTOM_MODEL_VALUE = "__custom";
 
 const REASONING_LABELS = {
   off: "关闭",
-  minimal: "最低（使用工具时可能不可用）",
+  minimal: "最低",
   low: "低",
   medium: "中",
   high: "高",
   xhigh: "极高",
-  max: "最高（最深）"
+  max: "最高"
 };
 
 export const DEFAULT_SETTINGS = {
@@ -131,6 +131,27 @@ export function getToolModeOptions() {
 
 export function formatReasoningLevel(value) {
   return REASONING_LABELS[value] ?? value;
+}
+
+export function buildReasoningMenuItems(settings) {
+  const options = getReasoningOptions(settings);
+  const entries = Object.entries(options);
+  const hasLevels = entries.some(([value]) => value !== "");
+
+  if (!hasLevels) {
+    return entries.map(([value, label]) => ({ value, label, selected: true }));
+  }
+
+  const resolved = getResolvedReasoning(settings);
+  return entries
+    .filter(([value]) => value !== "")
+    .map(([value, label]) => ({
+      value,
+      label,
+      selected:
+        settings.reasoningEffort === value ||
+        (settings.reasoningEffort === "" && value === resolved)
+    }));
 }
 
 function normalizeString(value) {

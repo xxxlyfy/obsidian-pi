@@ -1,5 +1,5 @@
 import { FuzzySuggestModal, Notice, SuggestModal } from "obsidian";
-import { getReasoningOptions, getResolvedReasoning } from "../../plugin/settings.mjs";
+import { buildReasoningMenuItems } from "../../plugin/settings.mjs";
 import {
   buildModelPickerItems,
   getModelPickerPrimary,
@@ -74,18 +74,12 @@ export class ThinkingPickerModal extends SuggestModal {
   }
 
   getItems() {
-    const options = getReasoningOptions(this.settings);
-    return Object.entries(options).flatMap(([value, label]) => {
-      const resolved = value === "" ? getResolvedReasoning(this.settings) : "";
-      if (value === "" && (resolved === "pi-default" || resolved === "cli-default")) return [];
-      return [
-        {
-          value,
-          primary: label,
-          secondary: value === "" ? `对 ${formatEffectiveModel(this.settings)} 生效` : ""
-        }
-      ];
-    });
+    return buildReasoningMenuItems(this.settings).map((item) => ({
+      value: item.value,
+      primary: item.label,
+      secondary: "",
+      selected: item.selected
+    }));
   }
 
   renderSuggestion(item, el) {
@@ -96,7 +90,7 @@ export class ThinkingPickerModal extends SuggestModal {
     el.setAttribute(
       "aria-label",
       `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${
-        this.settings.reasoningEffort === item.value ? ", 已选中" : ""
+        item.selected ? ", 已选中" : ""
       }`
     );
   }
@@ -106,10 +100,4 @@ export class ThinkingPickerModal extends SuggestModal {
       new Notice(error instanceof Error ? error.message : String(error));
     });
   }
-}
-
-function formatEffectiveModel(settings) {
-  const slug = settings.model || settings.effectiveModel;
-  const model = settings.availableModels.find((candidate) => candidate.slug === slug);
-  return model?.displayName || slug;
 }

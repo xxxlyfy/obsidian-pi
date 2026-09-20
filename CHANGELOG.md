@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.25
+
+- The composer **Think** menu now lists only the reasoning levels the selected model actually supports, matching Pi (for example DeepSeek Flash shows 关闭/低/高/最高). The separate "default" entry was removed because it always duplicated one of those levels; the resolved default level is shown as selected instead. Reasoning labels were shortened to 关闭/最低/低/中/高/极高/最高.
+
 ## 0.0.24
 
 - Fixed the composer **Think** and **Mode** controls not reflecting changes: the in-place refresh called its icon helper without the control, which threw and aborted every label update. The Think menu now also labels the Pi default option distinctly (for example "默认（中）") so it is no longer duplicated with an explicit level such as "中".
