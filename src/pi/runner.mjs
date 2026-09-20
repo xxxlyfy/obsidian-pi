@@ -71,9 +71,10 @@ export class PiRunner {
     }
     if (!this.activeChild) return;
 
+    const child = this.activeChild;
     this.terminateActiveChild("SIGTERM");
     window.setTimeout(() => {
-      if (this.activeChild) this.terminateActiveChild("SIGKILL");
+      if (this.activeChild === child) this.terminateActiveChild("SIGKILL");
     }, 1500);
   }
 

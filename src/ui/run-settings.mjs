@@ -62,12 +62,14 @@ export class RunSettingsControls {
             menuItem
               .setTitle(getModelPickerPrimary(item))
               .setChecked(this.plugin.settings.model === item.value)
-              .onClick(async () => {
-                this.plugin.settings.model = item.value;
-                this.plugin.settings.reasoningEffort = "";
-                await this.plugin.saveSettings();
-                this.plugin.refreshOpenModelControls();
-              })
+              .onClick(() =>
+                this.applySettingChange(async () => {
+                  this.plugin.settings.model = item.value;
+                  this.plugin.settings.reasoningEffort = "";
+                  await this.plugin.saveSettings();
+                  this.plugin.refreshOpenModelControls();
+                })
+              )
           );
         }
         menu.showAtMouseEvent(event);
@@ -87,11 +89,13 @@ export class RunSettingsControls {
             menuItem
               .setTitle(item.label)
               .setChecked(item.selected)
-              .onClick(async () => {
-                this.plugin.settings.reasoningEffort = item.value;
-                await this.plugin.saveSettings();
-                this.plugin.refreshOpenModelControls();
-              })
+              .onClick(() =>
+                this.applySettingChange(async () => {
+                  this.plugin.settings.reasoningEffort = item.value;
+                  await this.plugin.saveSettings();
+                  this.plugin.refreshOpenModelControls();
+                })
+              )
           );
         }
         menu.showAtMouseEvent(event);
@@ -110,7 +114,7 @@ export class RunSettingsControls {
             menuItem
               .setTitle(label)
               .setChecked(this.plugin.settings.sandboxMode === value)
-              .onClick(() => this.applyToolMode(value))
+              .onClick(() => this.applySettingChange(() => this.applyToolMode(value)))
           );
         }
         menu.showAtMouseEvent(event);
@@ -121,6 +125,14 @@ export class RunSettingsControls {
   async ensureCatalog() {
     if (!hasSafeRuntimeCatalog(this.plugin.settings)) {
       await this.plugin.ensureRuntimeModelState();
+    }
+  }
+
+  async applySettingChange(action) {
+    try {
+      await action();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
     }
   }
 

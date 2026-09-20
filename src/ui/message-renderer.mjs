@@ -15,20 +15,21 @@ export function renderMessages() {
   this.liveThinkingDetailsEl = void 0;
   this.liveThinkingTextEl = void 0;
   this.liveThinkingSetExpanded = void 0;
-  this.unloadMessageRenderComponents();
-  e.empty();
-  let s = this.plugin.messages;
-  if (s.length === 0) {
-    this.renderEmptyState();
+  try {
+    this.unloadMessageRenderComponents();
+    e.empty();
+    let s = this.plugin.messages;
+    if (s.length === 0) {
+      this.renderEmptyState();
+      return;
+    }
+    for (let a = 0; a < s.length; a++) this.renderMessage(s[a], a);
+    if (this.running && this.streamingAssistantContent) this.renderStreamingAssistantMessage();
+    else if (this.running && this.activityText) this.renderActivityMessage();
+  } finally {
     this.restoreMessagesScroll(e, t, n);
     this.isRenderingMessages = !1;
-    return;
   }
-  for (let a = 0; a < s.length; a++) this.renderMessage(s[a], a);
-  if (this.running && this.streamingAssistantContent) this.renderStreamingAssistantMessage();
-  else if (this.running && this.activityText) this.renderActivityMessage();
-  this.restoreMessagesScroll(e, t, n);
-  this.isRenderingMessages = !1;
 }
 
 export function restoreMessagesScroll(e, t, n) {
@@ -224,6 +225,8 @@ export function flushStreamingRender() {
   if (this.streamingTextEl?.isConnected) {
     this.renderStreamingAnswer();
     this.renderStreamingThinking();
+  } else if (this.streamingAssistantContent) {
+    this.renderMessages();
   } else if (this.liveThinkingTextEl?.isConnected) {
     this.renderStreamingThinking();
   } else {

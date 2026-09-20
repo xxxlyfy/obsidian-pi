@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.26
+
+- Fixed a streaming regression: when answer text started right after thinking, the throttled renderer kept updating only the thinking block and did not create the streaming answer element until the run finished. The flush now creates the streaming message as soon as answer text is available.
+- Hardened `renderMessages` so the scroll-tracking guard is always reset (try/finally), and made the cancel SIGKILL fallback target the same child process so a late timeout can no longer kill a newly started run.
+- Composer run-setting menu actions now surface save failures as a notice instead of an unhandled promise rejection. Added regression tests for the streaming flush and the run settings controls.
+
 ## 0.0.25
 
 - The composer **Think** menu now lists only the reasoning levels the selected model actually supports, matching Pi (for example DeepSeek Flash shows 关闭/低/高/最高). The separate "default" entry was removed because it always duplicated one of those levels; the resolved default level is shown as selected instead. Reasoning labels were shortened to 关闭/最低/低/中/高/极高/最高.

@@ -4353,9 +4353,10 @@ var PiRunner = class {
       return;
     }
     if (!this.activeChild) return;
+    const child = this.activeChild;
     this.terminateActiveChild("SIGTERM");
     window.setTimeout(() => {
-      if (this.activeChild) this.terminateActiveChild("SIGKILL");
+      if (this.activeChild === child) this.terminateActiveChild("SIGKILL");
     }, 1500);
   }
   terminateActiveChild(signal) {
@@ -6978,20 +6979,21 @@ function renderMessages() {
   this.liveThinkingDetailsEl = void 0;
   this.liveThinkingTextEl = void 0;
   this.liveThinkingSetExpanded = void 0;
-  this.unloadMessageRenderComponents();
-  e.empty();
-  let s = this.plugin.messages;
-  if (s.length === 0) {
-    this.renderEmptyState();
+  try {
+    this.unloadMessageRenderComponents();
+    e.empty();
+    let s = this.plugin.messages;
+    if (s.length === 0) {
+      this.renderEmptyState();
+      return;
+    }
+    for (let a = 0; a < s.length; a++) this.renderMessage(s[a], a);
+    if (this.running && this.streamingAssistantContent) this.renderStreamingAssistantMessage();
+    else if (this.running && this.activityText) this.renderActivityMessage();
+  } finally {
     this.restoreMessagesScroll(e, t, n);
     this.isRenderingMessages = false;
-    return;
   }
-  for (let a = 0; a < s.length; a++) this.renderMessage(s[a], a);
-  if (this.running && this.streamingAssistantContent) this.renderStreamingAssistantMessage();
-  else if (this.running && this.activityText) this.renderActivityMessage();
-  this.restoreMessagesScroll(e, t, n);
-  this.isRenderingMessages = false;
 }
 function restoreMessagesScroll(e, t, n) {
   t ? (e.scrollTop = e.scrollHeight) : (e.scrollTop = Math.min(n, e.scrollHeight));
@@ -7171,6 +7173,8 @@ function flushStreamingRender() {
   if (this.streamingTextEl?.isConnected) {
     this.renderStreamingAnswer();
     this.renderStreamingThinking();
+  } else if (this.streamingAssistantContent) {
+    this.renderMessages();
   } else if (this.liveThinkingTextEl?.isConnected) {
     this.renderStreamingThinking();
   } else {
@@ -7749,12 +7753,14 @@ var RunSettingsControls = class {
             menuItem
               .setTitle(getModelPickerPrimary(item))
               .setChecked(this.plugin.settings.model === item.value)
-              .onClick(async () => {
-                this.plugin.settings.model = item.value;
-                this.plugin.settings.reasoningEffort = "";
-                await this.plugin.saveSettings();
-                this.plugin.refreshOpenModelControls();
-              })
+              .onClick(() =>
+                this.applySettingChange(async () => {
+                  this.plugin.settings.model = item.value;
+                  this.plugin.settings.reasoningEffort = "";
+                  await this.plugin.saveSettings();
+                  this.plugin.refreshOpenModelControls();
+                })
+              )
           );
         }
         menu.showAtMouseEvent(event);
@@ -7773,11 +7779,13 @@ var RunSettingsControls = class {
             menuItem
               .setTitle(item.label)
               .setChecked(item.selected)
-              .onClick(async () => {
-                this.plugin.settings.reasoningEffort = item.value;
-                await this.plugin.saveSettings();
-                this.plugin.refreshOpenModelControls();
-              })
+              .onClick(() =>
+                this.applySettingChange(async () => {
+                  this.plugin.settings.reasoningEffort = item.value;
+                  await this.plugin.saveSettings();
+                  this.plugin.refreshOpenModelControls();
+                })
+              )
           );
         }
         menu.showAtMouseEvent(event);
@@ -7795,7 +7803,7 @@ var RunSettingsControls = class {
             menuItem
               .setTitle(label)
               .setChecked(this.plugin.settings.sandboxMode === value)
-              .onClick(() => this.applyToolMode(value))
+              .onClick(() => this.applySettingChange(() => this.applyToolMode(value)))
           );
         }
         menu.showAtMouseEvent(event);
@@ -7805,6 +7813,13 @@ var RunSettingsControls = class {
   async ensureCatalog() {
     if (!hasSafeRuntimeCatalog(this.plugin.settings)) {
       await this.plugin.ensureRuntimeModelState();
+    }
+  }
+  async applySettingChange(action) {
+    try {
+      await action();
+    } catch (error) {
+      new import_obsidian15.Notice(error instanceof Error ? error.message : String(error));
     }
   }
   async applyToolMode(value) {
