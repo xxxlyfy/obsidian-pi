@@ -9,10 +9,17 @@ import {
 
 vi.mock("node:child_process", async (importOriginal) => {
   const original = await importOriginal();
-  return { ...original, spawnSync: vi.fn() };
+  return { ...original, execFile: vi.fn() };
 });
 
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
+
+function mockVersion(stdout, { code = 0, stderr = "" } = {}) {
+  execFile.mockImplementationOnce((_command, _args, _options, callback) => {
+    if (code === 0) callback(null, stdout, stderr);
+    else callback(Object.assign(new Error("command failed"), { code }), stdout, stderr);
+  });
+}
 
 describe("Pi compatibility helpers", () => {
   it("extracts and compares semantic Pi versions", () => {
@@ -26,10 +33,10 @@ describe("Pi compatibility helpers", () => {
     expect(compareVersions("0.79.9", MINIMUM_PI_VERSION)).toBe(-1);
   });
 
-  it("returns actionable diagnostics for unsupported Pi versions", () => {
-    spawnSync.mockReturnValue({ status: 0, stdout: "pi 0.79.9\n", stderr: "" });
+  it("returns actionable diagnostics for unsupported Pi versions", async () => {
+    mockVersion("pi 0.79.9\n");
 
-    expect(checkPiInstallation()).toMatchObject({
+    await expect(checkPiInstallation()).resolves.toMatchObject({
       ok: false,
       kind: "pi-unsupported",
       version: "0.79.9",
@@ -38,27 +45,23 @@ describe("Pi compatibility helpers", () => {
     });
   });
 
-  it("accepts the minimum version and preserves unparseable successful output", () => {
-    spawnSync.mockReturnValueOnce({ status: 0, stdout: `pi ${MINIMUM_PI_VERSION}\n`, stderr: "" });
-    expect(checkPiInstallation()).toMatchObject({
+  it("accepts the minimum version and preserves unparseable successful output", async () => {
+    mockVersion(`pi ${MINIMUM_PI_VERSION}\n`);
+    await expect(checkPiInstallation()).resolves.toMatchObject({
       ok: true,
       version: MINIMUM_PI_VERSION,
       supported: true
     });
 
-    spawnSync.mockReturnValueOnce({
-      status: 0,
-      stdout: `pi ${MINIMUM_PI_VERSION}-beta.1\n`,
-      stderr: ""
-    });
-    expect(checkPiInstallation()).toMatchObject({
+    mockVersion(`pi ${MINIMUM_PI_VERSION}-beta.1\n`);
+    await expect(checkPiInstallation()).resolves.toMatchObject({
       ok: false,
       kind: "pi-unsupported",
       version: `${MINIMUM_PI_VERSION}-beta.1`
     });
 
-    spawnSync.mockReturnValueOnce({ status: 0, stdout: "Pi development build\n", stderr: "" });
-    expect(checkPiInstallation()).toMatchObject({
+    mockVersion("Pi development build\n");
+    await expect(checkPiInstallation()).resolves.toMatchObject({
       ok: true,
       version: "Pi development build",
       supported: true

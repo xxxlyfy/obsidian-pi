@@ -3065,48 +3065,55 @@ function checkPiInstallation(piExecutablePath = "") {
     encoding: "utf8",
     timeout: 5e3
   });
-  const result = (0, import_node_child_process.spawnSync)(
-    invocation.command,
-    invocation.args,
-    invocation.options
-  );
-  if (result.error) {
-    const diagnostic = diagnosePiCliFailure({ error: result.error });
-    return {
-      ok: false,
-      kind: diagnostic.kind,
-      message: diagnostic.message
-    };
-  }
-  if (result.status !== 0) {
-    const diagnostic = diagnosePiCliFailure({
-      stderr: result.stderr,
-      stdout: result.stdout,
-      exitCode: result.status
-    });
-    return {
-      ok: false,
-      kind: diagnostic.kind,
-      message: diagnostic.message
-    };
-  }
-  const versionText = (result.stdout || result.stderr || "Pi CLI found.").trim();
-  const version = extractVersion(versionText);
-  if (version && compareVersions(version, MINIMUM_PI_VERSION) < 0) {
-    return {
-      ok: false,
-      kind: "pi-unsupported",
-      version,
-      supported: false,
-      message: `Pi ${version} is installed, but Pi Agent requires Pi ${MINIMUM_PI_VERSION} or newer. Upgrade Pi, fully restart Obsidian, and check the installation again.`
-    };
-  }
-  return {
-    ok: true,
-    version: version || versionText,
-    supported: true,
-    message: versionText
-  };
+  return new Promise((resolve) => {
+    (0, import_node_child_process.execFile)(
+      invocation.command,
+      invocation.args,
+      invocation.options,
+      (error, stdout, stderr) => {
+        if (error) {
+          if (typeof error.code === "number") {
+            const diagnostic2 = diagnosePiCliFailure({
+              stderr,
+              stdout,
+              exitCode: error.code
+            });
+            resolve({
+              ok: false,
+              kind: diagnostic2.kind,
+              message: diagnostic2.message
+            });
+            return;
+          }
+          const diagnostic = diagnosePiCliFailure({ error });
+          resolve({
+            ok: false,
+            kind: diagnostic.kind,
+            message: diagnostic.message
+          });
+          return;
+        }
+        const versionText = (stdout || stderr || "Pi CLI found.").trim();
+        const version = extractVersion(versionText);
+        if (version && compareVersions(version, MINIMUM_PI_VERSION) < 0) {
+          resolve({
+            ok: false,
+            kind: "pi-unsupported",
+            version,
+            supported: false,
+            message: `Pi ${version} is installed, but Pi Agent requires Pi ${MINIMUM_PI_VERSION} or newer. Upgrade Pi, fully restart Obsidian, and check the installation again.`
+          });
+          return;
+        }
+        resolve({
+          ok: true,
+          version: version || versionText,
+          supported: true,
+          message: versionText
+        });
+      }
+    );
+  });
 }
 function extractVersion(value) {
   return (
@@ -3461,13 +3468,14 @@ var PiRpcClient = class {
     if (!child) return;
     try {
       if (process.platform === "win32" && child.pid) {
-        (0, import_node_child_process2.execFileSync)(
+        (0, import_node_child_process2.execFile)(
           "taskkill",
           ["/pid", String(child.pid), "/T", "/F"],
           {
             timeout: 2e3,
             windowsHide: true
-          }
+          },
+          () => {}
         );
       } else if (child.pid) {
         process.kill(-child.pid, signal);
@@ -4333,13 +4341,14 @@ var PiRunner = class {
     if (!child) return;
     try {
       if (process.platform === "win32" && child.pid) {
-        (0, import_node_child_process3.execFileSync)(
+        (0, import_node_child_process3.execFile)(
           "taskkill",
           ["/pid", String(child.pid), "/T", "/F"],
           {
             timeout: 2e3,
             windowsHide: true
-          }
+          },
+          () => {}
         );
       } else if (child.pid) {
         process.kill(-child.pid, signal);
@@ -5494,7 +5503,7 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
       render: (setting) =>
         setting.addButton((button) =>
           button.setButtonText("Check").onClick(() => {
-            this.plugin.checkPiInstallation(true);
+            void this.plugin.checkPiInstallation(true);
           })
         )
     };
@@ -6921,6 +6930,8 @@ async function openVaultPath(value, newLeaf = "tab") {
 // src/ui/message-renderer.mjs
 var message_renderer_exports = {};
 __export(message_renderer_exports, {
+  clearStreamingRenderTimer: () => clearStreamingRenderTimer,
+  flushStreamingRender: () => flushStreamingRender,
   handleMessageLinkClick: () => handleMessageLinkClick,
   renderActivityMessage: () => renderActivityMessage,
   renderEmptyState: () => renderEmptyState,
@@ -6930,12 +6941,15 @@ __export(message_renderer_exports, {
   renderRoleLabel: () => renderRoleLabel,
   renderStreamingAnswer: () => renderStreamingAnswer,
   renderStreamingAssistantMessage: () => renderStreamingAssistantMessage,
+  renderStreamingThinking: () => renderStreamingThinking,
   renderThinkingDisclosure: () => renderThinkingDisclosure,
   renderToolErrors: () => renderToolErrors,
   restoreMessagesScroll: () => restoreMessagesScroll,
+  scheduleStreamingRender: () => scheduleStreamingRender,
   unloadMessageRenderComponents: () => unloadMessageRenderComponents
 });
 var f3 = __toESM(require("obsidian"), 1);
+var STREAM_RENDER_INTERVAL_MS = 80;
 function renderMessages() {
   this.syncCurrentRunFlags();
   if (!this.messagesEl) return;
@@ -7118,9 +7132,41 @@ function renderStreamingAssistantMessage() {
   this.renderStreamingAnswer();
 }
 function renderStreamingAnswer() {
-  if (!this.streamingTextEl?.isConnected && this.streamingTextEl?.isConnected !== void 0) return;
-  this.renderPlainMessageContent(this.streamingTextEl, this.streamingAssistantContent);
+  if (!this.streamingTextEl) return;
+  if (!this.streamingTextEl.isConnected && this.streamingTextEl.isConnected !== void 0) return;
+  this.streamingTextEl.setText(this.streamingAssistantContent || "");
   this.streamingTextEl.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
+}
+function renderStreamingThinking() {
+  if (!this.liveThinkingTextEl?.isConnected) return;
+  this.liveThinkingTextEl.setText(this.streamingThinkingContent || "");
+}
+function scheduleStreamingRender() {
+  if (this.streamingRenderTimer) return;
+  const elapsed = Date.now() - (this.lastStreamingRenderAt || 0);
+  const delay = Math.max(0, STREAM_RENDER_INTERVAL_MS - elapsed);
+  this.streamingRenderTimer = window.setTimeout(() => {
+    this.streamingRenderTimer = void 0;
+    this.flushStreamingRender();
+  }, delay);
+}
+function flushStreamingRender() {
+  this.lastStreamingRenderAt = Date.now();
+  if (!this.running) return;
+  if (this.streamingTextEl?.isConnected) {
+    this.renderStreamingAnswer();
+    this.renderStreamingThinking();
+  } else if (this.liveThinkingTextEl?.isConnected) {
+    this.renderStreamingThinking();
+  } else {
+    this.renderMessages();
+  }
+  if (this.messagesEl && this.stickToBottom)
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+}
+function clearStreamingRenderTimer() {
+  if (this.streamingRenderTimer) window.clearTimeout(this.streamingRenderTimer);
+  this.streamingRenderTimer = void 0;
 }
 function renderActivityMessage() {
   if (!this.messagesEl) return;
@@ -8092,6 +8138,8 @@ var PiAgentView = class extends f4.ItemView {
     this.desktopNotificationRunIds = /* @__PURE__ */ new Set();
     this.nextDesktopNotificationRunId = 1;
     this.stickToBottom = true;
+    this.streamingRenderTimer = void 0;
+    this.lastStreamingRenderAt = 0;
   }
   getViewType() {
     return PI_AGENT_VIEW_TYPE;
@@ -8353,6 +8401,7 @@ var PiAgentView = class extends f4.ItemView {
     this.threadFavoriteEl = void 0;
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
     this.noteActions = void 0;
@@ -8594,6 +8643,7 @@ var PiAgentView = class extends f4.ItemView {
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
     if (this.runningThreadId) this.plugin.endAnnotationProcessingForThread(this.runningThreadId);
@@ -8838,6 +8888,7 @@ var PiAgentView = class extends f4.ItemView {
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
     this.streamingAssistantContent = "";
@@ -8993,6 +9044,7 @@ var PiAgentView = class extends f4.ItemView {
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
     this.streamingAssistantContent = "";
@@ -9117,6 +9169,7 @@ var PiAgentView = class extends f4.ItemView {
       this.activityStickyUntil = 0;
       this.pendingActivity = void 0;
       this.clearPendingActivityTimer();
+      this.clearStreamingRenderTimer();
       this.activeToolCalls.clear();
       this.activityText = "";
       this.activityDetail = "";
@@ -9156,13 +9209,7 @@ var PiAgentView = class extends f4.ItemView {
   }
   appendStreamingThinkingDelta(e) {
     if (!e) return;
-    if (!this.liveThinkingTextEl || !this.liveThinkingTextEl.isConnected) {
-      this.renderMessages();
-      return;
-    }
-    this.renderPlainMessageContent(this.liveThinkingTextEl, this.streamingThinkingContent);
-    if (this.messagesEl && this.stickToBottom)
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    this.scheduleStreamingRender();
   }
   setLiveThinkingExpanded(expanded) {
     const run = this.getCurrentThreadRun();
@@ -9174,23 +9221,16 @@ var PiAgentView = class extends f4.ItemView {
     }
   }
   appendStreamingDelta(e) {
-    if (e) {
-      this.activityText = "Responding";
-      this.activityKind = "answer";
-      this.activityDetail = "";
-      this.activityStickyUntil = 0;
-      this.pendingActivity = void 0;
-      this.clearPendingActivityTimer();
-      this.streamingAssistantContent += e;
-      this.updateActivityDom();
-      if (!this.streamingTextEl) {
-        this.renderMessages();
-        return;
-      }
-      this.renderStreamingAnswer();
-      if (this.messagesEl && this.stickToBottom)
-        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-    }
+    if (!e) return;
+    this.activityText = "Responding";
+    this.activityKind = "answer";
+    this.activityDetail = "";
+    this.activityStickyUntil = 0;
+    this.pendingActivity = void 0;
+    this.clearPendingActivityTimer();
+    this.streamingAssistantContent += e;
+    this.updateActivityDom();
+    this.scheduleStreamingRender();
   }
   setRunningState(e) {
     const hasInput =
@@ -10165,7 +10205,7 @@ var PiAgentPlugin = class extends P.Plugin {
       id: "check-pi-installation",
       name: `Check ${PI_BRAND_NAME2} installation`,
       callback: () => {
-        this.checkPiInstallation(true);
+        void this.checkPiInstallation(true);
       }
     });
     this.addCommand({
@@ -10315,17 +10355,18 @@ var PiAgentPlugin = class extends P.Plugin {
   showPiSetupIfNeeded() {
     if (this.settings.dismissedPiSetup) return;
     window.setTimeout(() => {
-      if (!this.settings.dismissedPiSetup) this.checkPiInstallation(false);
+      if (!this.settings.dismissedPiSetup) void this.checkPiInstallation(false);
     }, 800);
   }
   checkPiInstallation(showSuccess) {
-    let e = checkPiInstallation(this.settings.piExecutablePath);
-    if (e.ok) {
-      showSuccess && new P.Notice(`Pi CLI is available: ${e.version || e.message}`);
+    return checkPiInstallation(this.settings.piExecutablePath).then((e) => {
+      if (e.ok) {
+        showSuccess && new P.Notice(`Pi CLI is available: ${e.version || e.message}`);
+        return e;
+      }
+      showSuccess ? new P.Notice(e.message) : new PiSetupModal(this, e).open();
       return e;
-    }
-    showSuccess ? new P.Notice(e.message) : new PiSetupModal(this, e).open();
-    return e;
+    });
   }
   async refreshModelCatalog(showNotice = false, force = true) {
     if (!force && !needsRuntimeCatalogRefresh(this.settings, this.modelCatalogRefreshedAt)) {

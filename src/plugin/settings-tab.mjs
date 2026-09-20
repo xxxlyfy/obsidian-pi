@@ -290,7 +290,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
       render: (setting) =>
         setting.addButton((button) =>
           button.setButtonText("Check").onClick(() => {
-            this.plugin.checkPiInstallation(true);
+            void this.plugin.checkPiInstallation(true);
           })
         )
     };

@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { diagnosePiCliFailure } from "./diagnostics.mjs";
 import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
 
@@ -31,48 +31,54 @@ export function checkPiInstallation(piExecutablePath = "") {
     encoding: "utf8",
     timeout: 5000
   });
-  const result = spawnSync(invocation.command, invocation.args, invocation.options);
 
-  if (result.error) {
-    const diagnostic = diagnosePiCliFailure({ error: result.error });
-    return {
-      ok: false,
-      kind: diagnostic.kind,
-      message: diagnostic.message
-    };
-  }
+  return new Promise((resolve) => {
+    execFile(invocation.command, invocation.args, invocation.options, (error, stdout, stderr) => {
+      if (error) {
+        if (typeof error.code === "number") {
+          const diagnostic = diagnosePiCliFailure({
+            stderr,
+            stdout,
+            exitCode: error.code
+          });
+          resolve({
+            ok: false,
+            kind: diagnostic.kind,
+            message: diagnostic.message
+          });
+          return;
+        }
 
-  if (result.status !== 0) {
-    const diagnostic = diagnosePiCliFailure({
-      stderr: result.stderr,
-      stdout: result.stdout,
-      exitCode: result.status
+        const diagnostic = diagnosePiCliFailure({ error });
+        resolve({
+          ok: false,
+          kind: diagnostic.kind,
+          message: diagnostic.message
+        });
+        return;
+      }
+
+      const versionText = (stdout || stderr || "Pi CLI found.").trim();
+      const version = extractVersion(versionText);
+      if (version && compareVersions(version, MINIMUM_PI_VERSION) < 0) {
+        resolve({
+          ok: false,
+          kind: "pi-unsupported",
+          version,
+          supported: false,
+          message: `Pi ${version} is installed, but Pi Agent requires Pi ${MINIMUM_PI_VERSION} or newer. Upgrade Pi, fully restart Obsidian, and check the installation again.`
+        });
+        return;
+      }
+
+      resolve({
+        ok: true,
+        version: version || versionText,
+        supported: true,
+        message: versionText
+      });
     });
-    return {
-      ok: false,
-      kind: diagnostic.kind,
-      message: diagnostic.message
-    };
-  }
-
-  const versionText = (result.stdout || result.stderr || "Pi CLI found.").trim();
-  const version = extractVersion(versionText);
-  if (version && compareVersions(version, MINIMUM_PI_VERSION) < 0) {
-    return {
-      ok: false,
-      kind: "pi-unsupported",
-      version,
-      supported: false,
-      message: `Pi ${version} is installed, but Pi Agent requires Pi ${MINIMUM_PI_VERSION} or newer. Upgrade Pi, fully restart Obsidian, and check the installation again.`
-    };
-  }
-
-  return {
-    ok: true,
-    version: version || versionText,
-    supported: true,
-    message: versionText
-  };
+  });
 }
 
 export function extractVersion(value) {

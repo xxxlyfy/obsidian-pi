@@ -70,6 +70,8 @@ export class PiAgentView extends f.ItemView {
     this.desktopNotificationRunIds = new Set();
     this.nextDesktopNotificationRunId = 1;
     this.stickToBottom = !0;
+    this.streamingRenderTimer = undefined;
+    this.lastStreamingRenderAt = 0;
   }
   getViewType() {
     return T;
@@ -331,6 +333,7 @@ export class PiAgentView extends f.ItemView {
     this.threadFavoriteEl = void 0;
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
     this.noteActions = void 0;
@@ -572,6 +575,7 @@ export class PiAgentView extends f.ItemView {
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
     if (this.runningThreadId) this.plugin.endAnnotationProcessingForThread(this.runningThreadId);
@@ -815,6 +819,7 @@ export class PiAgentView extends f.ItemView {
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
     this.streamingAssistantContent = "";
@@ -970,6 +975,7 @@ export class PiAgentView extends f.ItemView {
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
     this.streamingAssistantContent = "";
@@ -1094,6 +1100,7 @@ export class PiAgentView extends f.ItemView {
       this.activityStickyUntil = 0;
       this.pendingActivity = void 0;
       this.clearPendingActivityTimer();
+      this.clearStreamingRenderTimer();
       this.activeToolCalls.clear();
       this.activityText = "";
       this.activityDetail = "";
@@ -1133,13 +1140,7 @@ export class PiAgentView extends f.ItemView {
   }
   appendStreamingThinkingDelta(e) {
     if (!e) return;
-    if (!this.liveThinkingTextEl || !this.liveThinkingTextEl.isConnected) {
-      this.renderMessages();
-      return;
-    }
-    this.renderPlainMessageContent(this.liveThinkingTextEl, this.streamingThinkingContent);
-    if (this.messagesEl && this.stickToBottom)
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    this.scheduleStreamingRender();
   }
   setLiveThinkingExpanded(expanded) {
     const run = this.getCurrentThreadRun();
@@ -1151,23 +1152,16 @@ export class PiAgentView extends f.ItemView {
     }
   }
   appendStreamingDelta(e) {
-    if (e) {
-      this.activityText = "Responding";
-      this.activityKind = "answer";
-      this.activityDetail = "";
-      this.activityStickyUntil = 0;
-      this.pendingActivity = void 0;
-      this.clearPendingActivityTimer();
-      this.streamingAssistantContent += e;
-      this.updateActivityDom();
-      if (!this.streamingTextEl) {
-        this.renderMessages();
-        return;
-      }
-      this.renderStreamingAnswer();
-      if (this.messagesEl && this.stickToBottom)
-        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-    }
+    if (!e) return;
+    this.activityText = "Responding";
+    this.activityKind = "answer";
+    this.activityDetail = "";
+    this.activityStickyUntil = 0;
+    this.pendingActivity = void 0;
+    this.clearPendingActivityTimer();
+    this.streamingAssistantContent += e;
+    this.updateActivityDom();
+    this.scheduleStreamingRender();
   }
   setRunningState(e) {
     const hasInput =

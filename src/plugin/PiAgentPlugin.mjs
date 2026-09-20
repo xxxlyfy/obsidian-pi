@@ -219,7 +219,7 @@ export class PiAgentPlugin extends P.Plugin {
       id: "check-pi-installation",
       name: `Check ${PI_BRAND_NAME} installation`,
       callback: () => {
-        this.checkPiInstallation(true);
+        void this.checkPiInstallation(true);
       }
     });
     this.addCommand({
@@ -375,18 +375,19 @@ export class PiAgentPlugin extends P.Plugin {
     if (this.settings.dismissedPiSetup) return;
 
     window.setTimeout(() => {
-      if (!this.settings.dismissedPiSetup) this.checkPiInstallation(false);
+      if (!this.settings.dismissedPiSetup) void this.checkPiInstallation(false);
     }, 800);
   }
   checkPiInstallation(showSuccess) {
-    let e = checkPiInstallation(this.settings.piExecutablePath);
-    if (e.ok) {
-      showSuccess && new P.Notice(`Pi CLI is available: ${e.version || e.message}`);
-      return e;
-    }
+    return checkPiInstallation(this.settings.piExecutablePath).then((e) => {
+      if (e.ok) {
+        showSuccess && new P.Notice(`Pi CLI is available: ${e.version || e.message}`);
+        return e;
+      }
 
-    showSuccess ? new P.Notice(e.message) : new PiSetupModal(this, e).open();
-    return e;
+      showSuccess ? new P.Notice(e.message) : new PiSetupModal(this, e).open();
+      return e;
+    });
   }
   async refreshModelCatalog(showNotice = false, force = true) {
     if (!force && !needsRuntimeCatalogRefresh(this.settings, this.modelCatalogRefreshedAt)) {

@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { getConfiguredSkillPaths } from "../context/skills.mjs";
@@ -83,10 +83,17 @@ export class PiRunner {
 
     try {
       if (process.platform === "win32" && child.pid) {
-        execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-          timeout: 2000,
-          windowsHide: true
-        });
+        execFile(
+          "taskkill",
+          ["/pid", String(child.pid), "/T", "/F"],
+          {
+            timeout: 2000,
+            windowsHide: true
+          },
+          () => {
+            // Fire-and-forget: taskkill failures are ignored.
+          }
+        );
       } else if (child.pid) {
         process.kill(-child.pid, signal);
       } else {

@@ -1,5 +1,7 @@
 import * as f from "obsidian";
 
+const STREAM_RENDER_INTERVAL_MS = 80;
+
 export function renderMessages() {
   this.syncCurrentRunFlags();
   if (!this.messagesEl) return;
@@ -195,9 +197,45 @@ export function renderStreamingAssistantMessage() {
 }
 
 export function renderStreamingAnswer() {
-  if (!this.streamingTextEl?.isConnected && this.streamingTextEl?.isConnected !== undefined) return;
-  this.renderPlainMessageContent(this.streamingTextEl, this.streamingAssistantContent);
+  if (!this.streamingTextEl) return;
+  if (!this.streamingTextEl.isConnected && this.streamingTextEl.isConnected !== undefined) return;
+  this.streamingTextEl.setText(this.streamingAssistantContent || "");
   this.streamingTextEl.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
+}
+
+export function renderStreamingThinking() {
+  if (!this.liveThinkingTextEl?.isConnected) return;
+  this.liveThinkingTextEl.setText(this.streamingThinkingContent || "");
+}
+
+export function scheduleStreamingRender() {
+  if (this.streamingRenderTimer) return;
+  const elapsed = Date.now() - (this.lastStreamingRenderAt || 0);
+  const delay = Math.max(0, STREAM_RENDER_INTERVAL_MS - elapsed);
+  this.streamingRenderTimer = window.setTimeout(() => {
+    this.streamingRenderTimer = undefined;
+    this.flushStreamingRender();
+  }, delay);
+}
+
+export function flushStreamingRender() {
+  this.lastStreamingRenderAt = Date.now();
+  if (!this.running) return;
+  if (this.streamingTextEl?.isConnected) {
+    this.renderStreamingAnswer();
+    this.renderStreamingThinking();
+  } else if (this.liveThinkingTextEl?.isConnected) {
+    this.renderStreamingThinking();
+  } else {
+    this.renderMessages();
+  }
+  if (this.messagesEl && this.stickToBottom)
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+}
+
+export function clearStreamingRenderTimer() {
+  if (this.streamingRenderTimer) window.clearTimeout(this.streamingRenderTimer);
+  this.streamingRenderTimer = undefined;
 }
 
 export function renderActivityMessage() {

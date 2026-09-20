@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { clearTimeout as clearNodeTimeout, setTimeout as setNodeTimeout } from "node:timers";
 import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
@@ -274,10 +274,17 @@ export class PiRpcClient {
     if (!child) return;
     try {
       if (process.platform === "win32" && child.pid) {
-        execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-          timeout: 2_000,
-          windowsHide: true
-        });
+        execFile(
+          "taskkill",
+          ["/pid", String(child.pid), "/T", "/F"],
+          {
+            timeout: 2_000,
+            windowsHide: true
+          },
+          () => {
+            // Fire-and-forget: taskkill failures are ignored.
+          }
+        );
       } else if (child.pid) {
         process.kill(-child.pid, signal);
       } else {

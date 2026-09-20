@@ -3,7 +3,7 @@ import { checkPiInstallation, MINIMUM_PI_VERSION, TESTED_PI_VERSION } from "../s
 import { PiRpcClient } from "../src/pi/rpc-client.mjs";
 
 const cwd = process.argv[2] ? path.resolve(process.argv[2]) : process.cwd();
-const health = checkPiInstallation();
+const health = await checkPiInstallation();
 if (!health.ok) {
   console.error(health.message);
   process.exit(1);
