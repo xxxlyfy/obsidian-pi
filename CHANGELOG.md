@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.30
+
+- Switching away from a running chat and back now restores its live run state: the streaming answer text, thinking disclosure, activity line, and context usage are kept per thread instead of resetting to an empty chat.
+- Restored semantic names in the UI mixin modules (message renderer, run activity, and thread list).
+- `checkJs` now type-checks the entire plugin source instead of only the core modules, with the view's runtime mixin surface declared under `src/types`. The wider check surfaced and fixed latent issues around constructor argument forwarding, vault rename/delete file guards, notification API access, and provider brand metadata.
+
 ## 0.0.29
 
 - Fixed queued annotation snapshots going out of sync with note renames and deletes: renaming a note now migrates the queued `contextFilePath` and annotation paths to the new name, deleting a note drops its queued annotations instead of restoring them later, and restoring consumed annotations now skips paths whose Markdown file no longer exists.
