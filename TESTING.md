@@ -163,7 +163,7 @@ Use non-sensitive PNG, JPEG, and WebP files.
 ## Release gate
 
 - [ ] `git status` contains only intended source, tests, docs, generated bundle, and styles.
-- [ ] `npm ci` and `npm run ci` pass for the release candidate (currently 51 test files / 292 tests).
+- [ ] `npm ci` and `npm run ci` pass for the release candidate (currently 52 test files / 299 tests).
 - [ ] The complete manual checklist above passes in the validation vault.
 - [ ] Open issues are updated with actual validation results.
 - [ ] `manifest.json`, `package.json`, and `versions.json` are aligned on the release version, and `CHANGELOG.md` has a non-empty section for it.

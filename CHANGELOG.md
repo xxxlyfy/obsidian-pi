@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.0.33
+
+- Tool activity is tracked per run, so switching back to a background chat now shows its running tool status instead of a stale activity line.
+- Prompt delivery retries once when the annotated note was renamed while the context was being built, so the prompt keeps its active-note context.
+- The view and mixin type surface is fully typed: the view references the real `PiAgentPlugin` type, DOM fields use element types, and the vault link target type is shared with the interface instead of `any`.
+- Extracted a `ThreadRunnerRegistry` so per-thread runner creation, reuse, and disposal live in a dedicated class with unit tests.
+- Refreshed dev dependencies (esbuild, eslint, eslint-plugin-obsidianmd, prettier, vitest), resolved all `npm audit` findings (7 to 0), renamed the source typecheck script to `typecheck:src`, and declared the Node engine requirement (`>=22`).
+
 ## 0.0.32
 
 - Track Pi 0.86.0 as the last tested compatibility version in the upgrade diagnostics, README, and manual checklist; the version parser test now derives from the tracked constant.
