@@ -7747,6 +7747,33 @@ var RunSettingsControls = class {
   populate(containerEl) {
     this.addPickerSetting(
       containerEl,
+      "Model",
+      { provider: this.getModelProvider() },
+      this.getModelLabel(),
+      async () => {
+        await this.openPicker(ModelPickerModal, async (value) => {
+          this.plugin.settings.model = value;
+          this.plugin.settings.reasoningEffort = "";
+          await this.plugin.saveSettings();
+          this.plugin.refreshOpenModelControls();
+        });
+      }
+    );
+    this.addPickerSetting(
+      containerEl,
+      "Think",
+      "brain",
+      this.formatDefaultReasoningLabel(),
+      async () => {
+        await this.openPicker(ThinkingPickerModal, async (value) => {
+          this.plugin.settings.reasoningEffort = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshOpenModelControls();
+        });
+      }
+    );
+    this.addPickerSetting(
+      containerEl,
       "Mode",
       this.getToolModeIcon(),
       this.getToolModeLabel(),
@@ -7773,33 +7800,6 @@ var RunSettingsControls = class {
           await this.plugin.saveSettings();
           this.plugin.refreshOpenModelControls();
         }).open();
-      }
-    );
-    this.addPickerSetting(
-      containerEl,
-      "Model",
-      { provider: this.getModelProvider() },
-      this.getModelLabel(),
-      async () => {
-        await this.openPicker(ModelPickerModal, async (value) => {
-          this.plugin.settings.model = value;
-          this.plugin.settings.reasoningEffort = "";
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        });
-      }
-    );
-    this.addPickerSetting(
-      containerEl,
-      "Think",
-      "brain",
-      this.formatDefaultReasoningLabel(),
-      async () => {
-        await this.openPicker(ThinkingPickerModal, async (value) => {
-          this.plugin.settings.reasoningEffort = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshOpenModelControls();
-        });
       }
     );
   }

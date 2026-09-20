@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.16
+
+- Moved the composer **Mode** control to the end of the run settings row, after **Model** and **Think**.
+
 ## 0.0.15
 
 - Added a **Mode** control to the chat composer, next to **Model** and **Think**, so the Pi tool mode (Chat, Review, Edit, Full agent) can be switched without opening plugin settings. The picker shows the same options and the same one-time write-tools confirmation as the settings tab, and the change applies to subsequent runs.
