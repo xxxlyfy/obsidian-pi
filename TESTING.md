@@ -170,6 +170,7 @@ Use non-sensitive PNG, JPEG, and WebP files.
 
 ## Validation record
 
-| Date       | Version | Environment                            | Scope                                 | Result                  |
-| ---------- | ------- | -------------------------------------- | ------------------------------------- | ----------------------- |
-| 2026-09-20 | 0.0.31  | Windows · Obsidian desktop · Pi 0.86.0 | Main-feature smoke test (general use) | Passed, no issues found |
+| Date       | Version | Environment                            | Scope                                 | Result                        |
+| ---------- | ------- | -------------------------------------- | ------------------------------------- | ----------------------------- |
+| 2026-09-20 | 0.0.31  | Windows · Obsidian desktop · Pi 0.86.0 | Main-feature smoke test (general use) | Passed, no issues found       |
+| 2026-09-20 | 0.0.31  | Windows · Pi 0.86.0                    | `npm run test:pi` (offline RPC smoke) | Passed (2 models, 9 commands) |
