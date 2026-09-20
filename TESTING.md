@@ -1,21 +1,21 @@
 # Pi Agent compatibility and pre-release checklist
 
-**Status: MANUAL VALIDATION PENDING FOR THE NEXT RELEASE.** Issue #43 must remain open until every applicable manual item below passes in the dedicated test vault:
+**Status: MANUAL VALIDATION PENDING FOR THE NEXT RELEASE.** Keep this checklist current for every release. Do not publish a release until every applicable manual item below passes in the validation vault:
 
 ```text
-/Users/xcad/Obsidian/ObsidianTesting
+C:\Users\zcooo\OneDrive\Obsidian
 ```
 
-Do not place source changes or test fixtures in that vault. Its plugin files should point to a development build from this repository.
+Use disposable notes and non-sensitive content in that vault. Do not place source changes or test fixtures in it. Its plugin files should point to a development build from this repository.
 
 ## Automated checks
 
-From this repository (not from the test vault):
+From this repository (not from the vault):
 
 ```bash
 npm ci
 npm run ci
-npm run test:pi -- /Users/xcad/Obsidian/ObsidianTesting
+npm run test:pi -- "C:\Users\zcooo\OneDrive\Obsidian"
 ```
 
 `npm run ci` includes `lint:obsidian:errors`, which runs the official `eslint-plugin-obsidianmd` recommended rules and fails on error-level Community scanner findings. This gate runs on pull requests, pushes to `main`, and again before the release workflow can publish assets. Run `npm run lint:obsidian` separately to inspect the scanner's non-blocking warnings as well.
@@ -26,15 +26,15 @@ npm run test:pi -- /Users/xcad/Obsidian/ObsidianTesting
 
 ```bash
 npm run build
-npm run dev:install -- /Users/xcad/Obsidian/ObsidianTesting/.obsidian/plugins/pi-agent
+npm run dev:install -- "C:\Users\zcooo\OneDrive\Obsidian\.obsidian\plugins\pi-agent"
 ```
 
-Then open `ObsidianTesting`, reload or disable/re-enable Pi Agent, and keep the developer console visible.
+Then open the vault, reload or disable/re-enable Pi Agent, and keep the developer console visible.
 
 ## Pi setup and compatibility
 
-- [ ] **Pending:** Run **Pi Agent: Check Pi installation** and confirm Pi is at least 0.80.0 (last tested: 0.80.7).
-- [ ] **Pending:** Point **Pi executable path** at a missing executable and an older/fake version; confirm actionable missing, runtime, and upgrade diagnostics, then restore it.
+- [ ] **Pending:** Run **Pi Agent: Check Pi installation** and confirm Pi is at least 0.80.0 (last full compatibility test: 0.80.7; latest smoke test: 0.86.0).
+- [ ] **Pending:** Point **Pi 可执行文件路径** (Pi executable path) at a missing executable and an older/fake version; confirm actionable missing, runtime, and upgrade diagnostics, then restore it.
 - [ ] **Pending:** Confirm required unsupported RPC commands fail with a capability/upgrade diagnostic and optional capability probes use only their declared fallback.
 - [ ] **Pending:** Refresh settings and confirm no unhandled console errors.
 
@@ -47,7 +47,7 @@ Then open `ObsidianTesting`, reload or disable/re-enable Pi Agent, and keep the 
 
 ## Chat history, persistent RPC, cancellation, retry, and compaction
 
-- [ ] **Pending:** Create more than 40 chats, reload Obsidian, and confirm all chats, messages, titles, favorites, archives, thinking disclosures, and current-chat selection survive in `.obsidian/plugins/pi-agent/data.json`.
+- [ ] **Pending:** Create more than 40 chats, reload Obsidian, and confirm all chats, messages, titles, favorites, thinking disclosures, and current-chat selection survive in `.obsidian/plugins/pi-agent/data.json`.
 - [ ] **Pending:** Confirm `chat-history.backup.json` and `chat-history.backup.previous.json` are checksummed JSON snapshots in the plugin directory; temporarily remove `chatHistory` from `data.json`, reload, and confirm recovery from backup.
 - [ ] **Pending:** Starting from a development build that wrote chat files into the vault, reload this build and confirm every chat is verified in plugin data before only Pi-managed vault chat files are removed. Unrecognized or malformed files must remain untouched.
 - [ ] **Pending:** Send two prompts in one chat; confirm process reuse, conversation continuity, and no duplicated stable instructions/history in each prompt.
@@ -88,10 +88,15 @@ Create an active note with frontmatter, headings, tags, wikilinks, backlinks, an
 - [ ] **Pending:** Verify current-note and selected-text context plus `@note`, `#tag`, `/search`, `/backlinks`, `/links`, and `/context show`.
 - [ ] **Pending:** Confirm ignored folders do not enter attached context and autocomplete reflects Pi's command discovery.
 - [ ] **Pending:** Confirm there is no persistent steer/follow-up selector in settings or the composer.
-- [ ] **Pending:** While a run is active, submit several text and image messages; confirm they enter the visible local follow-up queue by default and can be safely reordered, edited/retrieved, or removed.
+- [ ] **Pending:** While a run is active, submit several text and image messages; confirm they enter the visible local follow-up queue by default and can be safely edited/retrieved or removed.
 - [ ] **Pending:** Promote any pending item once with **Steer now**; confirm it leaves the local queue, reaches Pi after the current assistant turn/tool batch, and is never delivered twice.
 - [ ] **Pending:** Let the active run settle and confirm every unpromoted item starts once, in order, as a normal follow-up prompt.
 - [ ] **Pending:** Exercise abort, transient failure/retry, compaction, and thread switching with queued text/images; confirm the visible Pi/local state never loses, duplicates, or assigns an item to the wrong thread.
+- [ ] **Pending:** Rename the annotated note while a prompt with annotations is queued; confirm the queued annotation and context paths follow the new name, and removing the queued item restores the annotations to the renamed note.
+- [ ] **Pending:** Delete the annotated note while a prompt with annotations is queued; confirm removing the queued item does not revive annotations for the deleted path.
+- [ ] **Pending:** Rename the annotated note during an active run, then cancel the run; confirm the annotations return to the renamed note instead of being dropped.
+- [ ] **Pending:** Rename a vault file that is attached to a queued prompt; confirm the queued attachment/image path follows the new name (the attachment content still sends either way).
+- [ ] **Pending:** Queue or send a prompt for an annotated note that was renamed or deleted before sending; confirm a notice appears and the currently open note's annotations are never sent or consumed in its place.
 
 ## Images
 
@@ -102,9 +107,9 @@ Use non-sensitive PNG, JPEG, and WebP files.
 - [ ] **Pending:** Confirm a text-only model blocks images clearly.
 - [ ] **Pending:** Confirm unsupported formats and files over 20 MB are rejected and image data is not retained unexpectedly.
 
-## Sessions, favorites, and archive
+## Sessions and favorites
 
-- [ ] **Pending:** Create, rename, switch, favorite/unfavorite, archive/restore, and fork chats; verify ordering and independent continuation.
+- [ ] **Pending:** Create, rename, switch, favorite/unfavorite, and fork chats; verify ordering and independent continuation.
 - [ ] **Pending:** Toggle the keyboard-accessible favorite in the active-chat header and thread-list row; confirm both stay synchronized.
 - [ ] **Pending:** Use **Delete chats** and verify the dialog offers **delete all** and **delete all except favorites** with correct counts, running chats are refused/skipped, favorites are preserved by the protected scope, the result notice is accurate, and no Pi session file is deleted.
 - [ ] **Pending:** Open Pi session info; verify path, messages, tokens, and cost are plausible.
@@ -120,10 +125,12 @@ Use non-sensitive PNG, JPEG, and WebP files.
 - [ ] **Pending:** Confirm there is no standalone **Tools** badge/button or permanent ordinary tool argument/result panel; concise current tool status may appear only in the live response disclosure.
 - [ ] **Pending:** Trigger a tool error and confirm it remains visible and actionable without exposing values whose keys contain token, secret, password, API key, or authorization.
 - [ ] **Pending:** Exercise idle Send, active-run queue, Cancel, and Canceling states; confirm they are visually distinct and usable in compact layouts.
+- [ ] **Pending:** Switch away from a running chat and back; confirm the live answer, thinking disclosure, activity line, and context usage are restored instead of showing an empty chat.
+- [ ] **Pending:** Run two chats at the same time and switch between them; confirm each chat's activity and context usage stays with its own run.
 
 ## Note annotations
 
-> **CodeMirror singleton regression (#35):** The failure was `Unrecognized extension value in extension set ([object Object]). This sometimes happens because multiple instances of @codemirror/state are loaded, breaking instanceof checks.` The root cause was `main.js` bundling private copies of `@codemirror/state` and `@codemirror/view`, so Obsidian rejected the annotation `ViewPlugin` created by the duplicate runtime whenever any Markdown editor opened.
+> **CodeMirror singleton regression:** The failure was `Unrecognized extension value in extension set ([object Object]). This sometimes happens because multiple instances of @codemirror/state are loaded, breaking instanceof checks.` The root cause was `main.js` bundling private copies of `@codemirror/state` and `@codemirror/view`, so Obsidian rejected the annotation `ViewPlugin` created by the duplicate runtime whenever any Markdown editor opened.
 
 - [ ] **Pending disabled-plugin baseline:** Disable Pi Agent, fully reload Obsidian, and open several Markdown notes in source and live-preview modes; confirm every editor opens and the exact CodeMirror error above is absent from the Developer Console.
 - [ ] **Pending:** Enable Pi Agent, fully reload Obsidian, repeat the same editor-opening cases, and confirm they still open without the exact CodeMirror error. Inspect the installed `main.js` and confirm it requires `@codemirror/state` and `@codemirror/view` from Obsidian rather than containing bundled `node_modules/@codemirror` implementations.
@@ -155,8 +162,14 @@ Use non-sensitive PNG, JPEG, and WebP files.
 
 ## Release gate
 
-- [ ] **Pending:** `git status` contains only intended source, tests, docs, generated bundle, and styles.
-- [x] `npm ci` and `npm run ci` pass for the 0.0.12 release candidate (47 test files / 262 tests).
-- [ ] **Pending:** The complete manual checklist above passes in `ObsidianTesting`.
-- [ ] **Pending:** Open issues are updated with actual validation results but remain open until explicitly accepted.
-- [x] Release-candidate files are aligned at `0.0.12`; no tag or GitHub release is created until final confirmation.
+- [ ] `git status` contains only intended source, tests, docs, generated bundle, and styles.
+- [ ] `npm ci` and `npm run ci` pass for the release candidate (currently 51 test files / 292 tests).
+- [ ] The complete manual checklist above passes in the validation vault.
+- [ ] Open issues are updated with actual validation results.
+- [ ] `manifest.json`, `package.json`, and `versions.json` are aligned on the release version, and `CHANGELOG.md` has a non-empty section for it.
+
+## Validation record
+
+| Date       | Version | Environment                            | Scope                                 | Result                  |
+| ---------- | ------- | -------------------------------------- | ------------------------------------- | ----------------------- |
+| 2026-09-20 | 0.0.31  | Windows · Obsidian desktop · Pi 0.86.0 | Main-feature smoke test (general use) | Passed, no issues found |
