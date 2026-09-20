@@ -65,9 +65,9 @@ describe("desktop completion notifications", () => {
 
     try {
       await expect(requestDesktopNotificationPermission()).resolves.toBe(true);
-      expect(
-        showDesktopRunNotification({ runId: "active-window", sentRunIds: new Set() })
-      ).toBe(true);
+      expect(showDesktopRunNotification({ runId: "active-window", sentRunIds: new Set() })).toBe(
+        true
+      );
       instances[0].onclick();
       expect(focus).toHaveBeenCalledOnce();
     } finally {

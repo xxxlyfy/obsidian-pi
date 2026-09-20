@@ -5,9 +5,7 @@ export function chooseThreadDeletion(app, thread) {
 }
 
 export function getThreadDeletionChoices(thread) {
-  return thread?.piSessionId
-    ? ["cancel", "chat", "both"]
-    : ["cancel", "chat"];
+  return thread?.piSessionId ? ["cancel", "chat", "both"] : ["cancel", "chat"];
 }
 
 export class DeleteThreadModal extends Modal {

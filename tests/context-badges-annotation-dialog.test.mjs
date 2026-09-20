@@ -19,7 +19,7 @@ describe("pending context badges", () => {
       "this.renderPendingBadge(badges, contextFile.name, { title: contextFile.path })"
     );
     expect(viewSource).not.toContain("`Remove ${contextFile.name}`");
-    expect(viewSource).toContain("`Remove ${image.fileName || \"image\"}`");
+    expect(viewSource).toContain('`Remove ${image.fileName || "image"}`');
     expect(viewSource).toContain("`Remove ${attachment.fileName}`");
     expect(viewSource).toContain("`Clear ${label}`");
     expect(styles).toMatch(
