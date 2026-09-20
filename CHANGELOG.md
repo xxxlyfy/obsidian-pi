@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.29
+
+- Fixed queued annotation snapshots going out of sync with note renames and deletes: renaming a note now migrates the queued `contextFilePath` and annotation paths to the new name, deleting a note drops its queued annotations instead of restoring them later, and restoring consumed annotations now skips paths whose Markdown file no longer exists.
+
 ## 0.0.28
 
 - Fixed annotation sends silently falling back to the currently open note when the annotated note was renamed or deleted: the prompt now shows a notice and leaves the other note's annotations untouched instead of consuming the wrong note's annotations.

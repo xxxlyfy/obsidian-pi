@@ -39,6 +39,7 @@ const { PiAgentPlugin } = await import("../src/plugin/PiAgentPlugin.mjs");
 
 function createPlugin({ files = {}, currentFile, annotationsByPath = {} } = {}) {
   const deletedPaths = [];
+  const replacedPaths = [];
   return {
     annotationController: { cancelPick: vi.fn() },
     app: {
@@ -49,9 +50,12 @@ function createPlugin({ files = {}, currentFile, annotationsByPath = {} } = {}) 
     getCurrentContextFile: () => currentFile,
     getAnnotationsForContext: vi.fn(async (path) => annotationsByPath[path] ?? []),
     annotationStore: {
-      deletePath: (path) => deletedPaths.push(path)
+      deletePath: (path) => deletedPaths.push(path),
+      list: (path) => annotationsByPath[path] ?? [],
+      replacePath: (path, annotations) => replacedPaths.push({ path, annotations })
     },
-    deletedPaths
+    deletedPaths,
+    replacedPaths
   };
 }
 
@@ -111,5 +115,30 @@ describe("PiAgentPlugin annotation consumption", () => {
     await expect(consumeAnnotations(plugin, undefined)).resolves.toEqual(current);
 
     expect(plugin.deletedPaths).toEqual(["B.md"]);
+  });
+
+  it("restores consumed annotations only for notes that still exist", () => {
+    const plugin = createPlugin({
+      files: { "B.md": new obsidian.TFile("B.md", "md") }
+    });
+
+    PiAgentPlugin.prototype.restoreConsumedAnnotations.call(plugin, [
+      { id: "a1", path: "A.md" },
+      { id: "b1", path: "B.md" }
+    ]);
+
+    expect(plugin.replacedPaths).toEqual([
+      { path: "B.md", annotations: [{ id: "b1", path: "B.md" }] }
+    ]);
+  });
+
+  it("skips restoring consumed annotations for non-markdown paths", () => {
+    const plugin = createPlugin({
+      files: { "A.png": new obsidian.TFile("A.png", "png") }
+    });
+
+    PiAgentPlugin.prototype.restoreConsumedAnnotations.call(plugin, [{ id: "a1", path: "A.png" }]);
+
+    expect(plugin.replacedPaths).toEqual([]);
   });
 });

@@ -34,6 +34,8 @@ import {
 import { ThreadStore } from "../threads/thread-store.mjs";
 import {
   enqueueLocalPrompt,
+  invalidateLocalPromptPaths,
+  migrateLocalPromptPaths,
   normalizeLocalPromptQueue,
   removeLocalPrompt,
   restorePersistedLocalPromptQueue,
@@ -181,8 +183,9 @@ export class PiAgentPlugin extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
+        if (file.extension !== "md") return;
+        this.migrateQueuedAnnotationPaths(oldPath, file.path);
         if (
-          file.extension === "md" &&
           this.annotationStore.list(oldPath).length > 0 &&
           !this.annotationStore.renamePath(oldPath, file.path)
         )
@@ -193,7 +196,9 @@ export class PiAgentPlugin extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file.extension === "md") this.annotationStore.deletePath(file.path);
+        if (file.extension !== "md") return;
+        this.annotationStore.deletePath(file.path);
+        this.invalidateQueuedAnnotationPaths(file.path);
       })
     );
     this.registerView(PI_AGENT_VIEW_TYPE, (leaf) => new PiAgentView(leaf, this));
@@ -905,6 +910,18 @@ export class PiAgentPlugin extends P.Plugin {
     this.localPromptQueue = normalizeLocalPromptQueue(queue, { preserveState: true });
     this.saveThreadHistory();
   }
+  migrateQueuedAnnotationPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    this.localPromptQueue = migrateLocalPromptPaths(this.localPromptQueue, oldPath, newPath);
+    this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
+    this.saveThreadHistory();
+  }
+  invalidateQueuedAnnotationPaths(path) {
+    if (!path) return;
+    this.localPromptQueue = invalidateLocalPromptPaths(this.localPromptQueue, path);
+    this.localPromptSteering = invalidateLocalPromptPaths(this.localPromptSteering, path);
+    this.saveThreadHistory();
+  }
   enqueueLocalPrompt(item) {
     this.localPromptQueue = enqueueLocalPrompt(this.localPromptQueue, item);
     this.saveThreadHistory();
@@ -1054,6 +1071,8 @@ export class PiAgentPlugin extends P.Plugin {
     }
     try {
       for (const [path, items] of byPath) {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof P.TFile) || file.extension !== "md") continue;
         const current = this.annotationStore.list(path);
         const ids = new Set(current.map((annotation) => annotation.id));
         this.annotationStore.replacePath(path, [

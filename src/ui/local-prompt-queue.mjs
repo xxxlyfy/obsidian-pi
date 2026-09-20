@@ -43,6 +43,28 @@ export function removeLocalPrompt(queue, id) {
   return queue.filter((item) => item.id !== id);
 }
 
+export function migrateLocalPromptPaths(queue, oldPath, newPath) {
+  if (!oldPath || !newPath || oldPath === newPath) return Array.isArray(queue) ? queue : [];
+  return (Array.isArray(queue) ? queue : []).map((item) => ({
+    ...item,
+    contextFilePath: item.contextFilePath === oldPath ? newPath : item.contextFilePath,
+    annotations: (Array.isArray(item.annotations) ? item.annotations : []).map((annotation) =>
+      annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
+    )
+  }));
+}
+
+export function invalidateLocalPromptPaths(queue, path) {
+  if (!path) return Array.isArray(queue) ? queue : [];
+  return (Array.isArray(queue) ? queue : []).map((item) => ({
+    ...item,
+    contextFilePath: item.contextFilePath === path ? undefined : item.contextFilePath,
+    annotations: (Array.isArray(item.annotations) ? item.annotations : []).filter(
+      (annotation) => annotation?.path !== path
+    )
+  }));
+}
+
 export function takeLocalPrompt(queue, id) {
   const index = queue.findIndex((item) => item.id === id && item.state === "pending");
   if (index < 0) return { queue, item: undefined, index: -1 };

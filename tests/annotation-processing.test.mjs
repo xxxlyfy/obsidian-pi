@@ -88,4 +88,9 @@ describe("annotation processing UX", () => {
     expect(viewSource).toContain("restoreUnsentAnnotations");
     expect(queueSource).toContain("restoreConsumedAnnotations(item.annotations)");
   });
+
+  it("keeps queued annotation snapshots in sync with note rename and delete", () => {
+    expect(pluginSource).toContain("this.migrateQueuedAnnotationPaths(oldPath, file.path)");
+    expect(pluginSource).toContain("this.invalidateQueuedAnnotationPaths(file.path)");
+  });
 });

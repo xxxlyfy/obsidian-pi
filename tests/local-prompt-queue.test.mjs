@@ -3,6 +3,8 @@ import { captureAnchor } from "../src/annotations/annotation-anchors.mjs";
 import {
   claimLocalPrompt,
   enqueueLocalPrompt,
+  invalidateLocalPromptPaths,
+  migrateLocalPromptPaths,
   nextDeliverablePrompt,
   normalizeLocalPromptQueue,
   releaseLocalPrompt,
@@ -121,5 +123,74 @@ describe("local prompt queue", () => {
     });
     expect(edited[1].prompt).toBe("changed");
     expect(removeLocalPrompt(edited, "one").map((item) => item.id)).toEqual(["two"]);
+  });
+
+  it("migrates queued annotation paths and context when a note is renamed", () => {
+    const annotation = {
+      id: "annotation-1",
+      path: "A.md",
+      intent: "change",
+      context: "Rewrite this",
+      targetKind: "selection",
+      ...captureAnchor("before target after", 7, 13)
+    };
+    const normalized = normalizeLocalPromptQueue([
+      {
+        id: "annotated",
+        prompt: "Apply annotations",
+        annotations: [annotation],
+        contextFilePath: "A.md",
+        threadId: "a",
+        createdAt: 1
+      },
+      { id: "plain", prompt: "plain", threadId: "a", createdAt: 2 }
+    ]);
+
+    const migrated = migrateLocalPromptPaths(normalized, "A.md", "B.md");
+
+    expect(migrated[0].contextFilePath).toBe("B.md");
+    expect(migrated[0].annotations[0].path).toBe("B.md");
+    expect(migrated[0].state).toBe("pending");
+    expect(migrated[1].contextFilePath).toBeUndefined();
+    expect(migrated[1].annotations).toEqual([]);
+    expect(normalized[0].contextFilePath).toBe("A.md");
+    expect(normalized[0].annotations[0].path).toBe("A.md");
+  });
+
+  it("drops queued annotations and context for a deleted note", () => {
+    const normalized = normalizeLocalPromptQueue([
+      {
+        id: "annotated",
+        prompt: "Apply annotations",
+        annotations: [
+          {
+            id: "annotation-1",
+            path: "A.md",
+            intent: "change",
+            context: "Rewrite this",
+            targetKind: "selection",
+            ...captureAnchor("before target after", 7, 13)
+          },
+          {
+            id: "annotation-2",
+            path: "B.md",
+            intent: "change",
+            context: "Rewrite that",
+            targetKind: "selection",
+            ...captureAnchor("before target after", 7, 13)
+          }
+        ],
+        contextFilePath: "A.md",
+        threadId: "a",
+        createdAt: 1
+      }
+    ]);
+
+    const invalidated = invalidateLocalPromptPaths(normalized, "A.md");
+
+    expect(invalidated[0].contextFilePath).toBeUndefined();
+    expect(invalidated[0].annotations.map((annotation) => annotation.id)).toEqual(["annotation-2"]);
+    expect(normalized[0].annotations).toHaveLength(2);
+    expect(normalized[0].contextFilePath).toBe("A.md");
   });
 });

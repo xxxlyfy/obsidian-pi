@@ -6264,6 +6264,26 @@ function updateLocalPrompt(queue, id, patch) {
 function removeLocalPrompt(queue, id) {
   return queue.filter((item) => item.id !== id);
 }
+function migrateLocalPromptPaths(queue, oldPath, newPath) {
+  if (!oldPath || !newPath || oldPath === newPath) return Array.isArray(queue) ? queue : [];
+  return (Array.isArray(queue) ? queue : []).map((item) => ({
+    ...item,
+    contextFilePath: item.contextFilePath === oldPath ? newPath : item.contextFilePath,
+    annotations: (Array.isArray(item.annotations) ? item.annotations : []).map((annotation) =>
+      annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
+    )
+  }));
+}
+function invalidateLocalPromptPaths(queue, path6) {
+  if (!path6) return Array.isArray(queue) ? queue : [];
+  return (Array.isArray(queue) ? queue : []).map((item) => ({
+    ...item,
+    contextFilePath: item.contextFilePath === path6 ? void 0 : item.contextFilePath,
+    annotations: (Array.isArray(item.annotations) ? item.annotations : []).filter(
+      (annotation) => annotation?.path !== path6
+    )
+  }));
+}
 function takeLocalPrompt(queue, id) {
   const index = queue.findIndex((item) => item.id === id && item.state === "pending");
   if (index < 0) return { queue, item: void 0, index: -1 };
@@ -10428,8 +10448,9 @@ var PiAgentPlugin = class extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
+        if (file.extension !== "md") return;
+        this.migrateQueuedAnnotationPaths(oldPath, file.path);
         if (
-          file.extension === "md" &&
           this.annotationStore.list(oldPath).length > 0 &&
           !this.annotationStore.renamePath(oldPath, file.path)
         )
@@ -10440,7 +10461,9 @@ var PiAgentPlugin = class extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file.extension === "md") this.annotationStore.deletePath(file.path);
+        if (file.extension !== "md") return;
+        this.annotationStore.deletePath(file.path);
+        this.invalidateQueuedAnnotationPaths(file.path);
       })
     );
     this.registerView(PI_AGENT_VIEW_TYPE, (leaf) => new PiAgentView(leaf, this));
@@ -11127,6 +11150,18 @@ var PiAgentPlugin = class extends P.Plugin {
     this.localPromptQueue = normalizeLocalPromptQueue(queue, { preserveState: true });
     this.saveThreadHistory();
   }
+  migrateQueuedAnnotationPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    this.localPromptQueue = migrateLocalPromptPaths(this.localPromptQueue, oldPath, newPath);
+    this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
+    this.saveThreadHistory();
+  }
+  invalidateQueuedAnnotationPaths(path6) {
+    if (!path6) return;
+    this.localPromptQueue = invalidateLocalPromptPaths(this.localPromptQueue, path6);
+    this.localPromptSteering = invalidateLocalPromptPaths(this.localPromptSteering, path6);
+    this.saveThreadHistory();
+  }
   enqueueLocalPrompt(item) {
     this.localPromptQueue = enqueueLocalPrompt(this.localPromptQueue, item);
     this.saveThreadHistory();
@@ -11274,6 +11309,8 @@ var PiAgentPlugin = class extends P.Plugin {
     }
     try {
       for (const [path6, items] of byPath) {
+        const file = this.app.vault.getAbstractFileByPath(path6);
+        if (!(file instanceof P.TFile) || file.extension !== "md") continue;
         const current = this.annotationStore.list(path6);
         const ids = new Set(current.map((annotation) => annotation.id));
         this.annotationStore.replacePath(path6, [
