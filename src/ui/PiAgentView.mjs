@@ -120,7 +120,7 @@ export class PiAgentView extends f.ItemView {
     this.messageActions = new MessageActions(this.plugin, {
       getInput: () => this.inputEl,
       runPrompt: (c) => {
-        this.runPrompt(c);
+        this.startPrompt(c);
       },
       insertIntoCurrentNote: (c) => {
         var p;
@@ -275,7 +275,9 @@ export class PiAgentView extends f.ItemView {
       this.suggestions?.update();
     });
     this.inputEl.addEventListener("blur", () => {
-      window.setTimeout(() => {
+      if (this.suggestionBlurTimer) window.clearTimeout(this.suggestionBlurTimer);
+      this.suggestionBlurTimer = window.setTimeout(() => {
+        this.suggestionBlurTimer = undefined;
         this.suggestions?.close();
       }, 120);
     });
@@ -334,6 +336,8 @@ export class PiAgentView extends f.ItemView {
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
     this.clearStreamingRenderTimer();
+    if (this.suggestionBlurTimer) window.clearTimeout(this.suggestionBlurTimer);
+    this.suggestionBlurTimer = undefined;
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
     this.noteActions = void 0;
@@ -520,7 +524,14 @@ export class PiAgentView extends f.ItemView {
     let attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
     const contextFilePath = this.plugin.getCurrentContextFile()?.path;
     if (!e && images.length === 0 && attachments.length === 0) return;
-    if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
+    if (images.length > 0) {
+      try {
+        await this.plugin.ensureModelCatalogLoaded();
+      } catch (error) {
+        new f.Notice(error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
     if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
       new f.Notice("The selected Pi model does not support image input.");
       return;
@@ -532,7 +543,7 @@ export class PiAgentView extends f.ItemView {
     if ((n = this.suggestions) != null) n.close();
     this.resizeInput();
     this.syncCurrentRunFlags();
-    this.runPrompt(e, undefined, images, undefined, attachments, undefined, contextFilePath);
+    this.startPrompt(e, undefined, images, undefined, attachments, undefined, contextFilePath);
     this.setRunningState(this.running);
   }
   handleSendButtonClick() {
@@ -836,6 +847,11 @@ export class PiAgentView extends f.ItemView {
   }
   runAnnotationPrompt(prompt, sourcePath) {
     return this.runPrompt(prompt, undefined, [], undefined, [], undefined, sourcePath);
+  }
+  startPrompt(...args) {
+    void this.runPrompt(...args).catch((error) => {
+      new f.Notice(error instanceof Error ? error.message : String(error));
+    });
   }
   async runPrompt(
     e,

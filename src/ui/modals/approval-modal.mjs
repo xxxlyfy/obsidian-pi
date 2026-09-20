@@ -31,9 +31,13 @@ export class ApprovalModal extends Modal {
     actionsEl
       .createEl("button", { text: "Apply change", cls: "mod-cta" })
       .addEventListener("click", async () => {
-        await this.applyChange();
-        this.finish();
-        this.close();
+        try {
+          await this.applyChange();
+          this.finish();
+          this.close();
+        } catch (error) {
+          new Notice(error instanceof Error ? error.message : String(error));
+        }
       });
   }
 

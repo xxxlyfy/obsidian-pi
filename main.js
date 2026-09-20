@@ -5749,9 +5749,13 @@ var ApprovalModal = class extends import_obsidian7.Modal {
     actionsEl
       .createEl("button", { text: "Apply change", cls: "mod-cta" })
       .addEventListener("click", async () => {
-        await this.applyChange();
-        this.finish();
-        this.close();
+        try {
+          await this.applyChange();
+          this.finish();
+          this.close();
+        } catch (error) {
+          new import_obsidian7.Notice(error instanceof Error ? error.message : String(error));
+        }
       });
   }
   onClose() {
@@ -5815,16 +5819,24 @@ pi --version`;
     actionsEl
       .createEl("button", { text: needsNode ? "Copy diagnostic commands" : "Copy install command" })
       .addEventListener("click", async () => {
-        await navigator.clipboard.writeText(needsNode ? commandText : INSTALL_COMMAND);
-        new import_obsidian8.Notice(
-          needsNode ? "Copied diagnostic commands." : "Copied Pi install command."
-        );
+        try {
+          await navigator.clipboard.writeText(needsNode ? commandText : INSTALL_COMMAND);
+          new import_obsidian8.Notice(
+            needsNode ? "Copied diagnostic commands." : "Copied Pi install command."
+          );
+        } catch (error) {
+          new import_obsidian8.Notice(error instanceof Error ? error.message : String(error));
+        }
       });
     actionsEl
       .createEl("button", { text: "Do not show again" })
       .addEventListener("click", async () => {
         this.plugin.settings.dismissedPiSetup = true;
-        await this.plugin.saveSettings();
+        try {
+          await this.plugin.saveSettings();
+        } catch (error) {
+          new import_obsidian8.Notice(error instanceof Error ? error.message : String(error));
+        }
         this.close();
       });
     actionsEl
@@ -5959,20 +5971,24 @@ ${message.content}`)
         item
           .setTitle("Insert into current note")
           .setIcon("file-plus")
-          .onClick(() => this.callbacks.insertIntoCurrentNote(message.content))
+          .onClick(() =>
+            this.runSafely(() => this.callbacks.insertIntoCurrentNote(message.content))
+          )
       );
       menu.addItem((item) =>
         item
           .setTitle("Create note from response")
           .setIcon("file-text")
-          .onClick(() => this.callbacks.createNoteFromResponse(message.content))
+          .onClick(() =>
+            this.runSafely(() => this.callbacks.createNoteFromResponse(message.content))
+          )
       );
       menu.addItem((item) =>
         item
           .setTitle("Open cited notes")
           .setIcon("links-coming-in")
           .setDisabled(this.callbacks.extractVaultLinks(message.content).length === 0)
-          .onClick(() => this.callbacks.openCitedNotes(message.content))
+          .onClick(() => this.runSafely(() => this.callbacks.openCitedNotes(message.content)))
       );
       menu.addSeparator();
       menu.addItem((item) =>
@@ -5989,8 +6005,20 @@ ${message.content}`)
     menu.showAtMouseEvent(event);
   }
   async copyResponse(content) {
-    await navigator.clipboard.writeText(content);
-    new import_obsidian10.Notice("Copied response.");
+    try {
+      await navigator.clipboard.writeText(content);
+      new import_obsidian10.Notice("Copied response.");
+    } catch (error) {
+      new import_obsidian10.Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+  runSafely(action) {
+    Promise.resolve()
+      .then(action)
+      .catch(
+        (error) =>
+          new import_obsidian10.Notice(error instanceof Error ? error.message : String(error))
+      );
   }
 };
 
@@ -6213,7 +6241,7 @@ function runNextQueuedPrompt() {
   this.promptQueue = claimed.queue;
   this.plugin.replaceLocalPromptQueue(this.promptQueue);
   this.renderPromptQueue();
-  this.runPrompt(
+  this.startPrompt(
     item.prompt,
     item.threadId,
     item.images,
@@ -8313,7 +8341,7 @@ var PiAgentView = class extends f4.ItemView {
     this.messageActions = new MessageActions(this.plugin, {
       getInput: () => this.inputEl,
       runPrompt: (c) => {
-        this.runPrompt(c);
+        this.startPrompt(c);
       },
       insertIntoCurrentNote: (c) => {
         var p;
@@ -8468,7 +8496,9 @@ var PiAgentView = class extends f4.ItemView {
       this.suggestions?.update();
     });
     this.inputEl.addEventListener("blur", () => {
-      window.setTimeout(() => {
+      if (this.suggestionBlurTimer) window.clearTimeout(this.suggestionBlurTimer);
+      this.suggestionBlurTimer = window.setTimeout(() => {
+        this.suggestionBlurTimer = void 0;
         this.suggestions?.close();
       }, 120);
     });
@@ -8527,6 +8557,8 @@ var PiAgentView = class extends f4.ItemView {
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
     this.clearStreamingRenderTimer();
+    if (this.suggestionBlurTimer) window.clearTimeout(this.suggestionBlurTimer);
+    this.suggestionBlurTimer = void 0;
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
     this.noteActions = void 0;
@@ -8713,7 +8745,14 @@ var PiAgentView = class extends f4.ItemView {
     let attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
     const contextFilePath = this.plugin.getCurrentContextFile()?.path;
     if (!e && images.length === 0 && attachments.length === 0) return;
-    if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
+    if (images.length > 0) {
+      try {
+        await this.plugin.ensureModelCatalogLoaded();
+      } catch (error) {
+        new f4.Notice(error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
     if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
       new f4.Notice("The selected Pi model does not support image input.");
       return;
@@ -8725,7 +8764,7 @@ var PiAgentView = class extends f4.ItemView {
     if ((n = this.suggestions) != null) n.close();
     this.resizeInput();
     this.syncCurrentRunFlags();
-    this.runPrompt(e, void 0, images, void 0, attachments, void 0, contextFilePath);
+    this.startPrompt(e, void 0, images, void 0, attachments, void 0, contextFilePath);
     this.setRunningState(this.running);
   }
   handleSendButtonClick() {
@@ -9030,6 +9069,11 @@ var PiAgentView = class extends f4.ItemView {
   }
   runAnnotationPrompt(prompt, sourcePath) {
     return this.runPrompt(prompt, void 0, [], void 0, [], void 0, sourcePath);
+  }
+  startPrompt(...args) {
+    void this.runPrompt(...args).catch((error) => {
+      new f4.Notice(error instanceof Error ? error.message : String(error));
+    });
   }
   async runPrompt(
     e,
@@ -10466,7 +10510,14 @@ var PiAgentPlugin = class extends P.Plugin {
   async saveSettings() {
     this.modelCatalogGeneration += 1;
     this.modelCatalogRefreshedAt = 0;
-    await this.savePluginData();
+    try {
+      await this.savePluginData();
+    } catch (error) {
+      new P.Notice(
+        `Pi Agent: \u65E0\u6CD5\u4FDD\u5B58\u8BBE\u7F6E\uFF1A${error instanceof Error ? error.message : String(error)}`
+      );
+      return;
+    }
     if (this.hasActivePiRuns()) this.pendingServiceRebuild = true;
     else this.rebuildServices();
   }
@@ -10635,22 +10686,24 @@ var PiAgentPlugin = class extends P.Plugin {
   async getThreadSessionStats(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).getSessionStats(thread.piSessionId);
+    return this.withSessionRunner(threadId, (runner) => runner.getSessionStats(thread.piSessionId));
   }
   async exportThreadSession(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).exportSession(thread.piSessionId);
+    return this.withSessionRunner(threadId, (runner) => runner.exportSession(thread.piSessionId));
   }
   async getThreadSessionTree(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).getSessionTree(thread.piSessionId);
+    return this.withSessionRunner(threadId, (runner) => runner.getSessionTree(thread.piSessionId));
   }
   async getThreadSessionEntries(threadId, since) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).getSessionEntries(thread.piSessionId, since);
+    return this.withSessionRunner(threadId, (runner) =>
+      runner.getSessionEntries(thread.piSessionId, since)
+    );
   }
   getThreadDisplayMessageCount(e) {
     let t = Array.isArray(e == null ? void 0 : e.messages) ? e.messages.length : 0,
@@ -10658,24 +10711,43 @@ var PiAgentPlugin = class extends P.Plugin {
     return Math.max(t, n);
   }
   countPiSessionChatMessages(e) {
-    let t = this.pi?.resolveSessionPath(e);
-    if (!t || !import_node_fs5.default.existsSync(t)) return 0;
+    const sessionPath = this.pi?.resolveSessionPath(e);
+    if (!sessionPath) return 0;
+    let stat;
     try {
-      return import_node_fs5.default
-        .readFileSync(t, "utf8")
+      stat = import_node_fs5.default.statSync(sessionPath);
+    } catch {
+      this.piSessionCountCache?.delete(sessionPath);
+      return 0;
+    }
+    const cached = this.piSessionCountCache?.get(sessionPath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.count;
+    }
+    try {
+      const count = import_node_fs5.default
+        .readFileSync(sessionPath, "utf8")
         .split(/\r?\n/)
-        .reduce((t2, n) => {
-          if (!n.trim()) return t2;
+        .reduce((total, line) => {
+          if (!line.trim()) return total;
           try {
-            let s = JSON.parse(n),
-              a = s == null ? void 0 : s.message;
-            return s.type === "message" && (a?.role === "user" || a?.role === "assistant")
-              ? t2 + 1
-              : t2;
+            const parsed = JSON.parse(line);
+            const message = parsed?.message;
+            return parsed.type === "message" &&
+              (message?.role === "user" || message?.role === "assistant")
+              ? total + 1
+              : total;
           } catch {
-            return t2;
+            return total;
           }
         }, 0);
+      this.piSessionCountCache ??= /* @__PURE__ */ new Map();
+      this.piSessionCountCache.set(sessionPath, {
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        count
+      });
+      return count;
     } catch {
       return 0;
     }
@@ -10778,9 +10850,9 @@ var PiAgentPlugin = class extends P.Plugin {
     this.saveThreadHistory();
     if (thread?.piSessionId) {
       const sessionName = this.threadHistory.getThread(e)?.title ?? t;
-      this.createPiRunner(e)
-        .setSessionName(thread.piSessionId, sessionName)
-        .catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
+      void this.withSessionRunner(e, (runner) =>
+        runner.setSessionName(thread.piSessionId, sessionName)
+      ).catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
     }
     return true;
   }
@@ -11020,6 +11092,18 @@ var PiAgentPlugin = class extends P.Plugin {
     this.threadRunners.set(threadId, runner);
     return runner;
   }
+  async withSessionRunner(threadId, action) {
+    const existing = this.threadRunners.get(threadId);
+    const runner = this.createPiRunner(threadId);
+    try {
+      return await action(runner);
+    } finally {
+      if (!existing) {
+        runner.rpcClient?.dispose();
+        this.threadRunners.delete(threadId);
+      }
+    }
+  }
   disposeThreadRunners() {
     for (const runner of this.threadRunners.values()) runner.rpcClient?.dispose();
     this.threadRunners.clear();
@@ -11163,7 +11247,7 @@ var PiAgentPlugin = class extends P.Plugin {
     let t = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0],
       n = t == null ? void 0 : t.view;
     if (n instanceof PiAgentView) {
-      n.runPrompt(e);
+      n.startPrompt(e);
       return;
     }
     new P.Notice("Could not open Pi view.");
@@ -11179,10 +11263,14 @@ var PiAgentPlugin = class extends P.Plugin {
       new P.Notice("Could not open Pi view.");
       return;
     }
-    await view.runAnnotationPrompt(
-      "Follow every annotation's user-authored request. Batch non-overlapping Change annotations for this note into one targeted edit call, and answer each Question annotation without modifying its target.",
-      path6
-    );
+    try {
+      await view.runAnnotationPrompt(
+        "Follow every annotation's user-authored request. Batch non-overlapping Change annotations for this note into one targeted edit call, and answer each Question annotation without modifying its target.",
+        path6
+      );
+    } catch (error) {
+      new P.Notice(error instanceof Error ? error.message : String(error));
+    }
   }
   async suggestFrontmatterForCurrentNote() {
     var o;

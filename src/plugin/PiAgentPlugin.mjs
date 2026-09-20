@@ -358,7 +358,14 @@ export class PiAgentPlugin extends P.Plugin {
     // the race against settings persistence or a service restart.
     this.modelCatalogGeneration += 1;
     this.modelCatalogRefreshedAt = 0;
-    await this.savePluginData();
+    try {
+      await this.savePluginData();
+    } catch (error) {
+      new P.Notice(
+        `Pi Agent: 无法保存设置：${error instanceof Error ? error.message : String(error)}`
+      );
+      return;
+    }
     if (this.hasActivePiRuns()) this.pendingServiceRebuild = true;
     else this.rebuildServices();
   }
@@ -535,22 +542,24 @@ export class PiAgentPlugin extends P.Plugin {
   async getThreadSessionStats(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return undefined;
-    return this.createPiRunner(threadId).getSessionStats(thread.piSessionId);
+    return this.withSessionRunner(threadId, (runner) => runner.getSessionStats(thread.piSessionId));
   }
   async exportThreadSession(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return undefined;
-    return this.createPiRunner(threadId).exportSession(thread.piSessionId);
+    return this.withSessionRunner(threadId, (runner) => runner.exportSession(thread.piSessionId));
   }
   async getThreadSessionTree(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return undefined;
-    return this.createPiRunner(threadId).getSessionTree(thread.piSessionId);
+    return this.withSessionRunner(threadId, (runner) => runner.getSessionTree(thread.piSessionId));
   }
   async getThreadSessionEntries(threadId, since) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return undefined;
-    return this.createPiRunner(threadId).getSessionEntries(thread.piSessionId, since);
+    return this.withSessionRunner(threadId, (runner) =>
+      runner.getSessionEntries(thread.piSessionId, since)
+    );
   }
   getThreadDisplayMessageCount(e) {
     let t = Array.isArray(e == null ? void 0 : e.messages) ? e.messages.length : 0,
@@ -558,24 +567,46 @@ export class PiAgentPlugin extends P.Plugin {
     return Math.max(t, n);
   }
   countPiSessionChatMessages(e) {
-    let t = this.pi?.resolveSessionPath(e);
-    if (!t || !fs.existsSync(t)) return 0;
+    const sessionPath = this.pi?.resolveSessionPath(e);
+    if (!sessionPath) return 0;
+
+    let stat;
     try {
-      return fs
-        .readFileSync(t, "utf8")
+      stat = fs.statSync(sessionPath);
+    } catch {
+      this.piSessionCountCache?.delete(sessionPath);
+      return 0;
+    }
+
+    const cached = this.piSessionCountCache?.get(sessionPath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.count;
+    }
+
+    try {
+      const count = fs
+        .readFileSync(sessionPath, "utf8")
         .split(/\r?\n/)
-        .reduce((t, n) => {
-          if (!n.trim()) return t;
+        .reduce((total, line) => {
+          if (!line.trim()) return total;
           try {
-            let s = JSON.parse(n),
-              a = s == null ? void 0 : s.message;
-            return s.type === "message" && (a?.role === "user" || a?.role === "assistant")
-              ? t + 1
-              : t;
+            const parsed = JSON.parse(line);
+            const message = parsed?.message;
+            return parsed.type === "message" &&
+              (message?.role === "user" || message?.role === "assistant")
+              ? total + 1
+              : total;
           } catch {
-            return t;
+            return total;
           }
         }, 0);
+      this.piSessionCountCache ??= new Map();
+      this.piSessionCountCache.set(sessionPath, {
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        count
+      });
+      return count;
     } catch {
       return 0;
     }
@@ -686,9 +717,9 @@ export class PiAgentPlugin extends P.Plugin {
     this.saveThreadHistory();
     if (thread?.piSessionId) {
       const sessionName = this.threadHistory.getThread(e)?.title ?? t;
-      this.createPiRunner(e)
-        .setSessionName(thread.piSessionId, sessionName)
-        .catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
+      void this.withSessionRunner(e, (runner) =>
+        runner.setSessionName(thread.piSessionId, sessionName)
+      ).catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
     }
     return true;
   }
@@ -927,6 +958,18 @@ export class PiAgentPlugin extends P.Plugin {
     this.threadRunners.set(threadId, runner);
     return runner;
   }
+  async withSessionRunner(threadId, action) {
+    const existing = this.threadRunners.get(threadId);
+    const runner = this.createPiRunner(threadId);
+    try {
+      return await action(runner);
+    } finally {
+      if (!existing) {
+        runner.rpcClient?.dispose();
+        this.threadRunners.delete(threadId);
+      }
+    }
+  }
   disposeThreadRunners() {
     for (const runner of this.threadRunners.values()) runner.rpcClient?.dispose();
     this.threadRunners.clear();
@@ -1072,7 +1115,7 @@ export class PiAgentPlugin extends P.Plugin {
     let t = this.app.workspace.getLeavesOfType(T)[0],
       n = t == null ? void 0 : t.view;
     if (n instanceof PiAgentView) {
-      n.runPrompt(e);
+      n.startPrompt(e);
       return;
     }
     new P.Notice("Could not open Pi view.");
@@ -1088,10 +1131,14 @@ export class PiAgentPlugin extends P.Plugin {
       new P.Notice("Could not open Pi view.");
       return;
     }
-    await view.runAnnotationPrompt(
-      "Follow every annotation's user-authored request. Batch non-overlapping Change annotations for this note into one targeted edit call, and answer each Question annotation without modifying its target.",
-      path
-    );
+    try {
+      await view.runAnnotationPrompt(
+        "Follow every annotation's user-authored request. Batch non-overlapping Change annotations for this note into one targeted edit call, and answer each Question annotation without modifying its target.",
+        path
+      );
+    } catch (error) {
+      new P.Notice(error instanceof Error ? error.message : String(error));
+    }
   }
   async suggestFrontmatterForCurrentNote() {
     var o;

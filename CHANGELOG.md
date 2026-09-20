@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.0.27
+
+- Hardened the plugin after a full code review: settings saves that fail now surface a notice instead of an unhandled promise rejection, and fire-and-forget prompt actions (composer, command palette, prompt queue, annotations, message actions, and modals) report failures through a notice instead of failing silently.
+- Cached per-session message counts (validated by file mtime/size) so rendering the chat list no longer re-reads and re-parses every Pi session JSONL on each render.
+- One-off session operations (stats, export, session tree/entries, and Pi session rename) now dispose the temporary Pi runner they create instead of leaving a persistent child process.
+- Cleared the composer suggestion blur timer on close.
+- Added `.gitattributes` (`* text=auto eol=lf`) so line endings and Prettier's format check are consistent across platforms.
+
 ## 0.0.26
 
 - Fixed a streaming regression: when answer text started right after thinking, the throttled renderer kept updating only the thinking block and did not create the streaming answer element until the run finished. The flush now creates the streaming message as soon as answer text is available.

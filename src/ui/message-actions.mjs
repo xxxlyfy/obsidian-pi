@@ -41,20 +41,24 @@ export class MessageActions {
         item
           .setTitle("Insert into current note")
           .setIcon("file-plus")
-          .onClick(() => this.callbacks.insertIntoCurrentNote(message.content))
+          .onClick(() =>
+            this.runSafely(() => this.callbacks.insertIntoCurrentNote(message.content))
+          )
       );
       menu.addItem((item) =>
         item
           .setTitle("Create note from response")
           .setIcon("file-text")
-          .onClick(() => this.callbacks.createNoteFromResponse(message.content))
+          .onClick(() =>
+            this.runSafely(() => this.callbacks.createNoteFromResponse(message.content))
+          )
       );
       menu.addItem((item) =>
         item
           .setTitle("Open cited notes")
           .setIcon("links-coming-in")
           .setDisabled(this.callbacks.extractVaultLinks(message.content).length === 0)
-          .onClick(() => this.callbacks.openCitedNotes(message.content))
+          .onClick(() => this.runSafely(() => this.callbacks.openCitedNotes(message.content)))
       );
       menu.addSeparator();
       menu.addItem((item) =>
@@ -73,7 +77,17 @@ export class MessageActions {
   }
 
   async copyResponse(content) {
-    await navigator.clipboard.writeText(content);
-    new Notice("Copied response.");
+    try {
+      await navigator.clipboard.writeText(content);
+      new Notice("Copied response.");
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  runSafely(action) {
+    Promise.resolve()
+      .then(action)
+      .catch((error) => new Notice(error instanceof Error ? error.message : String(error)));
   }
 }

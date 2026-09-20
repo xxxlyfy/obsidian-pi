@@ -34,14 +34,22 @@ export class PiSetupModal extends Modal {
     actionsEl
       .createEl("button", { text: needsNode ? "Copy diagnostic commands" : "Copy install command" })
       .addEventListener("click", async () => {
-        await navigator.clipboard.writeText(needsNode ? commandText : INSTALL_COMMAND);
-        new Notice(needsNode ? "Copied diagnostic commands." : "Copied Pi install command.");
+        try {
+          await navigator.clipboard.writeText(needsNode ? commandText : INSTALL_COMMAND);
+          new Notice(needsNode ? "Copied diagnostic commands." : "Copied Pi install command.");
+        } catch (error) {
+          new Notice(error instanceof Error ? error.message : String(error));
+        }
       });
     actionsEl
       .createEl("button", { text: "Do not show again" })
       .addEventListener("click", async () => {
         this.plugin.settings.dismissedPiSetup = true;
-        await this.plugin.saveSettings();
+        try {
+          await this.plugin.saveSettings();
+        } catch (error) {
+          new Notice(error instanceof Error ? error.message : String(error));
+        }
         this.close();
       });
     actionsEl

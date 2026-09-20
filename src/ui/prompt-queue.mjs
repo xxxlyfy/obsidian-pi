@@ -51,7 +51,7 @@ export function runNextQueuedPrompt() {
   this.promptQueue = claimed.queue;
   this.plugin.replaceLocalPromptQueue(this.promptQueue);
   this.renderPromptQueue();
-  this.runPrompt(
+  this.startPrompt(
     item.prompt,
     item.threadId,
     item.images,
