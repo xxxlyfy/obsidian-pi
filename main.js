@@ -6714,11 +6714,10 @@ function showThreadList() {
   this.renderThreadList();
 }
 function renderThreadList() {
-  var a;
-  let e = this.containerEl.children[1],
-    t = this.plugin.listThreads({ includeArchived: true }),
-    n = this.plugin.getCurrentThread();
-  if ((a = this.suggestions) != null) a.close();
+  let root = this.containerEl.children[1],
+    threads = this.plugin.listThreads({ includeArchived: true }),
+    currentThread = this.plugin.getCurrentThread();
+  this.suggestions?.close();
   this.cleanupComposerBarObserver();
   this.messagesEl = void 0;
   this.inputEl = void 0;
@@ -6729,97 +6728,102 @@ function renderThreadList() {
   this.toolBadgesEl = void 0;
   this.threadTitleEl = void 0;
   this.threadFavoriteEl = void 0;
-  e.empty();
-  e.addClass("pi-agent-view");
-  let s = e.createDiv({ cls: "pi-agent-thread-list-header" }),
-    o = s.createEl("button", {
+  root.empty();
+  root.addClass("pi-agent-view");
+  let header = root.createDiv({ cls: "pi-agent-thread-list-header" }),
+    backButton = header.createEl("button", {
       cls: "clickable-icon pi-agent-header-action",
       attr: { "aria-label": "Back to chat", title: "Back to chat" }
     });
-  (0, f2.setIcon)(o, "arrow-left");
-  o.addEventListener("click", () => this.renderChatView());
-  let l = s.createDiv({ cls: "pi-agent-thread-list-heading" });
-  l.createDiv({ cls: "pi-agent-thread-list-title-heading", text: "Threads" });
-  l.createDiv({
+  (0, f2.setIcon)(backButton, "arrow-left");
+  backButton.addEventListener("click", () => this.renderChatView());
+  let heading = header.createDiv({ cls: "pi-agent-thread-list-heading" });
+  heading.createDiv({ cls: "pi-agent-thread-list-title-heading", text: "Threads" });
+  heading.createDiv({
     cls: "pi-agent-thread-list-subtitle",
-    text: `${t.length} chat${t.length === 1 ? "" : "s"}`
+    text: `${threads.length} chat${threads.length === 1 ? "" : "s"}`
   });
-  let deleteChatsButton = s.createEl("button", {
+  let deleteChatsButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": "Delete chats", title: "Delete chats" }
   });
   (0, f2.setIcon)(deleteChatsButton, "trash-2");
   deleteChatsButton.addEventListener("click", () => this.deleteChats());
-  let d = s.createEl("button", {
+  let newChatButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": "New chat", title: "New chat" }
   });
-  (0, f2.setIcon)(d, "plus");
-  d.addEventListener("click", () => {
+  (0, f2.setIcon)(newChatButton, "plus");
+  newChatButton.addEventListener("click", () => {
     this.plugin.startNewThread();
     this.renderChatView();
   });
-  let h = e.createDiv({ cls: "pi-agent-thread-list" });
-  t.length === 0
-    ? h.createDiv({ cls: "pi-agent-empty", text: "No chat threads." })
-    : t.forEach((m) => this.renderThreadListRow(h, m, m.id === n.id));
+  let listEl = root.createDiv({ cls: "pi-agent-thread-list" });
+  threads.length === 0
+    ? listEl.createDiv({ cls: "pi-agent-empty", text: "No chat threads." })
+    : threads.forEach((thread) =>
+        this.renderThreadListRow(listEl, thread, thread.id === currentThread.id)
+      );
 }
-function renderThreadListRow(e, t, n) {
-  let s = e.createDiv({
-      cls: `pi-agent-thread-list-row${n ? " is-current" : ""}`
+function renderThreadListRow(listEl, thread, isCurrent) {
+  let row = listEl.createDiv({
+      cls: `pi-agent-thread-list-row${isCurrent ? " is-current" : ""}`
     }),
-    a = s.createDiv({ cls: "pi-agent-thread-list-info" }),
-    o = a.createDiv({
+    info = row.createDiv({ cls: "pi-agent-thread-list-info" }),
+    titleEl = info.createDiv({
       cls: "pi-agent-thread-list-title",
       attr: { title: "Open chat" }
     });
-  if (this.isThreadRunning(t.id)) {
-    let h2 = o.createSpan({
+  if (this.isThreadRunning(thread.id)) {
+    let runningEl = titleEl.createSpan({
       cls: "pi-agent-thread-list-running",
       attr: { title: "Agent is running in this chat" }
     });
-    (0, f2.setIcon)(h2, "loader");
+    (0, f2.setIcon)(runningEl, "loader");
   }
-  o.createSpan({ text: t.title });
-  s.addEventListener("click", () => {
-    this.plugin.switchThread(t.id);
+  titleEl.createSpan({ text: thread.title });
+  row.addEventListener("click", () => {
+    this.plugin.switchThread(thread.id);
     this.renderChatView();
   });
-  a.createDiv({ cls: "pi-agent-thread-list-meta", text: this.formatThreadMeta(t, n) });
-  let l = s.createDiv({ cls: "pi-agent-thread-list-actions" }),
-    d = l.createEl("button", {
-      cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${t.favorite ? " is-favorite" : ""}`,
+  info.createDiv({
+    cls: "pi-agent-thread-list-meta",
+    text: this.formatThreadMeta(thread, isCurrent)
+  });
+  let actions = row.createDiv({ cls: "pi-agent-thread-list-actions" }),
+    favoriteButton = actions.createEl("button", {
+      cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${thread.favorite ? " is-favorite" : ""}`,
       attr: {
-        "aria-label": t.favorite ? "Remove favorite" : "Mark as favorite",
-        title: t.favorite ? "Remove favorite" : "Mark as favorite",
-        "aria-pressed": String(t.favorite === true)
+        "aria-label": thread.favorite ? "Remove favorite" : "Mark as favorite",
+        title: thread.favorite ? "Remove favorite" : "Mark as favorite",
+        "aria-pressed": String(thread.favorite === true)
       }
     }),
-    deleteButton = l.createEl("button", {
+    deleteButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action pi-agent-thread-delete",
       attr: { "aria-label": "Delete chat", title: "Delete chat" }
     }),
-    h = l.createEl("button", {
+    moreButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action",
       attr: { "aria-label": "Thread actions", title: "Thread actions" }
     });
-  (0, f2.setIcon)(d, "star");
-  d.addEventListener("click", (u) => {
-    u.preventDefault();
-    u.stopPropagation();
-    this.toggleThreadFavorite(t);
+  (0, f2.setIcon)(favoriteButton, "star");
+  favoriteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.toggleThreadFavorite(thread);
   });
   (0, f2.setIcon)(deleteButton, "trash-2");
-  deleteButton.addEventListener("click", (u) => {
-    u.preventDefault();
-    u.stopPropagation();
-    this.deleteThreadFromList(t);
+  deleteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.deleteThreadFromList(thread);
   });
-  (0, f2.setIcon)(h, "more-horizontal");
-  h.addEventListener("click", (u) => {
-    u.preventDefault();
-    u.stopPropagation();
-    this.showThreadRowMenu(u, t, n, o);
+  (0, f2.setIcon)(moreButton, "more-horizontal");
+  moreButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.showThreadRowMenu(event, thread, isCurrent, titleEl);
   });
 }
 async function deleteChats() {
@@ -6849,40 +6853,40 @@ async function deleteChats() {
   );
   this.renderThreadList();
 }
-function showThreadRowMenu(e, t, n, s) {
-  let a = new f2.Menu();
-  a.addItem((o) =>
-    o
-      .setTitle(n ? "Current chat" : "Open")
-      .setIcon(n ? "check" : "arrow-right")
-      .setDisabled(n)
+function showThreadRowMenu(event, thread, isCurrent, titleEl) {
+  let menu = new f2.Menu();
+  menu.addItem((item) =>
+    item
+      .setTitle(isCurrent ? "Current chat" : "Open")
+      .setIcon(isCurrent ? "check" : "arrow-right")
+      .setDisabled(isCurrent)
       .onClick(() => {
-        this.plugin.switchThread(t.id);
+        this.plugin.switchThread(thread.id);
         this.renderChatView();
       })
   );
-  a.addItem((o) =>
-    o
-      .setTitle(t.favorite ? "Remove favorite" : "Mark as favorite")
+  menu.addItem((item) =>
+    item
+      .setTitle(thread.favorite ? "Remove favorite" : "Mark as favorite")
       .setIcon("star")
-      .onClick(() => this.toggleThreadFavorite(t))
+      .onClick(() => this.toggleThreadFavorite(thread))
   );
-  a.addItem((o) =>
-    o
+  menu.addItem((item) =>
+    item
       .setTitle("Rename")
       .setIcon("pencil")
-      .onClick(() => this.startThreadListRename(t, s))
+      .onClick(() => this.startThreadListRename(thread, titleEl))
   );
-  if (t.piSessionId) {
-    a.addItem((o) =>
-      o
+  if (thread.piSessionId) {
+    menu.addItem((item) =>
+      item
         .setTitle(`${PI_BRAND_NAME} session info`)
         .setIcon("info")
         .onClick(async () => {
           try {
             const [stats, tree] = await Promise.all([
-              this.plugin.getThreadSessionStats(t.id),
-              this.plugin.getThreadSessionTree(t.id)
+              this.plugin.getThreadSessionStats(thread.id),
+              this.plugin.getThreadSessionTree(thread.id)
             ]);
             const entryCount = countSessionEntries(tree?.tree ?? []);
             new f2.Notice(
@@ -6896,13 +6900,13 @@ ${stats.totalMessages} messages \xB7 ${entryCount} tree entries \xB7 ${stats.tok
           }
         })
     );
-    a.addItem((o) =>
-      o
+    menu.addItem((item) =>
+      item
         .setTitle(`Export ${PI_BRAND_NAME} session to HTML`)
         .setIcon("download")
         .onClick(async () => {
           try {
-            const result = await this.plugin.exportThreadSession(t.id);
+            const result = await this.plugin.exportThreadSession(thread.id);
             new f2.Notice(result?.path ? `Exported to ${result.path}` : "Session export failed.");
           } catch (error) {
             new f2.Notice(error instanceof Error ? error.message : String(error));
@@ -6910,66 +6914,66 @@ ${stats.totalMessages} messages \xB7 ${entryCount} tree entries \xB7 ${stats.tok
         })
     );
   }
-  a.addSeparator();
-  a.addItem((o) =>
-    o
+  menu.addSeparator();
+  menu.addItem((item) =>
+    item
       .setTitle("Delete")
       .setIcon("trash-2")
-      .onClick(() => this.deleteThreadFromList(t))
+      .onClick(() => this.deleteThreadFromList(thread))
   );
-  a.showAtMouseEvent(e);
+  menu.showAtMouseEvent(event);
 }
-function startThreadListRename(e, t) {
-  let n = document.createElement("input");
-  n.addClass("pi-agent-thread-list-title-input");
-  n.setAttr("type", "text");
-  n.setAttr("aria-label", "Chat title");
-  n.value = e.title;
-  t.replaceWith(n);
-  let s = (a) => {
-    let o = n.value.trim();
-    if (a && o && o !== e.title) this.plugin.renameThread(e.id, o);
+function startThreadListRename(thread, titleEl) {
+  let input = document.createElement("input");
+  input.addClass("pi-agent-thread-list-title-input");
+  input.setAttr("type", "text");
+  input.setAttr("aria-label", "Chat title");
+  input.value = thread.title;
+  titleEl.replaceWith(input);
+  let commit = (event) => {
+    let title = input.value.trim();
+    if (event && title && title !== thread.title) this.plugin.renameThread(thread.id, title);
     this.renderThreadList();
   };
-  n.addEventListener("click", (a) => a.stopPropagation());
-  n.addEventListener("keydown", (a) => {
-    if (a.key === "Enter") {
-      a.preventDefault();
-      s(true);
-    } else if (a.key === "Escape") {
-      a.preventDefault();
-      s(false);
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      commit(false);
     }
   });
-  n.addEventListener("blur", () => s(true));
-  n.focus();
-  n.select();
+  input.addEventListener("blur", () => commit(true));
+  input.focus();
+  input.select();
 }
-function toggleThreadFavorite(e) {
-  this.plugin.toggleThreadFavorite(e.id)
+function toggleThreadFavorite(thread) {
+  this.plugin.toggleThreadFavorite(thread.id)
     ? this.renderThreadList()
     : new f2.Notice("Chat thread was not found.");
 }
-async function deleteThreadFromList(e) {
-  if (this.isThreadRunning(e.id)) {
+async function deleteThreadFromList(thread) {
+  if (this.isThreadRunning(thread.id)) {
     new f2.Notice("Wait for the agent run to finish before deleting this chat.");
     return;
   }
-  const choice = await chooseThreadDeletion(this.plugin.app, e);
+  const choice = await chooseThreadDeletion(this.plugin.app, thread);
   if (choice === "cancel") return;
-  if (this.plugin.deleteThread(e.id, { deletePiSession: choice === "both" })) {
+  if (this.plugin.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
     new f2.Notice(choice === "both" ? "Chat and local Pi session deleted." : "Chat deleted.");
     this.renderThreadList();
   } else {
     new f2.Notice("Chat or local Pi session could not be deleted.");
   }
 }
-function formatThreadMeta(e, t) {
-  let n = this.plugin.getThreadDisplayMessageCount
-      ? this.plugin.getThreadDisplayMessageCount(e)
-      : e.messages.length,
-    s = `${n} message${n === 1 ? "" : "s"} \u2022 Updated ${this.formatThreadDate(e.updatedAt)}`;
-  return t ? `Current \u2022 ${s}` : s;
+function formatThreadMeta(thread, isCurrent) {
+  let messageCount = this.plugin.getThreadDisplayMessageCount
+      ? this.plugin.getThreadDisplayMessageCount(thread)
+      : thread.messages.length,
+    meta = `${messageCount} message${messageCount === 1 ? "" : "s"} \u2022 Updated ${this.formatThreadDate(thread.updatedAt)}`;
+  return isCurrent ? `Current \u2022 ${meta}` : meta;
 }
 function countSessionEntries(nodes) {
   return nodes.reduce(
@@ -6978,9 +6982,9 @@ function countSessionEntries(nodes) {
     0
   );
 }
-function formatThreadDate(e) {
+function formatThreadDate(value) {
   try {
-    return new Date(e).toLocaleString();
+    return new Date(value).toLocaleString();
   } catch {
     return "unknown date";
   }
@@ -7111,9 +7115,9 @@ var STREAM_RENDER_INTERVAL_MS = 80;
 function renderMessages() {
   this.syncCurrentRunFlags();
   if (!this.messagesEl) return;
-  let e = this.messagesEl,
-    t = this.stickToBottom,
-    n = e.scrollTop;
+  let messagesEl = this.messagesEl,
+    stickToBottom = this.stickToBottom,
+    previousScrollTop = messagesEl.scrollTop;
   this.isRenderingMessages = true;
   this.activityItemEl = void 0;
   this.activityDetailsEl = void 0;
@@ -7123,44 +7127,47 @@ function renderMessages() {
   this.liveThinkingSetExpanded = void 0;
   try {
     this.unloadMessageRenderComponents();
-    e.empty();
-    let s = this.plugin.messages;
-    if (s.length === 0) {
+    messagesEl.empty();
+    let messages = this.plugin.messages;
+    if (messages.length === 0) {
       this.renderEmptyState();
       return;
     }
-    for (let a = 0; a < s.length; a++) this.renderMessage(s[a], a);
+    for (let index = 0; index < messages.length; index++)
+      this.renderMessage(messages[index], index);
     if (this.running && this.streamingAssistantContent) this.renderStreamingAssistantMessage();
     else if (this.running && this.activityText) this.renderActivityMessage();
   } finally {
-    this.restoreMessagesScroll(e, t, n);
+    this.restoreMessagesScroll(messagesEl, stickToBottom, previousScrollTop);
     this.isRenderingMessages = false;
   }
 }
-function restoreMessagesScroll(e, t, n) {
-  t ? (e.scrollTop = e.scrollHeight) : (e.scrollTop = Math.min(n, e.scrollHeight));
+function restoreMessagesScroll(messagesEl, stickToBottom, previousScrollTop) {
+  stickToBottom
+    ? (messagesEl.scrollTop = messagesEl.scrollHeight)
+    : (messagesEl.scrollTop = Math.min(previousScrollTop, messagesEl.scrollHeight));
 }
 function renderEmptyState() {
   if (!this.messagesEl) return;
-  let t = this.messagesEl
+  let iconEl = this.messagesEl
     .createDiv({ cls: "pi-agent-empty-state" })
     .createSpan({ cls: "pi-agent-empty-icon" });
-  (0, f3.setIcon)(t, "messages-square");
+  (0, f3.setIcon)(iconEl, "messages-square");
 }
-function renderMessage(e, t) {
+function renderMessage(message, index) {
   if (!this.messagesEl) return;
-  let n = this.messagesEl.createDiv({
-    cls: `pi-agent-message pi-agent-message-${e.role}`
+  let messageEl = this.messagesEl.createDiv({
+    cls: `pi-agent-message pi-agent-message-${message.role}`
   });
-  this.renderRoleLabel(n, e.role === "user" ? "user" : "pi", e, t);
-  if (e.role === "assistant") this.renderToolErrors(n, e.toolErrors);
-  const response = n.createDiv({ cls: "pi-agent-message-content" });
+  this.renderRoleLabel(messageEl, message.role === "user" ? "user" : "pi", message, index);
+  if (message.role === "assistant") this.renderToolErrors(messageEl, message.toolErrors);
+  const response = messageEl.createDiv({ cls: "pi-agent-message-content" });
   let answer = response;
-  if (e.role === "assistant" && e.thinking) {
-    const key = `${this.getCurrentThreadId()}:${e.createdAt}`;
+  if (message.role === "assistant" && message.thinking) {
+    const key = `${this.getCurrentThreadId()}:${message.createdAt}`;
     this.renderThinkingDisclosure(
       response,
-      e.thinking,
+      message.thinking,
       this.completedThinkingExpansion.get(key) === true,
       (expanded) => this.completedThinkingExpansion.set(key, expanded),
       false,
@@ -7169,7 +7176,7 @@ function renderMessage(e, t) {
     );
     answer = response.createDiv({ cls: "pi-agent-message-answer" });
   }
-  this.renderPlainMessageContent(answer, e.content);
+  this.renderPlainMessageContent(answer, message.content);
 }
 function renderToolErrors(container, errors) {
   for (const error of Array.isArray(errors) ? errors : [])
@@ -7352,30 +7359,29 @@ function renderActivityMessage() {
   this.liveThinkingTextEl = rendered.text;
   this.liveThinkingSetExpanded = rendered.setExpanded;
 }
-function renderRoleLabel(e, t, n, s) {
-  let a = e.createDiv({ cls: "pi-agent-message-role" }),
-    o = a.createSpan({ cls: "pi-agent-message-role-title" }),
-    l = o.createSpan({
-      cls: `pi-agent-role-icon pi-agent-role-icon-${t}`
+function renderRoleLabel(parent, role, message, index) {
+  let roleEl = parent.createDiv({ cls: "pi-agent-message-role" }),
+    titleEl = roleEl.createSpan({ cls: "pi-agent-message-role-title" }),
+    iconEl = titleEl.createSpan({
+      cls: `pi-agent-role-icon pi-agent-role-icon-${role}`
     });
-  if (t === "user") {
-    (0, f3.setIcon)(l, "user");
-    o.createSpan({ text: "You" });
+  if (role === "user") {
+    (0, f3.setIcon)(iconEl, "user");
+    titleEl.createSpan({ text: "You" });
   } else {
-    this.renderPiIcon(l);
-    o.createSpan({ text: "Agent" });
+    this.renderPiIcon(iconEl);
+    titleEl.createSpan({ text: "Agent" });
   }
-  if (n && s !== void 0) {
-    let u = a.createEl("button", {
+  if (message && index !== void 0) {
+    let actionsButton = roleEl.createEl("button", {
       cls: "clickable-icon pi-agent-message-actions",
       attr: { "aria-label": "Message actions" }
     });
-    (0, f3.setIcon)(u, "ellipsis");
-    u.addEventListener("click", (g) => {
-      var m;
-      g.preventDefault();
-      g.stopPropagation();
-      if ((m = this.messageActions) != null) m.showMessageMenu(g, n, s);
+    (0, f3.setIcon)(actionsButton, "ellipsis");
+    actionsButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.messageActions?.showMessageMenu(event, message, index);
     });
   }
 }
@@ -7566,39 +7572,40 @@ function pickNestedString(value, keys, seen = /* @__PURE__ */ new Set()) {
 
 // src/ui/run-activity-state.mjs
 var ACTIVITY_STICKY_MS = 1200;
-function setActivity(e, t, n = "") {
-  let s = Date.now(),
-    a = isStickyActivityKind(t),
-    o = !a && !shouldBypassActivityStickiness(t) && s < this.activityStickyUntil;
-  if (o) {
-    this.queuePendingActivity(e, t, n);
+function setActivity(text, kind, detail = "") {
+  let now = Date.now(),
+    sticky = isStickyActivityKind(kind),
+    deferred = !sticky && !shouldBypassActivityStickiness(kind) && now < this.activityStickyUntil;
+  if (deferred) {
+    this.queuePendingActivity(text, kind, detail);
     return;
   }
-  this.applyActivity(e, t, n, a ? s + ACTIVITY_STICKY_MS : 0);
+  this.applyActivity(text, kind, detail, sticky ? now + ACTIVITY_STICKY_MS : 0);
 }
-function applyActivity(e, t, n = "", s = 0) {
-  let a = this.activityText === e && this.activityKind === t && this.activityDetail === n;
-  this.activityText = e;
-  this.activityKind = t;
-  this.activityDetail = n;
-  this.activityStickyUntil = s;
-  if (s) {
+function applyActivity(text, kind, detail = "", stickyUntil = 0) {
+  let isUnchanged =
+    this.activityText === text && this.activityKind === kind && this.activityDetail === detail;
+  this.activityText = text;
+  this.activityKind = kind;
+  this.activityDetail = detail;
+  this.activityStickyUntil = stickyUntil;
+  if (stickyUntil) {
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
   }
-  if (!a && !this.updateActivityDom()) this.renderMessages();
+  if (!isUnchanged && !this.updateActivityDom()) this.renderMessages();
 }
-function queuePendingActivity(e, t, n = "") {
-  this.pendingActivity = { text: e, kind: t, detail: n };
+function queuePendingActivity(text, kind, detail = "") {
+  this.pendingActivity = { text, kind, detail };
   this.schedulePendingActivity();
 }
 function schedulePendingActivity() {
   if (this.pendingActivityTimer) return;
-  let e = Math.max(0, this.activityStickyUntil - Date.now());
+  let delay = Math.max(0, this.activityStickyUntil - Date.now());
   this.pendingActivityTimer = window.setTimeout(() => {
     this.pendingActivityTimer = void 0;
     this.flushPendingActivity();
-  }, e);
+  }, delay);
 }
 function clearPendingActivityTimer() {
   if (this.pendingActivityTimer) window.clearTimeout(this.pendingActivityTimer);
@@ -7613,9 +7620,9 @@ function flushPendingActivity() {
     this.pendingActivity = void 0;
     return;
   }
-  let e = this.pendingActivity;
+  let pending = this.pendingActivity;
   this.pendingActivity = void 0;
-  this.applyActivity(e.text, e.kind, e.detail);
+  this.applyActivity(pending.text, pending.kind, pending.detail);
 }
 function updateActivityDom() {
   if (
@@ -7637,35 +7644,34 @@ function updateActivityDom() {
   if (this.activityLabelEl.textContent !== label) this.activityLabelEl.setText(label);
   return true;
 }
-function captureContextUsage(e) {
-  let t = extractEventTokenUsage(e == null ? void 0 : e.raw),
-    n = this.getContextUsageForTokens(t);
-  if (n) {
+function captureContextUsage(event) {
+  let tokenUsage = extractEventTokenUsage(event?.raw),
+    contextUsage = this.getContextUsageForTokens(tokenUsage);
+  if (contextUsage) {
     if (this.runningThreadId) this.invalidatedContextThreadIds.delete(this.runningThreadId);
-    this.currentRunContextUsage = { contextUsage: n, tokenUsage: t };
+    this.currentRunContextUsage = { contextUsage, tokenUsage };
     this.updateActivityDom();
     this.renderToolBadges();
   }
 }
-function getContextUsageForTokens(e) {
-  var a;
-  if (!e) return;
-  let t = this.plugin.getSelectedModelInfo(e),
-    n = (a = t == null ? void 0 : t.contextWindow) != null ? a : e?.contextWindow;
-  return createContextUsage(e, n);
+function getContextUsageForTokens(tokenUsage) {
+  if (!tokenUsage) return;
+  const modelInfo = this.plugin.getSelectedModelInfo(tokenUsage);
+  const contextWindow = modelInfo?.contextWindow ?? tokenUsage?.contextWindow;
+  return createContextUsage(tokenUsage, contextWindow);
 }
-function handleRunEvent(e) {
-  let t = this.normalizeRunEventType(e.type);
-  this.captureContextUsage(e);
-  if (t === "queue_update") {
+function handleRunEvent(event) {
+  let type = this.normalizeRunEventType(event.type);
+  this.captureContextUsage(event);
+  if (type === "queue_update") {
     this.nativePiQueue = {
-      steering: Array.isArray(e.raw?.steering) ? e.raw.steering : [],
-      followUp: Array.isArray(e.raw?.followUp) ? e.raw.followUp : []
+      steering: Array.isArray(event.raw?.steering) ? event.raw.steering : [],
+      followUp: Array.isArray(event.raw?.followUp) ? event.raw.followUp : []
     };
     this.renderPromptQueue();
     return;
   }
-  if (t === "context_ready") {
+  if (type === "context_ready") {
     const skillName = this.getCurrentThreadRun()?.skillName;
     this.setActivity(
       skillName ? `Skill \xB7 ${skillName}` : "Starting Pi",
@@ -7673,8 +7679,8 @@ function handleRunEvent(e) {
     );
     return;
   }
-  if (t === "compaction_start") {
-    let n = this.currentRunContextUsage?.contextUsage
+  if (type === "compaction_start") {
+    let detail = this.currentRunContextUsage?.contextUsage
       ? formatContextUsageTitle(
           this.currentRunContextUsage.contextUsage,
           this.currentRunContextUsage.tokenUsage
@@ -7683,19 +7689,19 @@ function handleRunEvent(e) {
     if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
     this.currentRunContextUsage = void 0;
     this.renderToolBadges();
-    this.setActivity("Compacting context", "context", n);
+    this.setActivity("Compacting context", "context", detail);
     return;
   }
-  if (t === "compaction_end") {
-    if (e.raw && e.raw.errorMessage) {
-      this.setActivity("Compaction failed", "error", String(e.raw.errorMessage));
+  if (type === "compaction_end") {
+    if (event.raw && event.raw.errorMessage) {
+      this.setActivity("Compaction failed", "error", String(event.raw.errorMessage));
       return;
     }
-    if (e.raw && e.raw.aborted) {
+    if (event.raw && event.raw.aborted) {
       this.setActivity("Compaction skipped", "thinking");
       return;
     }
-    let n = e.raw && e.raw.result ? e.raw.result.tokensBefore : void 0;
+    let tokensBefore = event.raw && event.raw.result ? event.raw.result.tokensBefore : void 0;
     if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
     this.currentRunContextUsage = {
       compacted: true,
@@ -7703,70 +7709,70 @@ function handleRunEvent(e) {
     };
     this.renderToolBadges();
     this.setActivity(
-      e.raw && e.raw.willRetry ? "Compacted context, retrying" : "Finishing",
-      e.raw && e.raw.willRetry ? "context" : "finishing",
-      n ? `Before compaction: ${formatTokenCount(n)} tokens` : ""
+      event.raw && event.raw.willRetry ? "Compacted context, retrying" : "Finishing",
+      event.raw && event.raw.willRetry ? "context" : "finishing",
+      tokensBefore ? `Before compaction: ${formatTokenCount(tokensBefore)} tokens` : ""
     );
     return;
   }
-  if (t === "auto_retry_start") {
-    this.setActivity("Retrying", "finishing", formatRetryDetail(e.raw));
+  if (type === "auto_retry_start") {
+    this.setActivity("Retrying", "finishing", formatRetryDetail(event.raw));
     return;
   }
-  if (t === "extension_error" || t === "extension_ui_error") {
+  if (type === "extension_error" || type === "extension_ui_error") {
     this.setActivity(
       "Extension failed",
       "error",
-      String(e.raw?.error ?? e.raw?.message ?? "Pi extension error")
+      String(event.raw?.error ?? event.raw?.message ?? "Pi extension error")
     );
     return;
   }
   if (
-    t === "pi_start" ||
-    t === "agent_start" ||
-    t === "turn_start" ||
-    t === "message_start" ||
-    t === "thinking_start" ||
-    t === "thinking_delta" ||
-    t === "thinking_end"
+    type === "pi_start" ||
+    type === "agent_start" ||
+    type === "turn_start" ||
+    type === "message_start" ||
+    type === "thinking_start" ||
+    type === "thinking_delta" ||
+    type === "thinking_end"
   ) {
     this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
     return;
   }
-  if (t === "toolcall_start" || t === "toolcall_delta" || t === "toolcall_end") {
-    let n = formatToolStatus(e.toolName, e.toolArgs, "preparing");
-    this.setActivity(n.label, n.kind, n.detail);
+  if (type === "toolcall_start" || type === "toolcall_delta" || type === "toolcall_end") {
+    let status = formatToolStatus(event.toolName, event.toolArgs, "preparing");
+    this.setActivity(status.label, status.kind, status.detail);
     return;
   }
-  if (t === "tool_start" || t === "tool_update") {
-    this.trackActiveTool(e);
-    let n = this.formatActiveToolStatus();
-    this.setActivity(n.label, n.kind, n.detail);
+  if (type === "tool_start" || type === "tool_update") {
+    this.trackActiveTool(event);
+    let status = this.formatActiveToolStatus();
+    this.setActivity(status.label, status.kind, status.detail);
     return;
   }
-  if (t === "tool_end") {
-    this.untrackActiveTool(e);
+  if (type === "tool_end") {
+    this.untrackActiveTool(event);
     if (this.activeToolCalls.size > 0) {
-      let n = this.formatActiveToolStatus();
-      this.setActivity(n.label, n.kind, n.detail);
+      let status = this.formatActiveToolStatus();
+      this.setActivity(status.label, status.kind, status.detail);
       return;
     }
     this.streamingAssistantContent ||
       this.setActivity(
-        e.isError ? "Tool failed" : "Reviewing results",
-        e.isError ? "error" : "thinking"
+        event.isError ? "Tool failed" : "Reviewing results",
+        event.isError ? "error" : "thinking"
       );
     return;
   }
-  if (t === "text_start") {
+  if (type === "text_start") {
     this.setActivity("Responding", "answer");
     return;
   }
-  if (t === "message_end" || t === "turn_end") {
+  if (type === "message_end" || type === "turn_end") {
     this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
     return;
   }
-  if (t === "agent_end") {
+  if (type === "agent_end") {
     this.activityText = "";
     this.activityDetail = "";
     this.activityStickyUntil = 0;
@@ -7776,37 +7782,37 @@ function handleRunEvent(e) {
     this.renderMessages();
   }
 }
-function normalizeRunEventType(e) {
-  return e === "auto_compaction_start" || e === "session_before_compact"
+function normalizeRunEventType(type) {
+  return type === "auto_compaction_start" || type === "session_before_compact"
     ? "compaction_start"
-    : e === "auto_compaction_end" || e === "session_compact"
+    : type === "auto_compaction_end" || type === "session_compact"
       ? "compaction_end"
-      : e;
+      : type;
 }
-function trackActiveTool(e) {
-  let t = getToolEventKey(e),
-    n = String(e.toolName || e.message || "tool"),
-    s = e.toolArgs || {};
-  this.activeToolCalls.set(t, { name: n, args: s });
+function trackActiveTool(event) {
+  let key = getToolEventKey(event),
+    name = String(event.toolName || event.message || "tool"),
+    args = event.toolArgs || {};
+  this.activeToolCalls.set(key, { name, args });
 }
-function untrackActiveTool(e) {
-  this.activeToolCalls.delete(getToolEventKey(e));
+function untrackActiveTool(event) {
+  this.activeToolCalls.delete(getToolEventKey(event));
 }
 function formatActiveToolStatus() {
-  let e = [...this.activeToolCalls.values()];
-  if (e.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };
-  if (e.length === 1) return formatToolStatus(e[0].name, e[0].args, "running");
-  let t = e.map((n) => formatToolStatus(n.name, n.args, "running"));
+  let tools = [...this.activeToolCalls.values()];
+  if (tools.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };
+  if (tools.length === 1) return formatToolStatus(tools[0].name, tools[0].args, "running");
+  let statuses = tools.map((status) => formatToolStatus(status.name, status.args, "running"));
   return {
-    label: `Running ${e.length} actions`,
-    kind: t.some((n) => n.kind === "shell")
+    label: `Running ${tools.length} actions`,
+    kind: statuses.some((status) => status.kind === "shell")
       ? "shell"
-      : t.some((n) => n.kind === "edit")
+      : statuses.some((status) => status.kind === "edit")
         ? "edit"
-        : t.some((n) => n.kind === "search")
+        : statuses.some((status) => status.kind === "search")
           ? "search"
           : "read",
-    detail: t.map((n) => n.label).join(" \u2022 ")
+    detail: statuses.map((status) => status.label).join(" \u2022 ")
   };
 }
 

@@ -5,59 +5,62 @@ const STREAM_RENDER_INTERVAL_MS = 80;
 export function renderMessages() {
   this.syncCurrentRunFlags();
   if (!this.messagesEl) return;
-  let e = this.messagesEl,
-    t = this.stickToBottom,
-    n = e.scrollTop;
-  this.isRenderingMessages = !0;
-  this.activityItemEl = void 0;
-  this.activityDetailsEl = void 0;
-  this.activityLabelEl = void 0;
-  this.liveThinkingDetailsEl = void 0;
-  this.liveThinkingTextEl = void 0;
-  this.liveThinkingSetExpanded = void 0;
+  let messagesEl = this.messagesEl,
+    stickToBottom = this.stickToBottom,
+    previousScrollTop = messagesEl.scrollTop;
+  this.isRenderingMessages = true;
+  this.activityItemEl = undefined;
+  this.activityDetailsEl = undefined;
+  this.activityLabelEl = undefined;
+  this.liveThinkingDetailsEl = undefined;
+  this.liveThinkingTextEl = undefined;
+  this.liveThinkingSetExpanded = undefined;
   try {
     this.unloadMessageRenderComponents();
-    e.empty();
-    let s = this.plugin.messages;
-    if (s.length === 0) {
+    messagesEl.empty();
+    let messages = this.plugin.messages;
+    if (messages.length === 0) {
       this.renderEmptyState();
       return;
     }
-    for (let a = 0; a < s.length; a++) this.renderMessage(s[a], a);
+    for (let index = 0; index < messages.length; index++)
+      this.renderMessage(messages[index], index);
     if (this.running && this.streamingAssistantContent) this.renderStreamingAssistantMessage();
     else if (this.running && this.activityText) this.renderActivityMessage();
   } finally {
-    this.restoreMessagesScroll(e, t, n);
-    this.isRenderingMessages = !1;
+    this.restoreMessagesScroll(messagesEl, stickToBottom, previousScrollTop);
+    this.isRenderingMessages = false;
   }
 }
 
-export function restoreMessagesScroll(e, t, n) {
-  t ? (e.scrollTop = e.scrollHeight) : (e.scrollTop = Math.min(n, e.scrollHeight));
+export function restoreMessagesScroll(messagesEl, stickToBottom, previousScrollTop) {
+  stickToBottom
+    ? (messagesEl.scrollTop = messagesEl.scrollHeight)
+    : (messagesEl.scrollTop = Math.min(previousScrollTop, messagesEl.scrollHeight));
 }
 
 export function renderEmptyState() {
   if (!this.messagesEl) return;
-  let t = this.messagesEl
+  let iconEl = this.messagesEl
     .createDiv({ cls: "pi-agent-empty-state" })
     .createSpan({ cls: "pi-agent-empty-icon" });
-  (0, f.setIcon)(t, "messages-square");
+  (0, f.setIcon)(iconEl, "messages-square");
 }
 
-export function renderMessage(e, t) {
+export function renderMessage(message, index) {
   if (!this.messagesEl) return;
-  let n = this.messagesEl.createDiv({
-    cls: `pi-agent-message pi-agent-message-${e.role}`
+  let messageEl = this.messagesEl.createDiv({
+    cls: `pi-agent-message pi-agent-message-${message.role}`
   });
-  this.renderRoleLabel(n, e.role === "user" ? "user" : "pi", e, t);
-  if (e.role === "assistant") this.renderToolErrors(n, e.toolErrors);
-  const response = n.createDiv({ cls: "pi-agent-message-content" });
+  this.renderRoleLabel(messageEl, message.role === "user" ? "user" : "pi", message, index);
+  if (message.role === "assistant") this.renderToolErrors(messageEl, message.toolErrors);
+  const response = messageEl.createDiv({ cls: "pi-agent-message-content" });
   let answer = response;
-  if (e.role === "assistant" && e.thinking) {
-    const key = `${this.getCurrentThreadId()}:${e.createdAt}`;
+  if (message.role === "assistant" && message.thinking) {
+    const key = `${this.getCurrentThreadId()}:${message.createdAt}`;
     this.renderThinkingDisclosure(
       response,
-      e.thinking,
+      message.thinking,
       this.completedThinkingExpansion.get(key) === true,
       (expanded) => this.completedThinkingExpansion.set(key, expanded),
       false,
@@ -66,7 +69,7 @@ export function renderMessage(e, t) {
     );
     answer = response.createDiv({ cls: "pi-agent-message-answer" });
   }
-  this.renderPlainMessageContent(answer, e.content);
+  this.renderPlainMessageContent(answer, message.content);
 }
 
 export function renderToolErrors(container, errors) {
@@ -265,30 +268,29 @@ export function renderActivityMessage() {
   this.liveThinkingSetExpanded = rendered.setExpanded;
 }
 
-export function renderRoleLabel(e, t, n, s) {
-  let a = e.createDiv({ cls: "pi-agent-message-role" }),
-    o = a.createSpan({ cls: "pi-agent-message-role-title" }),
-    l = o.createSpan({
-      cls: `pi-agent-role-icon pi-agent-role-icon-${t}`
+export function renderRoleLabel(parent, role, message, index) {
+  let roleEl = parent.createDiv({ cls: "pi-agent-message-role" }),
+    titleEl = roleEl.createSpan({ cls: "pi-agent-message-role-title" }),
+    iconEl = titleEl.createSpan({
+      cls: `pi-agent-role-icon pi-agent-role-icon-${role}`
     });
-  if (t === "user") {
-    (0, f.setIcon)(l, "user");
-    o.createSpan({ text: "You" });
+  if (role === "user") {
+    (0, f.setIcon)(iconEl, "user");
+    titleEl.createSpan({ text: "You" });
   } else {
-    this.renderPiIcon(l);
-    o.createSpan({ text: "Agent" });
+    this.renderPiIcon(iconEl);
+    titleEl.createSpan({ text: "Agent" });
   }
-  if (n && s !== void 0) {
-    let u = a.createEl("button", {
+  if (message && index !== undefined) {
+    let actionsButton = roleEl.createEl("button", {
       cls: "clickable-icon pi-agent-message-actions",
       attr: { "aria-label": "Message actions" }
     });
-    (0, f.setIcon)(u, "ellipsis");
-    u.addEventListener("click", (g) => {
-      var m;
-      g.preventDefault();
-      g.stopPropagation();
-      if ((m = this.messageActions) != null) m.showMessageMenu(g, n, s);
+    (0, f.setIcon)(actionsButton, "ellipsis");
+    actionsButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.messageActions?.showMessageMenu(event, message, index);
     });
   }
 }

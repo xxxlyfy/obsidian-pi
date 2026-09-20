@@ -6,118 +6,122 @@ import { formatBulkDeleteResult, planBulkThreadDeletion } from "./thread-bulk-ac
 const PI_BRAND_NAME = "Pi";
 
 export function showThreadList() {
-  this.showingThreadList = !0;
+  this.showingThreadList = true;
   this.renderThreadList();
 }
 
 export function renderThreadList() {
-  var a;
-  let e = this.containerEl.children[1],
-    t = this.plugin.listThreads({ includeArchived: !0 }),
-    n = this.plugin.getCurrentThread();
-  if ((a = this.suggestions) != null) a.close();
+  let root = this.containerEl.children[1],
+    threads = this.plugin.listThreads({ includeArchived: true }),
+    currentThread = this.plugin.getCurrentThread();
+  this.suggestions?.close();
   this.cleanupComposerBarObserver();
-  this.messagesEl = void 0;
-  this.inputEl = void 0;
-  this.sendButtonEl = void 0;
-  this.composerBarEl = void 0;
-  this.composerBarExpandEl = void 0;
-  this.runSettings = void 0;
-  this.toolBadgesEl = void 0;
-  this.threadTitleEl = void 0;
-  this.threadFavoriteEl = void 0;
-  e.empty();
-  e.addClass("pi-agent-view");
-  let s = e.createDiv({ cls: "pi-agent-thread-list-header" }),
-    o = s.createEl("button", {
+  this.messagesEl = undefined;
+  this.inputEl = undefined;
+  this.sendButtonEl = undefined;
+  this.composerBarEl = undefined;
+  this.composerBarExpandEl = undefined;
+  this.runSettings = undefined;
+  this.toolBadgesEl = undefined;
+  this.threadTitleEl = undefined;
+  this.threadFavoriteEl = undefined;
+  root.empty();
+  root.addClass("pi-agent-view");
+  let header = root.createDiv({ cls: "pi-agent-thread-list-header" }),
+    backButton = header.createEl("button", {
       cls: "clickable-icon pi-agent-header-action",
       attr: { "aria-label": "Back to chat", title: "Back to chat" }
     });
-  (0, f.setIcon)(o, "arrow-left");
-  o.addEventListener("click", () => this.renderChatView());
-  let l = s.createDiv({ cls: "pi-agent-thread-list-heading" });
-  l.createDiv({ cls: "pi-agent-thread-list-title-heading", text: "Threads" });
-  l.createDiv({
+  (0, f.setIcon)(backButton, "arrow-left");
+  backButton.addEventListener("click", () => this.renderChatView());
+  let heading = header.createDiv({ cls: "pi-agent-thread-list-heading" });
+  heading.createDiv({ cls: "pi-agent-thread-list-title-heading", text: "Threads" });
+  heading.createDiv({
     cls: "pi-agent-thread-list-subtitle",
-    text: `${t.length} chat${t.length === 1 ? "" : "s"}`
+    text: `${threads.length} chat${threads.length === 1 ? "" : "s"}`
   });
-  let deleteChatsButton = s.createEl("button", {
+  let deleteChatsButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": "Delete chats", title: "Delete chats" }
   });
   (0, f.setIcon)(deleteChatsButton, "trash-2");
   deleteChatsButton.addEventListener("click", () => this.deleteChats());
-  let d = s.createEl("button", {
+  let newChatButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": "New chat", title: "New chat" }
   });
-  (0, f.setIcon)(d, "plus");
-  d.addEventListener("click", () => {
+  (0, f.setIcon)(newChatButton, "plus");
+  newChatButton.addEventListener("click", () => {
     this.plugin.startNewThread();
     this.renderChatView();
   });
-  let h = e.createDiv({ cls: "pi-agent-thread-list" });
-  t.length === 0
-    ? h.createDiv({ cls: "pi-agent-empty", text: "No chat threads." })
-    : t.forEach((m) => this.renderThreadListRow(h, m, m.id === n.id));
+  let listEl = root.createDiv({ cls: "pi-agent-thread-list" });
+  threads.length === 0
+    ? listEl.createDiv({ cls: "pi-agent-empty", text: "No chat threads." })
+    : threads.forEach((thread) =>
+        this.renderThreadListRow(listEl, thread, thread.id === currentThread.id)
+      );
 }
 
-export function renderThreadListRow(e, t, n) {
-  let s = e.createDiv({
-      cls: `pi-agent-thread-list-row${n ? " is-current" : ""}`
+export function renderThreadListRow(listEl, thread, isCurrent) {
+  let row = listEl.createDiv({
+      cls: `pi-agent-thread-list-row${isCurrent ? " is-current" : ""}`
     }),
-    a = s.createDiv({ cls: "pi-agent-thread-list-info" }),
-    o = a.createDiv({
+    info = row.createDiv({ cls: "pi-agent-thread-list-info" }),
+    titleEl = info.createDiv({
       cls: "pi-agent-thread-list-title",
       attr: { title: "Open chat" }
     });
-  if (this.isThreadRunning(t.id)) {
-    let h = o.createSpan({
+  if (this.isThreadRunning(thread.id)) {
+    let runningEl = titleEl.createSpan({
       cls: "pi-agent-thread-list-running",
       attr: { title: "Agent is running in this chat" }
     });
-    (0, f.setIcon)(h, "loader");
+    (0, f.setIcon)(runningEl, "loader");
   }
-  o.createSpan({ text: t.title });
-  s.addEventListener("click", () => {
-    this.plugin.switchThread(t.id);
+  titleEl.createSpan({ text: thread.title });
+  row.addEventListener("click", () => {
+    this.plugin.switchThread(thread.id);
     this.renderChatView();
   });
-  a.createDiv({ cls: "pi-agent-thread-list-meta", text: this.formatThreadMeta(t, n) });
-  let l = s.createDiv({ cls: "pi-agent-thread-list-actions" }),
-    d = l.createEl("button", {
-      cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${t.favorite ? " is-favorite" : ""}`,
+  info.createDiv({
+    cls: "pi-agent-thread-list-meta",
+    text: this.formatThreadMeta(thread, isCurrent)
+  });
+  let actions = row.createDiv({ cls: "pi-agent-thread-list-actions" }),
+    favoriteButton = actions.createEl("button", {
+      cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${thread.favorite ? " is-favorite" : ""}`,
       attr: {
-        "aria-label": t.favorite ? "Remove favorite" : "Mark as favorite",
-        title: t.favorite ? "Remove favorite" : "Mark as favorite",
-        "aria-pressed": String(t.favorite === true)
+        "aria-label": thread.favorite ? "Remove favorite" : "Mark as favorite",
+        title: thread.favorite ? "Remove favorite" : "Mark as favorite",
+        "aria-pressed": String(thread.favorite === true)
       }
     }),
-    deleteButton = l.createEl("button", {
+    deleteButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action pi-agent-thread-delete",
       attr: { "aria-label": "Delete chat", title: "Delete chat" }
     }),
-    h = l.createEl("button", {
+    moreButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action",
       attr: { "aria-label": "Thread actions", title: "Thread actions" }
     });
-  (0, f.setIcon)(d, "star");
-  d.addEventListener("click", (u) => {
-    u.preventDefault();
-    u.stopPropagation();
-    this.toggleThreadFavorite(t);
+  (0, f.setIcon)(favoriteButton, "star");
+  favoriteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.toggleThreadFavorite(thread);
   });
   (0, f.setIcon)(deleteButton, "trash-2");
-  deleteButton.addEventListener("click", (u) => {
-    u.preventDefault();
-    u.stopPropagation();
-    this.deleteThreadFromList(t);
+  deleteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.deleteThreadFromList(thread);
   });
-  (0, f.setIcon)(h, "more-horizontal");
-  h.addEventListener("click", (u) => {
-    u.preventDefault();
-    u.stopPropagation();
-    this.showThreadRowMenu(u, t, n, o);
+  (0, f.setIcon)(moreButton, "more-horizontal");
+  moreButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.showThreadRowMenu(event, thread, isCurrent, titleEl);
   });
 }
 
@@ -151,40 +155,40 @@ export async function deleteChats() {
   this.renderThreadList();
 }
 
-export function showThreadRowMenu(e, t, n, s) {
-  let a = new f.Menu();
-  a.addItem((o) =>
-    o
-      .setTitle(n ? "Current chat" : "Open")
-      .setIcon(n ? "check" : "arrow-right")
-      .setDisabled(n)
+export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
+  let menu = new f.Menu();
+  menu.addItem((item) =>
+    item
+      .setTitle(isCurrent ? "Current chat" : "Open")
+      .setIcon(isCurrent ? "check" : "arrow-right")
+      .setDisabled(isCurrent)
       .onClick(() => {
-        this.plugin.switchThread(t.id);
+        this.plugin.switchThread(thread.id);
         this.renderChatView();
       })
   );
-  a.addItem((o) =>
-    o
-      .setTitle(t.favorite ? "Remove favorite" : "Mark as favorite")
+  menu.addItem((item) =>
+    item
+      .setTitle(thread.favorite ? "Remove favorite" : "Mark as favorite")
       .setIcon("star")
-      .onClick(() => this.toggleThreadFavorite(t))
+      .onClick(() => this.toggleThreadFavorite(thread))
   );
-  a.addItem((o) =>
-    o
+  menu.addItem((item) =>
+    item
       .setTitle("Rename")
       .setIcon("pencil")
-      .onClick(() => this.startThreadListRename(t, s))
+      .onClick(() => this.startThreadListRename(thread, titleEl))
   );
-  if (t.piSessionId) {
-    a.addItem((o) =>
-      o
+  if (thread.piSessionId) {
+    menu.addItem((item) =>
+      item
         .setTitle(`${PI_BRAND_NAME} session info`)
         .setIcon("info")
         .onClick(async () => {
           try {
             const [stats, tree] = await Promise.all([
-              this.plugin.getThreadSessionStats(t.id),
-              this.plugin.getThreadSessionTree(t.id)
+              this.plugin.getThreadSessionStats(thread.id),
+              this.plugin.getThreadSessionTree(thread.id)
             ]);
             const entryCount = countSessionEntries(tree?.tree ?? []);
             new f.Notice(
@@ -197,13 +201,13 @@ export function showThreadRowMenu(e, t, n, s) {
           }
         })
     );
-    a.addItem((o) =>
-      o
+    menu.addItem((item) =>
+      item
         .setTitle(`Export ${PI_BRAND_NAME} session to HTML`)
         .setIcon("download")
         .onClick(async () => {
           try {
-            const result = await this.plugin.exportThreadSession(t.id);
+            const result = await this.plugin.exportThreadSession(thread.id);
             new f.Notice(result?.path ? `Exported to ${result.path}` : "Session export failed.");
           } catch (error) {
             new f.Notice(error instanceof Error ? error.message : String(error));
@@ -211,57 +215,57 @@ export function showThreadRowMenu(e, t, n, s) {
         })
     );
   }
-  a.addSeparator();
-  a.addItem((o) =>
-    o
+  menu.addSeparator();
+  menu.addItem((item) =>
+    item
       .setTitle("Delete")
       .setIcon("trash-2")
-      .onClick(() => this.deleteThreadFromList(t))
+      .onClick(() => this.deleteThreadFromList(thread))
   );
-  a.showAtMouseEvent(e);
+  menu.showAtMouseEvent(event);
 }
 
-export function startThreadListRename(e, t) {
-  let n = document.createElement("input");
-  n.addClass("pi-agent-thread-list-title-input");
-  n.setAttr("type", "text");
-  n.setAttr("aria-label", "Chat title");
-  n.value = e.title;
-  t.replaceWith(n);
-  let s = (a) => {
-    let o = n.value.trim();
-    if (a && o && o !== e.title) this.plugin.renameThread(e.id, o);
+export function startThreadListRename(thread, titleEl) {
+  let input = document.createElement("input");
+  input.addClass("pi-agent-thread-list-title-input");
+  input.setAttr("type", "text");
+  input.setAttr("aria-label", "Chat title");
+  input.value = thread.title;
+  titleEl.replaceWith(input);
+  let commit = (event) => {
+    let title = input.value.trim();
+    if (event && title && title !== thread.title) this.plugin.renameThread(thread.id, title);
     this.renderThreadList();
   };
-  n.addEventListener("click", (a) => a.stopPropagation());
-  n.addEventListener("keydown", (a) => {
-    if (a.key === "Enter") {
-      a.preventDefault();
-      s(!0);
-    } else if (a.key === "Escape") {
-      a.preventDefault();
-      s(!1);
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      commit(false);
     }
   });
-  n.addEventListener("blur", () => s(!0));
-  n.focus();
-  n.select();
+  input.addEventListener("blur", () => commit(true));
+  input.focus();
+  input.select();
 }
 
-export function toggleThreadFavorite(e) {
-  this.plugin.toggleThreadFavorite(e.id)
+export function toggleThreadFavorite(thread) {
+  this.plugin.toggleThreadFavorite(thread.id)
     ? this.renderThreadList()
     : new f.Notice("Chat thread was not found.");
 }
 
-export async function deleteThreadFromList(e) {
-  if (this.isThreadRunning(e.id)) {
+export async function deleteThreadFromList(thread) {
+  if (this.isThreadRunning(thread.id)) {
     new f.Notice("Wait for the agent run to finish before deleting this chat.");
     return;
   }
-  const choice = await chooseThreadDeletion(this.plugin.app, e);
+  const choice = await chooseThreadDeletion(this.plugin.app, thread);
   if (choice === "cancel") return;
-  if (this.plugin.deleteThread(e.id, { deletePiSession: choice === "both" })) {
+  if (this.plugin.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
     new f.Notice(choice === "both" ? "Chat and local Pi session deleted." : "Chat deleted.");
     this.renderThreadList();
   } else {
@@ -269,12 +273,12 @@ export async function deleteThreadFromList(e) {
   }
 }
 
-export function formatThreadMeta(e, t) {
-  let n = this.plugin.getThreadDisplayMessageCount
-      ? this.plugin.getThreadDisplayMessageCount(e)
-      : e.messages.length,
-    s = `${n} message${n === 1 ? "" : "s"} • Updated ${this.formatThreadDate(e.updatedAt)}`;
-  return t ? `Current • ${s}` : s;
+export function formatThreadMeta(thread, isCurrent) {
+  let messageCount = this.plugin.getThreadDisplayMessageCount
+      ? this.plugin.getThreadDisplayMessageCount(thread)
+      : thread.messages.length,
+    meta = `${messageCount} message${messageCount === 1 ? "" : "s"} • Updated ${this.formatThreadDate(thread.updatedAt)}`;
+  return isCurrent ? `Current • ${meta}` : meta;
 }
 
 export function countSessionEntries(nodes) {
@@ -285,9 +289,9 @@ export function countSessionEntries(nodes) {
   );
 }
 
-export function formatThreadDate(e) {
+export function formatThreadDate(value) {
   try {
-    return new Date(e).toLocaleString();
+    return new Date(value).toLocaleString();
   } catch {
     return "unknown date";
   }
