@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.14
+
+- Smoothed long agent responses by throttling live streaming updates and rendering streaming text as plain text instead of re-parsing the entire answer through Obsidian's Markdown renderer on every token, which was stalling the main thread and freezing the UI during long runs. Completed responses are still rendered as full Markdown.
+- Removed the remaining synchronous CLI calls from the Obsidian renderer: Pi installation checks now run asynchronously instead of blocking for up to 5 seconds, and Windows process termination (taskkill) no longer blocks the UI for up to 2 seconds.
+
 ## 0.0.13
 
 - Fixed model switching and Pi-default startup failures by resolving one concrete startup model, passing it to Pi exactly once, and removing the redundant RPC model change and unreliable authentication preflight.
