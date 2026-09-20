@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.19
+
+- Stopped the composer **Model** control from truncating long model names: the model label can now expand (up to 240px) and shrinks with an ellipsis only when space is tight, while **Think** and **Mode** keep their compact labels.
+
 ## 0.0.18
 
 - Widened the composer control spacing further: run settings (**Model**, **Think**, **Mode**) now use a 16px gap, the composer bar uses 14px, and the compact layout uses 8px.

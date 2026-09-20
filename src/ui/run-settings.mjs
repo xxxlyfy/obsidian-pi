@@ -93,7 +93,7 @@ export class RunSettingsControls {
 
   addPickerSetting(containerEl, name, icon, label, onClick) {
     const buttonEl = containerEl.createEl("button", {
-      cls: "clickable-icon pi-agent-run-setting",
+      cls: `clickable-icon pi-agent-run-setting pi-agent-run-setting-${name.toLowerCase()}`,
       attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
     });
     if (icon?.provider) renderProviderIcon(buttonEl, icon.provider);

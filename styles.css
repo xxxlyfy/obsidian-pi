@@ -210,6 +210,15 @@
   white-space: nowrap;
 }
 
+.pi-agent-view button.pi-agent-run-setting-model {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.pi-agent-run-setting-model .pi-agent-control-label {
+  max-width: 240px;
+}
+
 .pi-agent-messages {
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
