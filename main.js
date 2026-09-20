@@ -6287,6 +6287,12 @@ function migrateLocalPromptPaths(queue, oldPath, newPath) {
     contextFilePath: item.contextFilePath === oldPath ? newPath : item.contextFilePath,
     annotations: (Array.isArray(item.annotations) ? item.annotations : []).map((annotation) =>
       annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
+    ),
+    images: (Array.isArray(item.images) ? item.images : []).map((image) =>
+      image?.path === oldPath ? { ...image, path: newPath } : image
+    ),
+    attachments: (Array.isArray(item.attachments) ? item.attachments : []).map((attachment) =>
+      attachment?.path === oldPath ? { ...attachment, path: newPath } : attachment
     )
   }));
 }
@@ -6297,6 +6303,12 @@ function invalidateLocalPromptPaths(queue, path6) {
     contextFilePath: item.contextFilePath === path6 ? void 0 : item.contextFilePath,
     annotations: (Array.isArray(item.annotations) ? item.annotations : []).filter(
       (annotation) => annotation?.path !== path6
+    ),
+    images: (Array.isArray(item.images) ? item.images : []).map((image) =>
+      image?.path === path6 ? { ...image, path: void 0 } : image
+    ),
+    attachments: (Array.isArray(item.attachments) ? item.attachments : []).map((attachment) =>
+      attachment?.path === path6 ? { ...attachment, path: void 0 } : attachment
     )
   }));
 }
@@ -10522,15 +10534,19 @@ var PiAgentPlugin = class extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
-        if (!(file instanceof P.TFile) || file.extension !== "md") return;
-        this.migrateQueuedAnnotationPaths(oldPath, file.path);
-        if (
-          this.annotationStore.list(oldPath).length > 0 &&
-          !this.annotationStore.renamePath(oldPath, file.path)
-        )
-          new P.Notice(
-            "Annotations could not follow the renamed note; their original records were kept."
-          );
+        if (!(file instanceof P.TFile)) return;
+        if (file.extension === "md") {
+          this.migrateQueuedAnnotationPaths(oldPath, file.path);
+          if (
+            this.annotationStore.list(oldPath).length > 0 &&
+            !this.annotationStore.renamePath(oldPath, file.path)
+          )
+            new P.Notice(
+              "Annotations could not follow the renamed note; their original records were kept."
+            );
+        } else {
+          this.migrateQueuedAttachmentPaths(oldPath, file.path);
+        }
       })
     );
     this.registerEvent(
@@ -11238,11 +11254,18 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   migrateQueuedAnnotationPaths(oldPath, newPath) {
     if (!oldPath || !newPath || oldPath === newPath) return;
+    this.migrateQueuedPaths(oldPath, newPath);
+    this.migrateOpenViewInFlightAnnotations(oldPath, newPath);
+  }
+  migrateQueuedAttachmentPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    this.migrateQueuedPaths(oldPath, newPath);
+  }
+  migrateQueuedPaths(oldPath, newPath) {
     this.localPromptQueue = migrateLocalPromptPaths(this.localPromptQueue, oldPath, newPath);
     this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
     this.saveThreadHistory();
     this.refreshOpenQueueViews();
-    this.migrateOpenViewInFlightAnnotations(oldPath, newPath);
   }
   invalidateQueuedAnnotationPaths(path6) {
     if (!path6) return;

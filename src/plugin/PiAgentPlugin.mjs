@@ -191,15 +191,19 @@ export class PiAgentPlugin extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
-        if (!(file instanceof P.TFile) || file.extension !== "md") return;
-        this.migrateQueuedAnnotationPaths(oldPath, file.path);
-        if (
-          this.annotationStore.list(oldPath).length > 0 &&
-          !this.annotationStore.renamePath(oldPath, file.path)
-        )
-          new P.Notice(
-            "Annotations could not follow the renamed note; their original records were kept."
-          );
+        if (!(file instanceof P.TFile)) return;
+        if (file.extension === "md") {
+          this.migrateQueuedAnnotationPaths(oldPath, file.path);
+          if (
+            this.annotationStore.list(oldPath).length > 0 &&
+            !this.annotationStore.renamePath(oldPath, file.path)
+          )
+            new P.Notice(
+              "Annotations could not follow the renamed note; their original records were kept."
+            );
+        } else {
+          this.migrateQueuedAttachmentPaths(oldPath, file.path);
+        }
       })
     );
     this.registerEvent(
@@ -927,11 +931,18 @@ export class PiAgentPlugin extends P.Plugin {
   }
   migrateQueuedAnnotationPaths(oldPath, newPath) {
     if (!oldPath || !newPath || oldPath === newPath) return;
+    this.migrateQueuedPaths(oldPath, newPath);
+    this.migrateOpenViewInFlightAnnotations(oldPath, newPath);
+  }
+  migrateQueuedAttachmentPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    this.migrateQueuedPaths(oldPath, newPath);
+  }
+  migrateQueuedPaths(oldPath, newPath) {
     this.localPromptQueue = migrateLocalPromptPaths(this.localPromptQueue, oldPath, newPath);
     this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
     this.saveThreadHistory();
     this.refreshOpenQueueViews();
-    this.migrateOpenViewInFlightAnnotations(oldPath, newPath);
   }
   invalidateQueuedAnnotationPaths(path) {
     if (!path) return;

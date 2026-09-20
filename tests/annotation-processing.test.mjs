@@ -97,6 +97,7 @@ describe("annotation processing UX", () => {
     expect(pluginSource).toContain("this.refreshOpenQueueViews()");
     expect(pluginSource).toContain("this.migrateOpenViewInFlightAnnotations(oldPath, newPath)");
     expect(pluginSource).toContain("this.invalidateOpenViewInFlightAnnotations(path)");
+    expect(pluginSource).toContain("this.migrateQueuedAttachmentPaths(oldPath, file.path)");
   });
 
   it("restores unsent annotations from the run snapshot instead of stale local paths", () => {

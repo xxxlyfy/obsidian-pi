@@ -125,7 +125,7 @@ describe("local prompt queue", () => {
     expect(removeLocalPrompt(edited, "one").map((item) => item.id)).toEqual(["two"]);
   });
 
-  it("migrates queued annotation paths and context when a note is renamed", () => {
+  it("migrates queued annotation, attachment, and image paths when a note is renamed", () => {
     const annotation = {
       id: "annotation-1",
       path: "A.md",
@@ -134,11 +134,34 @@ describe("local prompt queue", () => {
       targetKind: "selection",
       ...captureAnchor("before target after", 7, 13)
     };
+    const image = {
+      id: "image-1",
+      fileName: "pic.png",
+      mimeType: "image/png",
+      data: "aGk=",
+      size: 3,
+      source: "vault",
+      path: "A.md"
+    };
+    const attachment = {
+      id: "file-1",
+      kind: "text",
+      fileName: "config.yaml",
+      mimeType: "application/yaml",
+      content: "enabled: true",
+      originalSize: 13,
+      includedBytes: 13,
+      truncated: false,
+      source: "vault",
+      path: "A.md"
+    };
     const normalized = normalizeLocalPromptQueue([
       {
         id: "annotated",
         prompt: "Apply annotations",
         annotations: [annotation],
+        images: [image],
+        attachments: [attachment],
         contextFilePath: "A.md",
         threadId: "a",
         createdAt: 1
@@ -150,14 +173,18 @@ describe("local prompt queue", () => {
 
     expect(migrated[0].contextFilePath).toBe("B.md");
     expect(migrated[0].annotations[0].path).toBe("B.md");
+    expect(migrated[0].images[0].path).toBe("B.md");
+    expect(migrated[0].attachments[0].path).toBe("B.md");
     expect(migrated[0].state).toBe("pending");
     expect(migrated[1].contextFilePath).toBeUndefined();
     expect(migrated[1].annotations).toEqual([]);
     expect(normalized[0].contextFilePath).toBe("A.md");
     expect(normalized[0].annotations[0].path).toBe("A.md");
+    expect(normalized[0].images[0].path).toBe("A.md");
+    expect(normalized[0].attachments[0].path).toBe("A.md");
   });
 
-  it("drops queued annotations and context for a deleted note", () => {
+  it("drops queued annotations and clears queued attachment paths for a deleted note", () => {
     const normalized = normalizeLocalPromptQueue([
       {
         id: "annotated",
@@ -180,6 +207,31 @@ describe("local prompt queue", () => {
             ...captureAnchor("before target after", 7, 13)
           }
         ],
+        images: [
+          {
+            id: "image-1",
+            fileName: "pic.png",
+            mimeType: "image/png",
+            data: "aGk=",
+            size: 3,
+            source: "vault",
+            path: "A.md"
+          }
+        ],
+        attachments: [
+          {
+            id: "file-1",
+            kind: "text",
+            fileName: "config.yaml",
+            mimeType: "application/yaml",
+            content: "enabled: true",
+            originalSize: 13,
+            includedBytes: 13,
+            truncated: false,
+            source: "vault",
+            path: "A.md"
+          }
+        ],
         contextFilePath: "A.md",
         threadId: "a",
         createdAt: 1
@@ -190,7 +242,11 @@ describe("local prompt queue", () => {
 
     expect(invalidated[0].contextFilePath).toBeUndefined();
     expect(invalidated[0].annotations.map((annotation) => annotation.id)).toEqual(["annotation-2"]);
+    expect(invalidated[0].images[0].path).toBeUndefined();
+    expect(invalidated[0].attachments[0].path).toBeUndefined();
     expect(normalized[0].annotations).toHaveLength(2);
     expect(normalized[0].contextFilePath).toBe("A.md");
+    expect(normalized[0].images[0].path).toBe("A.md");
+    expect(normalized[0].attachments[0].path).toBe("A.md");
   });
 });

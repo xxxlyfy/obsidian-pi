@@ -50,6 +50,12 @@ export function migrateLocalPromptPaths(queue, oldPath, newPath) {
     contextFilePath: item.contextFilePath === oldPath ? newPath : item.contextFilePath,
     annotations: (Array.isArray(item.annotations) ? item.annotations : []).map((annotation) =>
       annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
+    ),
+    images: (Array.isArray(item.images) ? item.images : []).map((image) =>
+      image?.path === oldPath ? { ...image, path: newPath } : image
+    ),
+    attachments: (Array.isArray(item.attachments) ? item.attachments : []).map((attachment) =>
+      attachment?.path === oldPath ? { ...attachment, path: newPath } : attachment
     )
   }));
 }
@@ -61,6 +67,12 @@ export function invalidateLocalPromptPaths(queue, path) {
     contextFilePath: item.contextFilePath === path ? undefined : item.contextFilePath,
     annotations: (Array.isArray(item.annotations) ? item.annotations : []).filter(
       (annotation) => annotation?.path !== path
+    ),
+    images: (Array.isArray(item.images) ? item.images : []).map((image) =>
+      image?.path === path ? { ...image, path: undefined } : image
+    ),
+    attachments: (Array.isArray(item.attachments) ? item.attachments : []).map((attachment) =>
+      attachment?.path === path ? { ...attachment, path: undefined } : attachment
     )
   }));
 }
