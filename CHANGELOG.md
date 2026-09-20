@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.31
+
+- Fixed run state ownership when two chats run at the same time: activity and context usage are now written to the run of the chat that produced the event instead of the last-started run, and context compaction invalidates the correct chat.
+- Renaming a note or an attached file now migrates the queued prompt's attachment and image paths as well, and open chat views refresh their queue immediately so a later queue action cannot write the pre-rename paths back.
+- Failed or canceled runs restore their annotation snapshot through the live run state, so annotations are no longer dropped when the note was renamed mid-run, and the prompt's active-note context follows the same snapshot.
+- Removed the unused cancel-path helper that still relied on the last-started-thread field.
+
 ## 0.0.30
 
 - Switching away from a running chat and back now restores its live run state: the streaming answer text, thinking disclosure, activity line, and context usage are kept per thread instead of resetting to an empty chat.
