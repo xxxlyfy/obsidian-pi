@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.32
+
+- Track Pi 0.86.0 as the last tested compatibility version in the upgrade diagnostics, README, and manual checklist; the version parser test now derives from the tracked constant.
+- Refreshed the manual validation checklist for the current release: Windows validation vault paths, current test counts, Chinese settings labels, removed stale chat-archive and queue-reorder items, added coverage for note rename/delete annotation and queue behavior, and a validation record table with the 0.0.31 smoke-test results.
+
 ## 0.0.31
 
 - Fixed run state ownership when two chats run at the same time: activity and context usage are now written to the run of the chat that produced the event instead of the last-started run, and context compaction invalidates the correct chat.
