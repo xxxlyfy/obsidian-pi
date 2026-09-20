@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.18
+
+- Widened the composer control spacing further: run settings (**Model**, **Think**, **Mode**) now use a 16px gap, the composer bar uses 14px, and the compact layout uses 8px.
+
 ## 0.0.17
 
 - Increased the spacing between the composer run settings controls (**Model**, **Think**, **Mode**) and the composer bar buttons so they no longer sit too close together.
