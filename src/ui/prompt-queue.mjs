@@ -109,7 +109,8 @@ export async function steerQueuedPrompt(id) {
     if (delivery.images?.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo()))
       throw new Error("The selected Pi model does not support image input.");
     const formattedPrompt = delivery.promptContext
-      ? this.plugin.contextBuilder.formatPrompt(delivery.prompt, delivery.promptContext)
+      ? (this.plugin.contextBuilder?.formatPrompt(delivery.prompt, delivery.promptContext) ??
+        delivery.prompt)
       : delivery.prompt;
     const steerPrompt = appendTextAttachmentContext(formattedPrompt, delivery.attachments);
     await run.runner.steer(steerPrompt, delivery.images);

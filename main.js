@@ -6433,7 +6433,8 @@ async function steerQueuedPrompt(id) {
     if (delivery.images?.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo()))
       throw new Error("The selected Pi model does not support image input.");
     const formattedPrompt = delivery.promptContext
-      ? this.plugin.contextBuilder.formatPrompt(delivery.prompt, delivery.promptContext)
+      ? (this.plugin.contextBuilder?.formatPrompt(delivery.prompt, delivery.promptContext) ??
+        delivery.prompt)
       : delivery.prompt;
     const steerPrompt = appendTextAttachmentContext(formattedPrompt, delivery.attachments);
     await run.runner.steer(steerPrompt, delivery.images);
@@ -8427,6 +8428,10 @@ function restoreEditorScroll(editor, scroll) {
 
 // src/ui/PiAgentView.mjs
 var PiAgentView = class extends f4.ItemView {
+  /**
+   * @param {import("obsidian").WorkspaceLeaf} leaf
+   * @param {import("../plugin/PiAgentPlugin.mjs").PiAgentPlugin} plugin
+   */
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;

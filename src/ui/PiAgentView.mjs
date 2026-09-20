@@ -38,6 +38,10 @@ import {
 import { openNotificationThread, showDesktopRunNotification } from "./desktop-notifications.mjs";
 
 export class PiAgentView extends f.ItemView {
+  /**
+   * @param {import("obsidian").WorkspaceLeaf} leaf
+   * @param {import("../plugin/PiAgentPlugin.mjs").PiAgentPlugin} plugin
+   */
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -66,6 +70,7 @@ export class PiAgentView extends f.ItemView {
     this.completedThinkingExpansion = new Map();
     this.messageRenderComponents = [];
     this.messageRenderComponentByElement = new WeakMap();
+    /** @type {Map<string, any>} */
     this.activeRuns = new Map();
     this.desktopNotificationRunIds = new Set();
     this.nextDesktopNotificationRunId = 1;

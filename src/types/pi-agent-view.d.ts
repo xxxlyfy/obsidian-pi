@@ -2,21 +2,25 @@
 
 declare module "../ui/PiAgentView.mjs" {
   interface PiAgentView {
-    activeWindow?: any;
-    activityItemEl?: any;
-    activityDetailsEl?: any;
-    activityLabelEl?: any;
-    liveThinkingDetailsEl?: any;
-    liveThinkingTextEl?: any;
+    activeWindow?: Window & typeof globalThis;
+    activityItemEl?: HTMLElement;
+    activityDetailsEl?: HTMLElement;
+    activityLabelEl?: HTMLElement;
+    liveThinkingDetailsEl?: HTMLElement;
+    liveThinkingTextEl?: HTMLElement;
     liveThinkingSetExpanded?: (expanded: boolean) => void;
     renderMessages(): void;
-    restoreMessagesScroll(messagesEl: any, stickToBottom: boolean, previousScrollTop: number): void;
+    restoreMessagesScroll(
+      messagesEl: HTMLElement,
+      stickToBottom: boolean,
+      previousScrollTop: number
+    ): void;
     renderEmptyState(): void;
     renderMessage(message: any, index: number): void;
-    renderToolErrors(container: any, errors: any): void;
+    renderToolErrors(container: HTMLElement, errors: any): void;
     renderThinkingDisclosure(...args: any[]): any;
     handleMessageLinkClick(event: any): boolean;
-    renderPlainMessageContent(container: any, content: string): any;
+    renderPlainMessageContent(container: HTMLElement, content: string): any;
     unloadMessageRenderComponents(): void;
     renderStreamingAssistantMessage(): void;
     renderStreamingAnswer(): void;
@@ -25,7 +29,7 @@ declare module "../ui/PiAgentView.mjs" {
     flushStreamingRender(): void;
     clearStreamingRenderTimer(): void;
     renderActivityMessage(): void;
-    renderRoleLabel(parent: any, role: string, message?: any, index?: number): void;
+    renderRoleLabel(parent: HTMLElement, role: string, message?: any, index?: number): void;
     setActivity(text: string, kind: string, detail?: string): void;
     applyActivity(text: string, kind: string, detail?: string, stickyUntil?: number): void;
     queuePendingActivity(text: string, kind: string, detail?: string): void;
@@ -44,28 +48,35 @@ declare module "../ui/PiAgentView.mjs" {
     formatActiveToolStatus(): { label: string; kind: string; detail: string };
     showThreadList(): void;
     renderThreadList(): void;
-    renderThreadListRow(listEl: any, thread: any, isCurrent: boolean): void;
+    renderThreadListRow(listEl: HTMLElement, thread: any, isCurrent: boolean): void;
     deleteChats(): Promise<void>;
-    showThreadRowMenu(event: any, thread: any, isCurrent: boolean, titleEl: any): void;
-    startThreadListRename(thread: any, titleEl: any): void;
+    showThreadRowMenu(event: any, thread: any, isCurrent: boolean, titleEl: HTMLElement): void;
+    startThreadListRename(thread: any, titleEl: HTMLElement): void;
     toggleThreadFavorite(thread: any): void;
     deleteThreadFromList(thread: any): Promise<void>;
     formatThreadMeta(thread: any, isCurrent: boolean): string;
     countSessionEntries(nodes: any[]): number;
     formatThreadDate(value: any): string;
-    enqueuePrompt(...args: any[]): void;
+    enqueuePrompt(
+      prompt: string,
+      threadId?: string,
+      images?: any[],
+      attachments?: any[],
+      annotations?: any[],
+      contextFilePath?: string
+    ): void;
     runNextQueuedPrompt(): void;
     removeQueuedPrompt(id: string): void;
     retrieveQueuedPrompt(id: string): void;
     steerQueuedPrompt(id: string): Promise<void>;
     renderPromptQueue(): void;
-    classifyVaultLinkTarget(value: string): any;
+    classifyVaultLinkTarget(value: string): import("../ui/vault-link-actions.mjs").VaultLinkTarget;
     openVaultLink(value: string, newLeaf?: boolean): Promise<void>;
     parseVaultLinkTarget(value: string): any;
     formatVaultLinkTarget(target: any): string;
     getLinkLabel(value: string): string;
     getLinkSourcePath(): string;
-    revealLine(leaf: any, line: any): any;
-    openVaultPath(value: string, newLeaf?: string): Promise<void>;
+    revealLine(leaf: any, line: number): void;
+    openVaultPath(value: string, newLeaf?: boolean | string): Promise<void>;
   }
 }
