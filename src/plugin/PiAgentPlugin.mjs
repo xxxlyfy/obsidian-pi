@@ -32,6 +32,7 @@ import {
   removeImportedVaultChatHistory
 } from "../threads/chat-history-import.mjs";
 import { ThreadStore } from "../threads/thread-store.mjs";
+import { ThreadRunnerRegistry } from "./thread-runners.mjs";
 import {
   enqueueLocalPrompt,
   invalidateLocalPromptPaths,
@@ -134,7 +135,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
-    this.threadRunners = new Map();
+    this.threadRunners = new ThreadRunnerRegistry(() => this.buildPiRunner());
     /** @type {any} */
     this.extensionUiHandler = undefined;
     /** @type {Map<string, { mtimeMs: number, size: number, count: number }> | undefined} */
@@ -283,7 +284,7 @@ export class PiAgentPlugin extends P.Plugin {
   onunload() {
     this.annotationController?.destroy();
     this.cancelPiRun();
-    this.disposeThreadRunners();
+    this.threadRunners.disposeAll();
   }
   async loadSettings() {
     const rawData = (await this.loadData()) ?? {};
@@ -387,7 +388,7 @@ export class PiAgentPlugin extends P.Plugin {
     else this.rebuildServices();
   }
   hasActivePiRuns() {
-    return [...this.threadRunners.values()].some((runner) => runner.isRunning);
+    return this.threadRunners.hasActive();
   }
   rebuildServicesIfPending() {
     if (this.pendingServiceRebuild && !this.hasActivePiRuns()) {
@@ -542,8 +543,7 @@ export class PiAgentPlugin extends P.Plugin {
             .catch((error) => console.warn("Pi Agent: could not name cloned Pi session", error));
         }
       } finally {
-        runner.rpcClient?.dispose();
-        this.threadRunners.delete(current.id);
+        this.threadRunners.dispose(current.id);
       }
       if (!clonedSession) return undefined;
     }
@@ -676,8 +676,7 @@ export class PiAgentPlugin extends P.Plugin {
       if (sessionIsShared) return false;
     }
 
-    runner?.rpcClient?.dispose();
-    this.threadRunners.delete(threadId);
+    this.threadRunners.dispose(threadId);
     if (sessionPath) {
       try {
         fs.unlinkSync(sessionPath);
@@ -705,8 +704,7 @@ export class PiAgentPlugin extends P.Plugin {
       .map((thread) => thread.id);
 
     for (const threadId of deleteIds) {
-      this.threadRunners.get(threadId)?.rpcClient?.dispose();
-      this.threadRunners.delete(threadId);
+      this.threadRunners.dispose(threadId);
     }
 
     const result = this.threadHistory.deleteThreads(deleteIds);
@@ -1018,11 +1016,12 @@ export class PiAgentPlugin extends P.Plugin {
     (runner ?? this.pi)?.cancelCurrentRun();
   }
   createPiRunner(threadId = this.getCurrentThread().id) {
+    return this.threadRunners.create(threadId);
+  }
+  buildPiRunner() {
     (!this.graph || !this.contextBuilder) && this.rebuildServices();
     if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
-    const existing = this.threadRunners.get(threadId);
-    if (existing) return existing;
-    const runner = new PiRunner(
+    return new PiRunner(
       this.settings,
       this.contextBuilder,
       this.getVaultBasePath(),
@@ -1030,29 +1029,14 @@ export class PiAgentPlugin extends P.Plugin {
       undefined,
       this.getExtensionUiHandler()
     );
-    this.threadRunners.set(threadId, runner);
-    return runner;
   }
   async withSessionRunner(threadId, action) {
-    const existing = this.threadRunners.get(threadId);
-    const runner = this.createPiRunner(threadId);
-    try {
-      return await action(runner);
-    } finally {
-      if (!existing) {
-        runner.rpcClient?.dispose();
-        this.threadRunners.delete(threadId);
-      }
-    }
-  }
-  disposeThreadRunners() {
-    for (const runner of this.threadRunners.values()) runner.rpcClient?.dispose();
-    this.threadRunners.clear();
+    return this.threadRunners.withRunner(threadId, action);
   }
   rebuildServices() {
     this.modelCatalogGeneration += 1;
     this.modelCatalogRefreshedAt = 0;
-    this.disposeThreadRunners();
+    this.threadRunners.disposeAll();
     this.piCommands = [];
     this.commandCatalogLoaded = false;
     this.graph = new VaultGraph(this.app, this.settings, () => this.getCurrentContextFile());
