@@ -148,14 +148,14 @@ describe("per-thread live run UI state", () => {
   it("migrates in-flight annotation snapshots when a note is renamed", () => {
     const snapshotA = { annotations: [{ id: "a1", path: "A.md" }], sourcePath: "A.md" };
     const snapshotB = { annotations: [{ id: "b1", path: "B.md" }], sourcePath: "B.md" };
-    const view = {
-      activeRuns: new Map([
-        ["t1", { annotationSnapshot: snapshotA }],
-        ["t2", { annotationSnapshot: snapshotB }]
-      ])
-    };
+    const view = Object.create(PiAgentView.prototype);
+    view.pendingAnnotationSnapshots = new Set();
+    view.activeRuns = new Map([
+      ["t1", { annotationSnapshot: snapshotA }],
+      ["t2", { annotationSnapshot: snapshotB }]
+    ]);
 
-    PiAgentView.prototype.migrateInFlightAnnotationPaths.call(view, "A.md", "C.md");
+    view.migrateInFlightAnnotationPaths("A.md", "C.md");
 
     expect(snapshotA.sourcePath).toBe("C.md");
     expect(snapshotA.annotations[0].path).toBe("C.md");
@@ -171,9 +171,11 @@ describe("per-thread live run UI state", () => {
       ],
       sourcePath: "A.md"
     };
-    const view = { activeRuns: new Map([["t1", { annotationSnapshot: snapshot }]]) };
+    const view = Object.create(PiAgentView.prototype);
+    view.pendingAnnotationSnapshots = new Set();
+    view.activeRuns = new Map([["t1", { annotationSnapshot: snapshot }]]);
 
-    PiAgentView.prototype.invalidateInFlightAnnotationPaths.call(view, "A.md");
+    view.invalidateInFlightAnnotationPaths("A.md");
 
     expect(snapshot.sourcePath).toBeUndefined();
     expect(snapshot.annotations.map((annotation) => annotation.id)).toEqual(["b1"]);

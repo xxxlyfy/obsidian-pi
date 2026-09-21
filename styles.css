@@ -192,29 +192,18 @@
   line-height: 1;
 }
 
-.pi-agent-run-setting-speed-fast,
-.pi-agent-run-setting-speed-default,
-.pi-agent-run-setting-mode-read {
-  color: var(--text-normal);
-}
-
-.pi-agent-run-setting-mode-write {
-  color: var(--text-warning);
-}
-
-.pi-agent-run-setting-mode-full {
-  color: var(--text-error);
-  font-weight: 700;
-}
-
 .pi-agent-control-label {
   color: currentColor;
   font-size: var(--font-ui-smaller);
   line-height: 1;
-  max-width: 78px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pi-agent-run-setting .pi-agent-control-label {
+  max-width: 78px;
 }
 
 .pi-agent-view button.pi-agent-run-setting-model {
@@ -295,12 +284,6 @@
 .pi-agent-message-actions:focus {
   background: transparent;
   color: var(--text-normal);
-}
-
-.pi-agent-setting-error {
-  color: var(--text-error);
-  font-size: var(--font-ui-smaller);
-  margin: -8px 0 10px;
 }
 
 .pi-agent-role-icon {
@@ -658,38 +641,17 @@
   color: var(--text-normal);
 }
 
-.pi-agent-queue-image-previews,
-.pi-agent-composer-images {
+.pi-agent-queue-image-previews {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.pi-agent-composer-images.is-empty {
-  display: none;
-}
-
-.pi-agent-queue-image-preview,
-.pi-agent-composer-image img {
+.pi-agent-queue-image-preview {
   border-radius: 6px;
   height: 52px;
   object-fit: cover;
   width: 52px;
-}
-
-.pi-agent-composer-image {
-  align-items: center;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  display: flex;
-  gap: 6px;
-  max-width: 260px;
-  padding: 4px;
-  position: relative;
-}
-
-.pi-agent-composer-file {
-  min-height: 52px;
 }
 
 .pi-agent-attachment-icon {
@@ -698,7 +660,6 @@
   flex: 0 0 auto;
 }
 
-.pi-agent-attachment-metadata,
 .pi-agent-queue-attachment span:last-child {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
@@ -715,16 +676,6 @@
   gap: 6px;
   max-width: 100%;
   padding: 4px;
-}
-
-.pi-agent-composer-image button {
-  background: var(--background-primary-alt);
-  height: 20px;
-  padding: 2px;
-  position: absolute;
-  right: -5px;
-  top: -5px;
-  width: 20px;
 }
 
 .pi-agent-image-input {

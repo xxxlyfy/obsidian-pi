@@ -8470,6 +8470,7 @@ var PiAgentView = class extends f4.ItemView {
     this.composerImages = [];
     this.composerAttachments = [];
     this.excludedContextPath = void 0;
+    this.pendingAnnotationSnapshots = /* @__PURE__ */ new Set();
     this.nativePiQueue = void 0;
     this.steeringPromptIds = /* @__PURE__ */ new Set();
     this.streamingThinkingContent = "";
@@ -8715,6 +8716,7 @@ var PiAgentView = class extends f4.ItemView {
     this.composerImages = [];
     this.composerAttachments = [];
     this.excludedContextPath = void 0;
+    this.pendingAnnotationSnapshots.clear();
     this.imageInputEl = void 0;
     this.sendButtonEl = void 0;
     this.composerBarEl = void 0;
@@ -9227,27 +9229,86 @@ var PiAgentView = class extends f4.ItemView {
     this.renderPromptQueue();
     this.setRunningState(this.running);
   }
-  migrateInFlightAnnotationPaths(oldPath, newPath) {
-    if (!oldPath || !newPath || oldPath === newPath) return;
+  /**
+   * @param {any} snapshot
+   * @returns {() => void}
+   */
+  trackPendingAnnotationSnapshot(snapshot) {
+    this.pendingAnnotationSnapshots.add(snapshot);
+    return () => this.pendingAnnotationSnapshots.delete(snapshot);
+  }
+  /**
+   * Snapshots of prompts that are still being prepared are not attached to a run
+   * yet, but a rename or delete during delivery still has to reach them.
+   *
+   * @param {(snapshot: any) => void} callback
+   */
+  forEachAnnotationSnapshot(callback) {
+    const seen = /* @__PURE__ */ new Set();
+    for (const snapshot of this.pendingAnnotationSnapshots) {
+      if (seen.has(snapshot)) continue;
+      seen.add(snapshot);
+      callback(snapshot);
+    }
     for (const run of this.activeRuns.values()) {
       const snapshot = run.annotationSnapshot;
-      if (!snapshot) continue;
+      if (!snapshot || seen.has(snapshot)) continue;
+      seen.add(snapshot);
+      callback(snapshot);
+    }
+  }
+  migrateInFlightAnnotationPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    this.forEachAnnotationSnapshot((snapshot) => {
       if (snapshot.sourcePath === oldPath) snapshot.sourcePath = newPath;
       snapshot.annotations = snapshot.annotations.map((annotation) =>
         annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
       );
-    }
+    });
   }
   invalidateInFlightAnnotationPaths(path6) {
     if (!path6) return;
-    for (const run of this.activeRuns.values()) {
-      const snapshot = run.annotationSnapshot;
-      if (!snapshot) continue;
+    this.forEachAnnotationSnapshot((snapshot) => {
       if (snapshot.sourcePath === path6) snapshot.sourcePath = void 0;
       snapshot.annotations = snapshot.annotations.filter(
         (annotation) => annotation?.path !== path6
       );
+    });
+  }
+  /**
+   * A rename or delete can migrate the annotation snapshot while the context is
+   * still being built. Rebuild the delivery once so the prompt keeps its note.
+   *
+   * @param {() => Promise<any>} buildDelivery
+   * @param {any} annotationSnapshot
+   */
+  async buildDeliveryWithSnapshotRetry(buildDelivery, annotationSnapshot) {
+    const releasePendingSnapshot = this.trackPendingAnnotationSnapshot(annotationSnapshot);
+    try {
+      const deliverySourcePath = annotationSnapshot.sourcePath;
+      const delivery = await buildDelivery();
+      if (
+        annotationSnapshot.sourcePath !== deliverySourcePath &&
+        !delivery.promptContext?.activeNote
+      )
+        return buildDelivery();
+      return delivery;
+    } finally {
+      releasePendingSnapshot();
     }
+  }
+  /**
+   * Returns a failed queued delivery to the pending queue so it can run again.
+   *
+   * @param {string | undefined} queuedId
+   */
+  requeueQueuedPrompt(queuedId) {
+    if (!queuedId) return;
+    this.promptQueue = this.promptQueue.map((item) =>
+      item.id === queuedId ? { ...item, state: "pending" } : item
+    );
+    this.plugin.replaceLocalPromptQueue(this.promptQueue);
+    this.renderPromptQueue();
   }
   restoreActiveRunUiState() {
     const threadId = this.getCurrentThreadId();
@@ -9291,13 +9352,43 @@ var PiAgentView = class extends f4.ItemView {
     annotationSourcePath,
     includeActiveNote
   ) {
+    const prepared = await this.preparePromptPayload({
+      prompt,
+      threadId,
+      images,
+      queuedId,
+      attachments,
+      annotations,
+      annotationSourcePath,
+      includeActiveNote
+    });
+    if (!prepared) return;
+    await this.executePromptRun(prepared);
+  }
+  /**
+   * Resolves the annotations, builds the pre-attached context, and returns the
+   * payload a run needs. Returns undefined when the prompt was queued, rolled
+   * back, or rejected; every bail-out path already reported itself.
+   *
+   * @param {any} request
+   * @returns {Promise<any>}
+   */
+  async preparePromptPayload(request) {
+    let prompt = request.prompt;
+    let images = request.images || [];
+    let attachments = request.attachments || [];
+    const threadId = request.threadId;
+    const queuedId = request.queuedId;
+    const annotationSourcePath = request.annotationSourcePath;
+    let annotations = request.annotations;
+    let includeActiveNote = request.includeActiveNote;
     if (includeActiveNote === void 0) includeActiveNote = this.shouldIncludeActiveNote();
     if (annotations === void 0) {
       try {
         annotations = await this.plugin.consumeAnnotationsForPrompt(annotationSourcePath);
       } catch (error) {
         new f4.Notice(error instanceof Error ? error.message : String(error));
-        return;
+        return void 0;
       }
     }
     const annotationSnapshot = { annotations, sourcePath: annotationSourcePath };
@@ -9305,25 +9396,23 @@ var PiAgentView = class extends f4.ItemView {
       const unsent = annotationSnapshot.annotations;
       if (!queuedId && unsent.length > 0) this.plugin.restoreConsumedAnnotations(unsent);
     };
+    const enqueueWhileRunning = () =>
+      this.enqueuePrompt(
+        prompt,
+        threadId,
+        images,
+        attachments,
+        annotationSnapshot.annotations,
+        annotationSnapshot.sourcePath,
+        includeActiveNote
+      );
     if (this.isThreadRunning(threadId)) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
-        this.renderPromptQueue();
+        this.requeueQueuedPrompt(queuedId);
       } else {
-        this.enqueuePrompt(
-          prompt,
-          threadId,
-          images,
-          attachments,
-          annotationSnapshot.annotations,
-          annotationSnapshot.sourcePath,
-          includeActiveNote
-        );
+        enqueueWhileRunning();
       }
-      return;
+      return void 0;
     }
     const buildDelivery = () =>
       this.plugin.enrichPromptDelivery(
@@ -9337,26 +9426,15 @@ var PiAgentView = class extends f4.ItemView {
         },
         { mode: "prompt", threadId }
       );
-    const deliverySourcePath = annotationSnapshot.sourcePath;
     let delivery;
     try {
-      delivery = await buildDelivery();
-      if (
-        annotationSnapshot.sourcePath !== deliverySourcePath &&
-        !delivery.promptContext?.activeNote
-      ) {
-        delivery = await buildDelivery();
-      }
+      delivery = await this.buildDeliveryWithSnapshotRetry(buildDelivery, annotationSnapshot);
     } catch (error) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
-        this.renderPromptQueue();
+        this.requeueQueuedPrompt(queuedId);
       } else restoreUnsentAnnotations();
       new f4.Notice(error instanceof Error ? error.message : String(error));
-      return;
+      return void 0;
     }
     prompt = String(delivery.prompt || "").trim();
     images = delivery.images || [];
@@ -9365,47 +9443,48 @@ var PiAgentView = class extends f4.ItemView {
       delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
     if (!prompt && images.length === 0 && attachments.length === 0) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
-        this.renderPromptQueue();
+        this.requeueQueuedPrompt(queuedId);
         new f4.Notice("The queued message became empty and was not sent.");
       } else restoreUnsentAnnotations();
-      return;
+      return void 0;
     }
     if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
     if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
-        this.renderPromptQueue();
+        this.requeueQueuedPrompt(queuedId);
       } else restoreUnsentAnnotations();
       new f4.Notice("The selected Pi model does not support image input.");
-      return;
+      return void 0;
     }
     if (this.isThreadRunning(threadId)) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
-        this.renderPromptQueue();
+        this.requeueQueuedPrompt(queuedId);
       } else {
-        this.enqueuePrompt(
-          prompt,
-          threadId,
-          images,
-          attachments,
-          annotationSnapshot.annotations,
-          annotationSnapshot.sourcePath,
-          includeActiveNote
-        );
+        enqueueWhileRunning();
       }
-      return;
+      return void 0;
     }
+    return {
+      prompt,
+      threadId,
+      images,
+      attachments,
+      queuedId,
+      annotationSnapshot,
+      restoreUnsentAnnotations,
+      delivery
+    };
+  }
+  /**
+   * Streams one prepared prompt through Pi and settles the run.
+   *
+   * @param {any} prepared
+   */
+  async executePromptRun(prepared) {
+    const { threadId, queuedId, annotationSnapshot, restoreUnsentAnnotations, delivery } = prepared;
+    const prompt = prepared.prompt;
+    const images = prepared.images;
+    const attachments = prepared.attachments;
     let run = {
       canceling: false,
       runner: this.plugin.createPiRunner(threadId),
@@ -9472,40 +9551,8 @@ var PiAgentView = class extends f4.ItemView {
         prompt,
         {
           isCanceled: () => run.canceling,
-          onEvent: (event) => {
-            const thinkingDelta = getThinkingDelta(event);
-            if (thinkingDelta) {
-              run.thinking += thinkingDelta;
-              if (!run.thinkingUserSet) run.thinkingExpanded = true;
-            }
-            const toolError = formatToolError(event);
-            if (toolError && run.toolErrors[run.toolErrors.length - 1] !== toolError)
-              run.toolErrors.push(toolError);
-            const eventType = this.normalizeRunEventType(event.type);
-            if (eventType === "tool_start" || eventType === "tool_update")
-              this.trackActiveTool(event, run.activeToolCalls);
-            else if (eventType === "tool_end") this.untrackActiveTool(event, run.activeToolCalls);
-            this.handleSuccessfulToolMutation(event, threadId);
-            if (!this.isCurrentThread(threadId)) return;
-            this.streamingThinkingContent = run.thinking;
-            this.thinkingDisclosureExpanded = run.thinkingExpanded;
-            this.thinkingDisclosureUserSet = run.thinkingUserSet;
-            this.handleRunEvent(event, threadId);
-            this.syncRunActivity(threadId);
-            this.syncRunContextUsage(threadId);
-            if (thinkingDelta) {
-              this.liveThinkingSetExpanded?.(run.thinkingExpanded);
-              this.appendStreamingThinkingDelta(thinkingDelta);
-            }
-          },
-          onTextDelta: (delta) => {
-            if (!run.thinkingUserSet) run.thinkingExpanded = false;
-            run.assistantContent += delta;
-            if (!this.isCurrentThread(threadId)) return;
-            this.thinkingDisclosureExpanded = run.thinkingExpanded;
-            this.liveThinkingSetExpanded?.(run.thinkingExpanded);
-            this.appendStreamingDelta(delta);
-          },
+          onEvent: (event) => this.handleRunStreamEvent(run, threadId, event),
+          onTextDelta: (delta) => this.handleRunStreamDelta(run, threadId, delta),
           onPromptAccepted: acknowledgeQueuedDelivery
         },
         threadId,
@@ -9547,10 +9594,7 @@ var PiAgentView = class extends f4.ItemView {
     } catch (error) {
       let message = error instanceof Error ? error.message : String(error);
       if (queuedId && !run.accepted) {
-        this.promptQueue = this.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.requeueQueuedPrompt(queuedId);
         skipQueueDrain = true;
       } else if (!run.accepted) restoreUnsentAnnotations();
       if (message === "Pi run canceled.") {
@@ -9609,6 +9653,50 @@ var PiAgentView = class extends f4.ItemView {
       this.plugin.rebuildServicesIfPending();
       if (!skipQueueDrain) this.runNextQueuedPrompt();
     }
+  }
+  /**
+   * @param {any} run
+   * @param {string} threadId
+   * @param {any} event
+   */
+  handleRunStreamEvent(run, threadId, event) {
+    const thinkingDelta = getThinkingDelta(event);
+    if (thinkingDelta) {
+      run.thinking += thinkingDelta;
+      if (!run.thinkingUserSet) run.thinkingExpanded = true;
+    }
+    const toolError = formatToolError(event);
+    if (toolError && run.toolErrors[run.toolErrors.length - 1] !== toolError)
+      run.toolErrors.push(toolError);
+    const eventType = this.normalizeRunEventType(event.type);
+    if (eventType === "tool_start" || eventType === "tool_update")
+      this.trackActiveTool(event, run.activeToolCalls);
+    else if (eventType === "tool_end") this.untrackActiveTool(event, run.activeToolCalls);
+    this.handleSuccessfulToolMutation(event, threadId);
+    if (!this.isCurrentThread(threadId)) return;
+    this.streamingThinkingContent = run.thinking;
+    this.thinkingDisclosureExpanded = run.thinkingExpanded;
+    this.thinkingDisclosureUserSet = run.thinkingUserSet;
+    this.handleRunEvent(event, threadId);
+    this.syncRunActivity(threadId);
+    this.syncRunContextUsage(threadId);
+    if (thinkingDelta) {
+      this.liveThinkingSetExpanded?.(run.thinkingExpanded);
+      this.appendStreamingThinkingDelta(thinkingDelta);
+    }
+  }
+  /**
+   * @param {any} run
+   * @param {string} threadId
+   * @param {string} delta
+   */
+  handleRunStreamDelta(run, threadId, delta) {
+    if (!run.thinkingUserSet) run.thinkingExpanded = false;
+    run.assistantContent += delta;
+    if (!this.isCurrentThread(threadId)) return;
+    this.thinkingDisclosureExpanded = run.thinkingExpanded;
+    this.liveThinkingSetExpanded?.(run.thinkingExpanded);
+    this.appendStreamingDelta(delta);
   }
   notifyRunCompleted(runId, threadId, body = "Agent response completed. Click to open the chat.") {
     if (!this.plugin.settings.desktopNotifications) return false;

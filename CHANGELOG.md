@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.35
+
+- Fixed the mid-build annotation retry that could never fire: the annotation snapshot of a prompt that is still being prepared is now tracked as pending, so a note rename or delete during context building reaches it and the delivery is rebuilt once with the resolved path.
+- Split the 327-line `runPrompt` into `preparePromptPayload()`, `executePromptRun()`, and shared `requeueQueuedPrompt()` and `buildDeliveryWithSnapshotRetry()` helpers, and moved the streaming callbacks into `handleRunStreamEvent()` and `handleRunStreamDelta()`.
+- Removed stylesheet rules that no longer match any class: the run-setting speed and tool-mode colors, the settings error line, and the composer image/file/attachment cards that pending-context badges replaced. Run-setting labels keep their `max-width` scoped to `.pi-agent-run-setting` so the shared `.pi-agent-control-label` no longer clips other labels.
+
 ## 0.0.34
 
 - Kept the composer run settings on a single row in narrow panes: the Model, Think, and Mode labels are no longer hidden, compact and narrow layouts tighten the spacing instead, and the unreachable expand/collapse path (`composerBarExpanded`, `composerBarExpandEl`, `.is-expanded`, `chevrons-*`) was removed instead of leaving a non-functional contract in the stylesheet.
