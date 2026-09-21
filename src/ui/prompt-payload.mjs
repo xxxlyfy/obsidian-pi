@@ -106,6 +106,7 @@ const SUPPORTED_TEXT_MIME_TYPES = new Set([
  * @property {Array<any>} attachments
  * @property {Array<any>} annotations
  * @property {string | undefined} contextFilePath
+ * @property {boolean} includeActiveNote
  * @property {string} threadId
  * @property {number} createdAt
  * @property {string} state
@@ -121,6 +122,7 @@ export function createQueuedPrompt({
   attachments = [],
   annotations = [],
   contextFilePath,
+  includeActiveNote = true,
   threadId,
   id,
   createdAt
@@ -139,6 +141,7 @@ export function createQueuedPrompt({
     attachments: normalizedAttachments,
     annotations: normalizedAnnotations,
     contextFilePath: contextFilePath ? String(contextFilePath) : undefined,
+    includeActiveNote: includeActiveNote !== false,
     threadId: String(threadId || ""),
     createdAt: typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now(),
     state: "pending"

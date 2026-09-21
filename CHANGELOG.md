@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.34
+
+- Kept the composer run settings on a single row in narrow panes: the Model, Think, and Mode labels are no longer hidden, compact and narrow layouts tighten the spacing instead, and the unreachable expand/collapse path (`composerBarExpanded`, `composerBarExpandEl`, `.is-expanded`, `chevrons-*`) was removed instead of leaving a non-functional contract in the stylesheet.
+- Added a remove action to the current-note pending-context badge. Excluding the current note drops its content and its annotations from every prompt until another note is opened, and queued or steered follow-ups keep the exclusion they were created with.
+- `/context show` now reports `activeNote: null` plus an explicit `activeNoteStatus` (`attached`, `excluded with the composer note badge`, or `no active markdown note`) instead of omitting the field, so an excluded note is no longer indistinguishable from an empty one.
+
 ## 0.0.33
 
 - Tool activity is tracked per run, so switching back to a background chat now shows its running tool status instead of a stale activity line.

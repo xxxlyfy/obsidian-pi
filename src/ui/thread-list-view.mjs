@@ -22,7 +22,6 @@ export function renderThreadList() {
   this.inputEl = undefined;
   this.sendButtonEl = undefined;
   this.composerBarEl = undefined;
-  this.composerBarExpandEl = undefined;
   this.runSettings = undefined;
   this.toolBadgesEl = undefined;
   this.threadTitleEl = undefined;

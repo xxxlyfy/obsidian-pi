@@ -40,7 +40,7 @@ export class ContextBuilder {
     const toolCatalog = this.getToolCatalog();
     const slashCommands = getSlashCommands(this.getPiCommands());
     const piCommand = findPiCommand(userPrompt, slashCommands);
-    const inspection = this.createInspection(preAttachedContext);
+    const inspection = this.createInspection(preAttachedContext, options);
 
     return {
       ...preAttachedContext,
@@ -60,6 +60,9 @@ export class ContextBuilder {
    * vault exploration belongs to Pi's read/search/list tools in Review, Edit,
    * and Full agent modes. Chat mode has no tools, so users can still attach
    * additional context explicitly with @note, #tag, /search, or folder refs.
+   *
+   * The composer badge can exclude the current note for the active view; when it
+   * does, no active-note content or active-note annotation is pre-attached.
    */
   async buildPreAttachedContext(parsedPrompt, selection = "", options = undefined) {
     const activeNote = await this.resolveActiveNote(selection, options);
@@ -81,6 +84,7 @@ export class ContextBuilder {
   }
 
   async resolveActiveNote(selection, options) {
+    if (options?.includeActiveNote === false) return undefined;
     if (!options?.activeNotePath) return this.graph.getActiveNoteContext(selection);
     try {
       const context = await this.graph.getNoteContext(options.activeNotePath);
@@ -295,7 +299,11 @@ export class ContextBuilder {
     return tools;
   }
 
-  createInspection(context) {
+  /**
+   * @param {any} context
+   * @param {any} [options]
+   */
+  createInspection(context, options = undefined) {
     return {
       activeNote: context.activeNote
         ? {
@@ -309,7 +317,12 @@ export class ContextBuilder {
             tagCount: context.activeNote.tags.length,
             headingCount: context.activeNote.headings.length
           }
-        : undefined,
+        : null,
+      activeNoteStatus: context.activeNote
+        ? "attached"
+        : options?.includeActiveNote === false
+          ? "excluded with the composer note badge"
+          : "no active markdown note",
       annotations: {
         total: context.annotations.length,
         attached: context.annotations.filter((annotation) => annotation.status === "attached")

@@ -540,6 +540,7 @@
 .pi-agent-composer-bar {
   align-items: center;
   display: flex;
+  flex-wrap: nowrap;
   gap: 14px;
   min-width: 0;
 }
@@ -548,45 +549,43 @@
   gap: 8px;
 }
 
+.pi-agent-composer-bar.is-compact .pi-agent-run-settings {
+  gap: 8px;
+}
+
 .pi-agent-composer-bar.is-compact .pi-agent-run-setting {
-  gap: 0;
-  padding: 0;
-  width: 28px;
-}
-
-.pi-agent-composer-bar.is-compact .pi-agent-run-setting .pi-agent-control-label {
-  display: none;
-}
-
-.pi-agent-composer-bar.is-compact.is-expanded {
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.pi-agent-composer-bar.is-compact.is-expanded .pi-agent-run-settings {
-  display: flex;
-  flex: 1 0 100%;
-  order: 10;
-}
-
-.pi-agent-composer-bar.is-compact.is-expanded .pi-agent-run-setting {
-  flex: 1 1 0;
-  gap: 4px;
+  flex: 0 1 auto;
+  gap: 3px;
   min-width: 0;
-  padding: 0 4px;
+  overflow: hidden;
+  padding: 0 2px;
   width: auto;
 }
 
-.pi-agent-composer-bar.is-compact.is-expanded .pi-agent-run-setting .pi-agent-control-label {
-  display: inline;
+.pi-agent-composer-bar.is-compact .pi-agent-run-setting-model .pi-agent-control-label {
+  max-width: 120px;
 }
 
-.pi-agent-composer-bar.is-narrow:not(.is-expanded) .pi-agent-run-settings {
-  display: flex;
+.pi-agent-composer-bar.is-narrow {
+  gap: 5px;
+}
+
+.pi-agent-composer-bar.is-narrow .pi-agent-run-settings {
+  gap: 5px;
+}
+
+.pi-agent-composer-bar.is-narrow .pi-agent-run-setting {
+  gap: 2px;
+  padding: 0 1px;
+}
+
+.pi-agent-composer-bar.is-narrow .pi-agent-run-setting .pi-agent-control-label {
+  max-width: 62px;
 }
 
 .pi-agent-composer-bar.is-narrow .pi-agent-send-button {
   margin-left: auto;
+  padding: 0 8px;
 }
 
 .pi-agent-prompt-queue {

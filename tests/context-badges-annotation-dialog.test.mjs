@@ -15,10 +15,9 @@ describe("pending context badges", () => {
     expect(viewSource).not.toContain("Current:");
     expect(viewSource).not.toContain("No current note");
     expect(viewSource).toContain("pi-agent-context-badge-remove");
-    expect(viewSource).toContain(
-      "this.renderPendingBadge(badges, contextFile.name, { title: contextFile.path })"
-    );
-    expect(viewSource).not.toContain("`Remove ${contextFile.name}`");
+    expect(viewSource).toContain("this.renderPendingBadge(badges, contextFile.name, {");
+    expect(viewSource).toContain("title: contextFile.path");
+    expect(viewSource).toContain("removeLabel: `Remove ${contextFile.name}`");
     expect(viewSource).toContain('`Remove ${image.fileName || "image"}`');
     expect(viewSource).toContain("`Remove ${attachment.fileName}`");
     expect(viewSource).toContain("`Clear ${label}`");
@@ -27,10 +26,11 @@ describe("pending context badges", () => {
     );
   });
 
-  it("keeps the current note mandatory while removing real pending files and annotations", () => {
-    expect(viewSource).not.toContain("excludedContextPath");
-    expect(viewSource).not.toContain("includeActiveNote");
-    expect(pluginSource).not.toContain("includeActiveNote");
+  it("keeps pending files and annotations removable while the current note can be excluded", () => {
+    expect(viewSource).toContain("this.excludedContextPath = contextFile.path");
+    expect(viewSource).toContain(
+      "return !!contextFile && this.excludedContextPath !== contextFile.path;"
+    );
     expect(viewSource).toContain("if (!onRemove) return");
     expect(viewSource).toContain(
       "this.composerImages = this.composerImages.filter((item) => item.id !== image.id)"

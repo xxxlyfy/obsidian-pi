@@ -77,6 +77,7 @@ describe("ContextBuilder", () => {
     ]);
     expect(context.inspection).toMatchObject({
       activeNote: { path: "Active.md", hasSelection: true },
+      activeNoteStatus: "attached",
       annotations: { total: 1, attached: 0, detached: 1 },
       attachments: { total: 4 },
       searchResults: { count: 0 },
@@ -97,7 +98,7 @@ describe("ContextBuilder", () => {
     expect(formatted).toContain('"status": "detached"');
   });
 
-  it("always includes the pinned current note in prompt context", async () => {
+  it("includes the pinned current note unless the composer excluded it", async () => {
     const graph = createGraph();
     graph.getNoteContext = vi.fn(async (path) => ({
       ...graph.activeNote,
@@ -108,6 +109,9 @@ describe("ContextBuilder", () => {
     const builder = new ContextBuilder(graph, DEFAULT_SETTINGS, "Bundled", "");
 
     const pinned = await builder.build("Prompt", "selection", {
+      activeNotePath: "Folder/Pinned.md"
+    });
+    const excluded = await builder.build("Prompt", "selection", {
       activeNotePath: "Folder/Pinned.md",
       includeActiveNote: false
     });
@@ -117,6 +121,11 @@ describe("ContextBuilder", () => {
       content: "content for Folder/Pinned.md",
       selection: "selection"
     });
+    expect(excluded.activeNote).toBeUndefined();
+    expect(excluded.annotations).toEqual([]);
+    expect(excluded.inspection.activeNote).toBeNull();
+    expect(excluded.inspection.activeNoteStatus).toBe("excluded with the composer note badge");
+    expect(pinned.inspection.activeNoteStatus).toBe("attached");
     expect(graph.getNoteContext).toHaveBeenCalledOnce();
   });
 

@@ -2155,7 +2155,7 @@ var ContextBuilder = class {
     const toolCatalog = this.getToolCatalog();
     const slashCommands = getSlashCommands(this.getPiCommands());
     const piCommand = findPiCommand(userPrompt, slashCommands);
-    const inspection = this.createInspection(preAttachedContext);
+    const inspection = this.createInspection(preAttachedContext, options);
     return {
       ...preAttachedContext,
       toolCatalog,
@@ -2173,6 +2173,9 @@ var ContextBuilder = class {
    * vault exploration belongs to Pi's read/search/list tools in Review, Edit,
    * and Full agent modes. Chat mode has no tools, so users can still attach
    * additional context explicitly with @note, #tag, /search, or folder refs.
+   *
+   * The composer badge can exclude the current note for the active view; when it
+   * does, no active-note content or active-note annotation is pre-attached.
    */
   async buildPreAttachedContext(parsedPrompt, selection = "", options = void 0) {
     const activeNote = await this.resolveActiveNote(selection, options);
@@ -2192,6 +2195,7 @@ var ContextBuilder = class {
     );
   }
   async resolveActiveNote(selection, options) {
+    if (options?.includeActiveNote === false) return void 0;
     if (!options?.activeNotePath) return this.graph.getActiveNoteContext(selection);
     try {
       const context = await this.graph.getNoteContext(options.activeNotePath);
@@ -2396,7 +2400,11 @@ ${contextPacket}`;
     );
     return tools;
   }
-  createInspection(context) {
+  /**
+   * @param {any} context
+   * @param {any} [options]
+   */
+  createInspection(context, options = void 0) {
     return {
       activeNote: context.activeNote
         ? {
@@ -2410,7 +2418,12 @@ ${contextPacket}`;
             tagCount: context.activeNote.tags.length,
             headingCount: context.activeNote.headings.length
           }
-        : void 0,
+        : null,
+      activeNoteStatus: context.activeNote
+        ? "attached"
+        : options?.includeActiveNote === false
+          ? "excluded with the composer note badge"
+          : "no active markdown note",
       annotations: {
         total: context.annotations.length,
         attached: context.annotations.filter((annotation) => annotation.status === "attached")
@@ -4054,6 +4067,7 @@ function createQueuedPrompt({
   attachments = [],
   annotations = [],
   contextFilePath,
+  includeActiveNote = true,
   threadId,
   id,
   createdAt
@@ -4072,6 +4086,7 @@ function createQueuedPrompt({
     attachments: normalizedAttachments,
     annotations: normalizedAnnotations,
     contextFilePath: contextFilePath ? String(contextFilePath) : void 0,
+    includeActiveNote: includeActiveNote !== false,
     threadId: String(threadId || ""),
     createdAt: typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now(),
     state: "pending"
@@ -6351,7 +6366,8 @@ function enqueuePrompt(
   images = [],
   attachments = [],
   annotations = [],
-  contextFilePath
+  contextFilePath,
+  includeActiveNote
 ) {
   const targetThreadId = threadId ?? this.plugin.getCurrentThread().id;
   const item = this.plugin.enqueueLocalPrompt({
@@ -6360,6 +6376,7 @@ function enqueuePrompt(
     attachments,
     annotations,
     contextFilePath,
+    includeActiveNote,
     threadId: targetThreadId
   });
   if (!item) return;
@@ -6391,7 +6408,8 @@ function runNextQueuedPrompt() {
     item.id,
     item.attachments,
     item.annotations,
-    item.contextFilePath
+    item.contextFilePath,
+    item.includeActiveNote !== false
   );
 }
 function removeQueuedPrompt(id) {
@@ -6409,6 +6427,7 @@ function retrieveQueuedPrompt(id) {
   if (this.inputEl) this.inputEl.value = item.prompt;
   this.composerImages = item.images.map((image) => ({ ...image }));
   this.composerAttachments = item.attachments.map((attachment) => ({ ...attachment }));
+  this.excludedContextPath = item.includeActiveNote === false ? item.contextFilePath : void 0;
   this.removeQueuedPrompt(id);
   this.renderComposerImages();
   this.resizeInput();
@@ -6753,7 +6772,6 @@ function renderThreadList() {
   this.inputEl = void 0;
   this.sendButtonEl = void 0;
   this.composerBarEl = void 0;
-  this.composerBarExpandEl = void 0;
   this.runSettings = void 0;
   this.toolBadgesEl = void 0;
   this.threadTitleEl = void 0;
@@ -8437,7 +8455,6 @@ var PiAgentView = class extends f4.ItemView {
     this.plugin = plugin;
     this.running = false;
     this.canceling = false;
-    this.composerBarExpanded = false;
     this.activityText = "Thinking";
     this.activityKind = "thinking";
     this.activityDetail = "";
@@ -8452,6 +8469,7 @@ var PiAgentView = class extends f4.ItemView {
     this.promptQueue = this.plugin.getLocalPromptQueue();
     this.composerImages = [];
     this.composerAttachments = [];
+    this.excludedContextPath = void 0;
     this.nativePiQueue = void 0;
     this.steeringPromptIds = /* @__PURE__ */ new Set();
     this.streamingThinkingContent = "";
@@ -8696,10 +8714,10 @@ var PiAgentView = class extends f4.ItemView {
     this.extensionWidgetsBelowEl = void 0;
     this.composerImages = [];
     this.composerAttachments = [];
+    this.excludedContextPath = void 0;
     this.imageInputEl = void 0;
     this.sendButtonEl = void 0;
     this.composerBarEl = void 0;
-    this.composerBarExpandEl = void 0;
     this.runSettings = void 0;
     this.toolBadgesEl = void 0;
     this.threadTitleEl = void 0;
@@ -8746,7 +8764,16 @@ var PiAgentView = class extends f4.ItemView {
       attr: { role: "list", "aria-label": "Pending prompt context" }
     });
     const contextFile = this.plugin.getCurrentContextFile();
-    if (contextFile) this.renderPendingBadge(badges, contextFile.name, { title: contextFile.path });
+    const includeActiveNote = this.resolveActiveNoteInclusion(contextFile);
+    if (includeActiveNote)
+      this.renderPendingBadge(badges, contextFile.name, {
+        title: contextFile.path,
+        removeLabel: `Remove ${contextFile.name}`,
+        onRemove: () => {
+          this.excludedContextPath = contextFile.path;
+          this.renderToolBadges();
+        }
+      });
     for (const image of this.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
         removeLabel: `Remove ${image.fileName || "image"}`,
@@ -8765,7 +8792,8 @@ var PiAgentView = class extends f4.ItemView {
           this.renderComposerImages();
         }
       });
-    const annotations = contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
+    const annotations =
+      includeActiveNote && contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
     if (annotations.length > 0) {
       const label = `${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`;
       this.renderPendingBadge(badges, label, {
@@ -8778,6 +8806,18 @@ var PiAgentView = class extends f4.ItemView {
       });
     }
     this.renderToolBadgesContextUsage(root);
+  }
+  shouldIncludeActiveNote() {
+    return this.resolveActiveNoteInclusion(this.plugin.getCurrentContextFile());
+  }
+  resolveActiveNoteInclusion(contextFile) {
+    if (
+      this.excludedContextPath &&
+      contextFile?.path &&
+      this.excludedContextPath !== contextFile.path
+    )
+      this.excludedContextPath = void 0;
+    return !!contextFile && this.excludedContextPath !== contextFile.path;
   }
   renderPendingBadge(parent, label, options = {}) {
     const { removeLabel, onRemove, title = label } = options;
@@ -8890,6 +8930,7 @@ var PiAgentView = class extends f4.ItemView {
     const images = this.composerImages.map((image) => ({ ...image }));
     const attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
     const contextFilePath = this.plugin.getCurrentContextFile()?.path;
+    const includeActiveNote = this.shouldIncludeActiveNote();
     if (!text && images.length === 0 && attachments.length === 0) return;
     if (images.length > 0) {
       try {
@@ -8910,7 +8951,16 @@ var PiAgentView = class extends f4.ItemView {
     this.suggestions?.close();
     this.resizeInput();
     this.syncCurrentRunFlags();
-    this.startPrompt(text, void 0, images, void 0, attachments, void 0, contextFilePath);
+    this.startPrompt(
+      text,
+      void 0,
+      images,
+      void 0,
+      attachments,
+      void 0,
+      contextFilePath,
+      includeActiveNote
+    );
     this.setRunningState(this.running);
   }
   handleSendButtonClick() {
@@ -8981,20 +9031,8 @@ var PiAgentView = class extends f4.ItemView {
     if (!bar) return;
     let isCompact = width < 560,
       isNarrow = width < 390;
-    if (!isCompact && this.composerBarExpanded) this.composerBarExpanded = false;
     bar.toggleClass("is-compact", isCompact);
     bar.toggleClass("is-narrow", isNarrow);
-    this.updateComposerBarExpansion();
-  }
-  updateComposerBarExpansion() {
-    let bar = this.composerBarEl,
-      expandButton = this.composerBarExpandEl;
-    if (!bar || !expandButton) return;
-    let expanded = this.composerBarExpanded && bar.hasClass("is-compact");
-    bar.toggleClass("is-expanded", expanded);
-    expandButton.setAttr("aria-label", expanded ? "Collapse run options" : "Expand run options");
-    expandButton.setAttr("title", expanded ? "Collapse run options" : "Expand run options");
-    (0, f4.setIcon)(expandButton, expanded ? "chevrons-right" : "chevrons-left");
   }
   renderImagePicker(parent) {
     const button = parent.createEl("button", {
@@ -9236,7 +9274,7 @@ var PiAgentView = class extends f4.ItemView {
     }
   }
   runAnnotationPrompt(prompt, sourcePath) {
-    return this.runPrompt(prompt, void 0, [], void 0, [], void 0, sourcePath);
+    return this.runPrompt(prompt, void 0, [], void 0, [], void 0, sourcePath, true);
   }
   startPrompt(...args) {
     void this.runPrompt(...args).catch((error) => {
@@ -9250,8 +9288,10 @@ var PiAgentView = class extends f4.ItemView {
     queuedId,
     attachments = [],
     annotations,
-    annotationSourcePath
+    annotationSourcePath,
+    includeActiveNote
   ) {
+    if (includeActiveNote === void 0) includeActiveNote = this.shouldIncludeActiveNote();
     if (annotations === void 0) {
       try {
         annotations = await this.plugin.consumeAnnotationsForPrompt(annotationSourcePath);
@@ -9279,7 +9319,8 @@ var PiAgentView = class extends f4.ItemView {
           images,
           attachments,
           annotationSnapshot.annotations,
-          annotationSnapshot.sourcePath
+          annotationSnapshot.sourcePath,
+          includeActiveNote
         );
       }
       return;
@@ -9291,7 +9332,8 @@ var PiAgentView = class extends f4.ItemView {
           images,
           attachments,
           annotations: annotationSnapshot.annotations,
-          contextFilePath: annotationSnapshot.sourcePath
+          contextFilePath: annotationSnapshot.sourcePath,
+          includeActiveNote
         },
         { mode: "prompt", threadId }
       );
@@ -9358,7 +9400,8 @@ var PiAgentView = class extends f4.ItemView {
           images,
           attachments,
           annotationSnapshot.annotations,
-          annotationSnapshot.sourcePath
+          annotationSnapshot.sourcePath,
+          includeActiveNote
         );
       }
       return;
@@ -11292,7 +11335,8 @@ var PiAgentPlugin = class extends P.Plugin {
     const promptContext = await /** @type {ContextBuilder} */
     this.contextBuilder.build(enriched.prompt, this.getEditorSelection(), {
       ...(hasAnnotationSnapshot ? { annotations: enriched.annotations } : {}),
-      activeNotePath: enriched.contextFilePath
+      activeNotePath: enriched.contextFilePath,
+      includeActiveNote: enriched.includeActiveNote !== false
     });
     return { ...enriched, promptContext };
   }

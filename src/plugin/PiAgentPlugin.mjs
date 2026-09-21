@@ -895,7 +895,8 @@ export class PiAgentPlugin extends P.Plugin {
       this.getEditorSelection(),
       {
         ...(hasAnnotationSnapshot ? { annotations: enriched.annotations } : {}),
-        activeNotePath: enriched.contextFilePath
+        activeNotePath: enriched.contextFilePath,
+        includeActiveNote: enriched.includeActiveNote !== false
       }
     );
     return { ...enriched, promptContext };

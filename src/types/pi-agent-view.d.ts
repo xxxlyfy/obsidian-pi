@@ -63,7 +63,8 @@ declare module "../ui/PiAgentView.mjs" {
       images?: any[],
       attachments?: any[],
       annotations?: any[],
-      contextFilePath?: string
+      contextFilePath?: string,
+      includeActiveNote?: boolean
     ): void;
     runNextQueuedPrompt(): void;
     removeQueuedPrompt(id: string): void;

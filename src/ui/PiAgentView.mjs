@@ -47,7 +47,6 @@ export class PiAgentView extends f.ItemView {
     this.plugin = plugin;
     this.running = false;
     this.canceling = false;
-    this.composerBarExpanded = false;
     this.activityText = "Thinking";
     this.activityKind = "thinking";
     this.activityDetail = "";
@@ -62,6 +61,7 @@ export class PiAgentView extends f.ItemView {
     this.promptQueue = this.plugin.getLocalPromptQueue();
     this.composerImages = [];
     this.composerAttachments = [];
+    this.excludedContextPath = undefined;
     this.nativePiQueue = undefined;
     this.steeringPromptIds = new Set();
     this.streamingThinkingContent = "";
@@ -307,10 +307,10 @@ export class PiAgentView extends f.ItemView {
     this.extensionWidgetsBelowEl = undefined;
     this.composerImages = [];
     this.composerAttachments = [];
+    this.excludedContextPath = undefined;
     this.imageInputEl = undefined;
     this.sendButtonEl = undefined;
     this.composerBarEl = undefined;
-    this.composerBarExpandEl = undefined;
     this.runSettings = undefined;
     this.toolBadgesEl = undefined;
     this.threadTitleEl = undefined;
@@ -357,7 +357,16 @@ export class PiAgentView extends f.ItemView {
       attr: { role: "list", "aria-label": "Pending prompt context" }
     });
     const contextFile = this.plugin.getCurrentContextFile();
-    if (contextFile) this.renderPendingBadge(badges, contextFile.name, { title: contextFile.path });
+    const includeActiveNote = this.resolveActiveNoteInclusion(contextFile);
+    if (includeActiveNote)
+      this.renderPendingBadge(badges, contextFile.name, {
+        title: contextFile.path,
+        removeLabel: `Remove ${contextFile.name}`,
+        onRemove: () => {
+          this.excludedContextPath = contextFile.path;
+          this.renderToolBadges();
+        }
+      });
     for (const image of this.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
         removeLabel: `Remove ${image.fileName || "image"}`,
@@ -376,7 +385,8 @@ export class PiAgentView extends f.ItemView {
           this.renderComposerImages();
         }
       });
-    const annotations = contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
+    const annotations =
+      includeActiveNote && contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
     if (annotations.length > 0) {
       const label = `${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`;
       this.renderPendingBadge(badges, label, {
@@ -389,6 +399,18 @@ export class PiAgentView extends f.ItemView {
       });
     }
     this.renderToolBadgesContextUsage(root);
+  }
+  shouldIncludeActiveNote() {
+    return this.resolveActiveNoteInclusion(this.plugin.getCurrentContextFile());
+  }
+  resolveActiveNoteInclusion(contextFile) {
+    if (
+      this.excludedContextPath &&
+      contextFile?.path &&
+      this.excludedContextPath !== contextFile.path
+    )
+      this.excludedContextPath = undefined;
+    return !!contextFile && this.excludedContextPath !== contextFile.path;
   }
   renderPendingBadge(parent, label, options = {}) {
     const { removeLabel, onRemove, title = label } = options;
@@ -501,6 +523,7 @@ export class PiAgentView extends f.ItemView {
     const images = this.composerImages.map((image) => ({ ...image }));
     const attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
     const contextFilePath = this.plugin.getCurrentContextFile()?.path;
+    const includeActiveNote = this.shouldIncludeActiveNote();
     if (!text && images.length === 0 && attachments.length === 0) return;
     if (images.length > 0) {
       try {
@@ -521,7 +544,16 @@ export class PiAgentView extends f.ItemView {
     this.suggestions?.close();
     this.resizeInput();
     this.syncCurrentRunFlags();
-    this.startPrompt(text, undefined, images, undefined, attachments, undefined, contextFilePath);
+    this.startPrompt(
+      text,
+      undefined,
+      images,
+      undefined,
+      attachments,
+      undefined,
+      contextFilePath,
+      includeActiveNote
+    );
     this.setRunningState(this.running);
   }
   handleSendButtonClick() {
@@ -592,20 +624,8 @@ export class PiAgentView extends f.ItemView {
     if (!bar) return;
     let isCompact = width < 560,
       isNarrow = width < 390;
-    if (!isCompact && this.composerBarExpanded) this.composerBarExpanded = false;
     bar.toggleClass("is-compact", isCompact);
     bar.toggleClass("is-narrow", isNarrow);
-    this.updateComposerBarExpansion();
-  }
-  updateComposerBarExpansion() {
-    let bar = this.composerBarEl,
-      expandButton = this.composerBarExpandEl;
-    if (!bar || !expandButton) return;
-    let expanded = this.composerBarExpanded && bar.hasClass("is-compact");
-    bar.toggleClass("is-expanded", expanded);
-    expandButton.setAttr("aria-label", expanded ? "Collapse run options" : "Expand run options");
-    expandButton.setAttr("title", expanded ? "Collapse run options" : "Expand run options");
-    (0, f.setIcon)(expandButton, expanded ? "chevrons-right" : "chevrons-left");
   }
   renderImagePicker(parent) {
     const button = parent.createEl("button", {
@@ -845,7 +865,7 @@ export class PiAgentView extends f.ItemView {
     }
   }
   runAnnotationPrompt(prompt, sourcePath) {
-    return this.runPrompt(prompt, undefined, [], undefined, [], undefined, sourcePath);
+    return this.runPrompt(prompt, undefined, [], undefined, [], undefined, sourcePath, true);
   }
   startPrompt(...args) {
     void this.runPrompt(...args).catch((error) => {
@@ -859,8 +879,10 @@ export class PiAgentView extends f.ItemView {
     queuedId,
     attachments = [],
     annotations,
-    annotationSourcePath
+    annotationSourcePath,
+    includeActiveNote
   ) {
+    if (includeActiveNote === undefined) includeActiveNote = this.shouldIncludeActiveNote();
     if (annotations === undefined) {
       try {
         annotations = await this.plugin.consumeAnnotationsForPrompt(annotationSourcePath);
@@ -888,7 +910,8 @@ export class PiAgentView extends f.ItemView {
           images,
           attachments,
           annotationSnapshot.annotations,
-          annotationSnapshot.sourcePath
+          annotationSnapshot.sourcePath,
+          includeActiveNote
         );
       }
       return;
@@ -900,7 +923,8 @@ export class PiAgentView extends f.ItemView {
           images,
           attachments,
           annotations: annotationSnapshot.annotations,
-          contextFilePath: annotationSnapshot.sourcePath
+          contextFilePath: annotationSnapshot.sourcePath,
+          includeActiveNote
         },
         { mode: "prompt", threadId: threadId }
       );
@@ -967,7 +991,8 @@ export class PiAgentView extends f.ItemView {
           images,
           attachments,
           annotationSnapshot.annotations,
-          annotationSnapshot.sourcePath
+          annotationSnapshot.sourcePath,
+          includeActiveNote
         );
       }
       return;
