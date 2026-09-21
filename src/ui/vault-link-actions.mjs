@@ -1,4 +1,5 @@
 import { Notice } from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 
 const EXTERNAL_LINK_PATTERN = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i;
 const LEGACY_LINE_PATTERN = /^(.*):(\d+)$/;
@@ -43,7 +44,7 @@ export async function openVaultLink(value, newLeaf = false) {
         : { kind: "invalid" };
 
   if (target.kind !== "internal") {
-    if (target.kind === "invalid") new Notice(`Note not found: ${String(value)}`);
+    if (target.kind === "invalid") new Notice(STRINGS.messages.noteNotFound(String(value)));
     return false;
   }
 
@@ -57,7 +58,7 @@ export async function openVaultLink(value, newLeaf = false) {
     return true;
   } catch (error) {
     console.error("Pi Agent: failed to open vault link", error);
-    new Notice(`Note not found: ${this.formatVaultLinkTarget(target)}`);
+    new Notice(STRINGS.messages.noteNotFound(this.formatVaultLinkTarget(target)));
     return false;
   }
 }

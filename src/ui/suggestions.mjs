@@ -1,4 +1,5 @@
 import { getSlashCommands } from "../context/slash-commands.mjs";
+import { STRINGS } from "../shared/strings.mjs";
 
 export class ComposerSuggestions {
   constructor(inputEl, plugin, onApply) {
@@ -110,14 +111,14 @@ export class ComposerSuggestions {
 
     const folderSuggestions = [...folders].map((folder) => ({
       label: `${folder}/`,
-      detail: "Folder",
+      detail: STRINGS.suggestions.folder,
       insertText: this.formatAttachmentInsert(`${folder}/`)
     }));
     const noteSuggestions = files.map((file) => {
       const label = file.path.replace(/\.md$/i, "");
       return {
         label,
-        detail: "Note",
+        detail: STRINGS.suggestions.note,
         insertText: this.formatAttachmentInsert(label)
       };
     });
@@ -146,7 +147,7 @@ export class ComposerSuggestions {
     return [...tags]
       .filter((tag) => tag.toLowerCase().includes(query))
       .sort()
-      .map((tag) => ({ label: tag, detail: "Tag", insertText: `${tag} ` }));
+      .map((tag) => ({ label: tag, detail: STRINGS.suggestions.tag, insertText: `${tag} ` }));
   }
 
   getCommandSuggestions(query) {
@@ -154,7 +155,7 @@ export class ComposerSuggestions {
       .map((command) => ({
         label: command.command,
         detail: command.command.startsWith("/skill:")
-          ? `Skill — ${command.detail}`
+          ? STRINGS.suggestions.skill(command.detail)
           : command.detail,
         insertText: command.insertText
       }))

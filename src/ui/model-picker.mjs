@@ -1,3 +1,4 @@
+import { STRINGS } from "../shared/strings.mjs";
 export class RuntimeCatalogRefreshGate {
   run(task) {
     if (this.inFlight) return this.inFlight;
@@ -26,7 +27,7 @@ export function needsRuntimeCatalogRefresh(
 
 export function createRuntimeCatalogSnapshot(models, effectiveConfig) {
   if (!Array.isArray(models) || models.length === 0) {
-    throw new Error("Pi returned no models.");
+    throw new Error(STRINGS.picker.noModelsReturned);
   }
 
   const reportedModel = String(effectiveConfig?.effectiveModel || "").trim();

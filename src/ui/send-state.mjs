@@ -1,10 +1,12 @@
+import { STRINGS } from "../shared/strings.mjs";
+
 export function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
   if (canceling) {
     return {
       state: "canceling",
       icon: "loader",
-      label: "Canceling",
-      ariaLabel: "Canceling agent run",
+      label: STRINGS.sendState.canceling,
+      ariaLabel: STRINGS.sendState.cancelingAria,
       disabled: true
     };
   }
@@ -13,8 +15,8 @@ export function getSendActionState({ running, canceling, hasInput, queuedCount =
     return {
       state: "queue",
       icon: "list-plus",
-      label: "Queue",
-      ariaLabel: "Queue message",
+      label: STRINGS.sendState.queue,
+      ariaLabel: STRINGS.sendState.queueAria,
       disabled: false
     };
   }
@@ -23,8 +25,8 @@ export function getSendActionState({ running, canceling, hasInput, queuedCount =
     return {
       state: "cancel",
       icon: "square",
-      label: "Cancel",
-      ariaLabel: "Cancel agent run",
+      label: STRINGS.sendState.cancel,
+      ariaLabel: STRINGS.sendState.cancelAria,
       disabled: false
     };
   }
@@ -32,9 +34,9 @@ export function getSendActionState({ running, canceling, hasInput, queuedCount =
   return {
     state: "send",
     icon: "send",
-    label: "Send",
-    ariaLabel: "Send message",
+    label: STRINGS.view.send,
+    ariaLabel: STRINGS.view.sendMessage,
     disabled: false,
-    titleSuffix: queuedCount > 0 ? `${queuedCount} queued.` : ""
+    titleSuffix: queuedCount > 0 ? STRINGS.sendState.queuedSuffix(queuedCount) : ""
   };
 }

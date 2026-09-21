@@ -1,4 +1,5 @@
 import { Modal, Setting } from "obsidian";
+import { STRINGS } from "../../shared/strings.mjs";
 
 export function confirmWithModal(app, options) {
   return new Promise((resolve) => {
@@ -22,14 +23,14 @@ class ConfirmModal extends Modal {
 
     const actionsEl = contentEl.createDiv({ cls: "pi-agent-modal-actions" });
     actionsEl
-      .createEl("button", { text: this.options.cancelText ?? "Cancel" })
+      .createEl("button", { text: this.options.cancelText ?? STRINGS.common.cancel })
       .addEventListener("click", () => {
         this.finish(false);
         this.close();
       });
     actionsEl
       .createEl("button", {
-        text: this.options.confirmText ?? "Continue",
+        text: this.options.confirmText ?? STRINGS.modals.continueLabel,
         cls: this.options.warning ? "mod-warning" : "mod-cta"
       })
       .addEventListener("click", () => {

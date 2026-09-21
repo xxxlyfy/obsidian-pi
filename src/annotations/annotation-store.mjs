@@ -1,4 +1,5 @@
 import { reanchorAnnotation } from "./annotation-anchors.mjs";
+import { STRINGS } from "../shared/strings.mjs";
 import {
   ANNOTATION_LIMITS,
   annotationDataBytes,
@@ -31,7 +32,7 @@ export class AnnotationStore {
 
   create(input) {
     const annotation = createAnnotation(input);
-    if (!annotation) throw new Error("Invalid annotation.");
+    if (!annotation) throw new Error(STRINGS.annotations.storageInvalid);
     const current = this.data.annotations[annotation.path] ?? [];
     if (current.length >= ANNOTATION_LIMITS.perPath)
       throw new Error(`A note can have at most ${ANNOTATION_LIMITS.perPath} annotations.`);
@@ -43,7 +44,7 @@ export class AnnotationStore {
     if (this.count() >= ANNOTATION_LIMITS.total)
       throw new Error(`At most ${ANNOTATION_LIMITS.total} annotations can be stored.`);
     if (current.some((item) => item.id === annotation.id))
-      throw new Error("Annotation ID already exists.");
+      throw new Error(STRINGS.annotations.storageDuplicateId);
 
     this.assertStorageBudget({
       ...this.data.annotations,
@@ -71,7 +72,7 @@ export class AnnotationStore {
       },
       existing.path
     );
-    if (!updated) throw new Error("Invalid annotation update.");
+    if (!updated) throw new Error(STRINGS.annotations.storageInvalidUpdate);
     const updatedItems = items.map((item, itemIndex) => (itemIndex === index ? updated : item));
     this.assertStorageBudget({ ...this.data.annotations, [existing.path]: updatedItems });
     items[index] = updated;
@@ -178,7 +179,7 @@ export class AnnotationStore {
       annotationDataBytes({ schemaVersion: this.data.schemaVersion, annotations }) >
       ANNOTATION_LIMITS.storageBytes
     )
-      throw new Error("Annotation storage limit reached.");
+      throw new Error(STRINGS.annotations.storageLimitReached);
   }
 
   changed() {

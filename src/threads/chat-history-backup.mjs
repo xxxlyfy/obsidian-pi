@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { STRINGS } from "../shared/strings.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -7,7 +8,7 @@ const BACKUP_FILE = "chat-history.backup.json";
 const PREVIOUS_BACKUP_FILE = "chat-history.backup.previous.json";
 
 export async function writeChatHistoryBackup(pluginDirectory, history) {
-  if (!pluginDirectory) throw new Error("The plugin directory is unavailable.");
+  if (!pluginDirectory) throw new Error(STRINGS.history.pluginDirectoryUnavailable);
   const normalized = cloneHistory(history);
   const payload = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -55,7 +56,7 @@ async function readValidBackup(filePath) {
 }
 
 function cloneHistory(history) {
-  if (!history || !Array.isArray(history.threads)) throw new Error("Invalid chat history backup.");
+  if (!history || !Array.isArray(history.threads)) throw new Error(STRINGS.history.invalidBackup);
   const cloned = JSON.parse(JSON.stringify(history));
   if (
     typeof cloned.currentThreadId !== "string" ||
@@ -67,7 +68,7 @@ function cloneHistory(history) {
         !Array.isArray(thread.messages)
     )
   ) {
-    throw new Error("Invalid chat history backup.");
+    throw new Error(STRINGS.history.invalidBackup);
   }
   return cloned;
 }

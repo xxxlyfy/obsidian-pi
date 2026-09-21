@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 import {
   mapRenderedChunkCandidatesToSource,
   mapRenderedChunksToSource,
@@ -30,13 +31,13 @@ describe("reading mode annotation capture", () => {
       range: { from: 30, to: 48 },
       targetKind: "block",
       renderedText: "repeated",
-      anchorLabel: "Rendered selection (anchored to containing source block)"
+      anchorLabel: STRINGS.annotations.renderedSelectionLabel
     });
   });
 
   it("rejects stale section information instead of guessing", () => {
-    expect(resolveReadingModeCapture(source, section("changed", 2), "unique").error).toMatch(
-      /no longer tied/
+    expect(resolveReadingModeCapture(source, section("changed", 2), "unique").error).toBe(
+      STRINGS.annotations.renderedBlockGone
     );
     expect(resolveSectionRange(source, { lineStart: 99, lineEnd: 99, text: "" })).toBeUndefined();
   });

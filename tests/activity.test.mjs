@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 import {
   formatRetryDetail,
   formatToolError,
@@ -22,12 +23,12 @@ describe("activity helpers", () => {
 
   it("formats readable tool statuses", () => {
     expect(formatToolStatus("grep", { pattern: "TODO", path: "src/main.js" })).toEqual({
-      label: 'Searching "TODO" in main.js',
+      label: `${STRINGS.activity.searching} "TODO" in main.js`,
       kind: "search",
       detail: ""
     });
     expect(formatToolStatus("bash", { command: "npm test" })).toEqual({
-      label: "Running command",
+      label: `${STRINGS.activity.running} ${STRINGS.activity.command}`,
       kind: "shell",
       detail: ""
     });
@@ -39,9 +40,9 @@ describe("activity helpers", () => {
     expect(
       formatToolStatus("read", { path: "/Users/example/.pi/agent/skills/github/SKILL.md" })
     ).toEqual({
-      label: "Skill · github",
+      label: STRINGS.activity.skill("github"),
       kind: "skill",
-      detail: "Using skill instructions"
+      detail: STRINGS.activity.usingSkillInstructions
     });
     expect(
       formatToolStatus(
@@ -50,9 +51,9 @@ describe("activity helpers", () => {
         "preparing"
       )
     ).toEqual({
-      label: "Skill · github",
+      label: STRINGS.activity.skill("github"),
       kind: "skill",
-      detail: "Loading skill instructions"
+      detail: STRINGS.activity.loadingSkillInstructions
     });
   });
 
@@ -67,7 +68,7 @@ describe("activity helpers", () => {
       },
       { type: "context_ready" }
     );
-    expect(setActivity).toHaveBeenCalledWith("Skill · github", "skill");
+    expect(setActivity).toHaveBeenCalledWith(STRINGS.activity.skill("github"), "skill");
   });
 
   it("handles sticky and bypass activity kinds", () => {
@@ -80,7 +81,7 @@ describe("activity helpers", () => {
   it("creates stable tool event and retry labels", () => {
     expect(getToolEventKey({ toolCallId: "call-1" })).toBe("call-1");
     expect(formatRetryDetail({ attempt: 2, maxAttempts: 3, errorMessage: "temporary" })).toBe(
-      "attempt 2/3 — temporary"
+      "第 2/3 次尝试 — temporary"
     );
   });
 
@@ -96,6 +97,6 @@ describe("activity helpers", () => {
         isError: true,
         errorMessage: "File not found"
       })
-    ).toBe("read: File not found");
+    ).toBe(STRINGS.activity.toolFailed("read", "File not found"));
   });
 });

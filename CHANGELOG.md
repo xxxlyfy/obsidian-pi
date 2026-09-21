@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.36
+
+- Cancellation is now detected from the error identity instead of the `"Pi run canceled."` message text, so the runtime message can change without breaking the cancel path. `PiRunCanceledError` and `isPiRunCanceled()` walk the error cause chain, and the runner, the plugin, and the view no longer compare message strings.
+- Translated the human-facing interface to Simplified Chinese: the composer, threads, queue, activity and thinking lines, modals, annotation dialog and notices, slash-command catalogue, suggestion details, plugin notices, ribbon tooltip, and command palette names now use one shared copy table in `src/shared/strings.mjs`. Prompt text that is sent to Pi (context packet, bundled instructions, `/context show` field names and status values) stays in English, and runtime diagnostics keep their messages.
+- Tests that asserted interface copy now import the same copy table instead of duplicating literals, so the assertions follow the translated strings.
+- The build now emits UTF-8 instead of ASCII escapes, so translated copy stays readable in the committed bundle and packaged release (about 7 KB smaller).
+
 ## 0.0.35
 
 - Fixed the mid-build annotation retry that could never fire: the annotation snapshot of a prompt that is still being prepared is now tracked as pending, so a note rename or delete during context building reaches it and the delivery is rebuilt once with the resolved path.

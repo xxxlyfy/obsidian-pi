@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatContextShowResponse, isContextShowPrompt } from "../src/context/context-show.mjs";
+import { STRINGS } from "../src/shared/strings.mjs";
 
 describe("context show command", () => {
   it("matches slash and bare context show prompts", () => {
@@ -10,8 +11,15 @@ describe("context show command", () => {
   });
 
   it("formats the context inspection as a readable response", () => {
-    expect(formatContextShowResponse({ activeNote: { path: "Note.md" } })).toBe(
-      'Current Obsidian context:\n\n```json\n{\n  "activeNote": {\n    "path": "Note.md"\n  }\n}\n```'
-    );
+    const inspection = { activeNote: { path: "Note.md" } };
+    const expected = [
+      STRINGS.commands.contextShowHeading,
+      "",
+      "```json",
+      JSON.stringify(inspection, null, 2),
+      "```"
+    ].join("\n");
+
+    expect(formatContextShowResponse(inspection)).toBe(expected);
   });
 });

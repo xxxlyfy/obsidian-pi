@@ -15,6 +15,9 @@ const result = await build({
   bundle: true,
   platform: "node",
   format: "cjs",
+  // Keep the translated UI copy readable in the committed bundle instead of
+  // expanding every non-ASCII character into a \uXXXX escape.
+  charset: "utf8",
   // Obsidian owns these runtime singletons. Bundling CodeMirror creates a second
   // copy whose extension objects fail the host editor's instanceof checks.
   external: ["obsidian", "@codemirror/state", "@codemirror/view"],

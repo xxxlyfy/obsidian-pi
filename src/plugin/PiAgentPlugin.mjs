@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { STRINGS } from "../shared/strings.mjs";
 import * as P from "obsidian";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
@@ -7,6 +8,7 @@ import { formatContextShowResponse, isContextShowPrompt } from "../context/conte
 import { normalizeSkillFolderList } from "../context/skills.mjs";
 import { VaultGraph } from "../context/vault-graph.mjs";
 import { checkPiInstallation, warmupPiCli } from "../pi/health.mjs";
+import { PiRunCanceledError } from "../pi/run-canceled.mjs";
 import { PiCommandCatalog } from "../pi/command-catalog.mjs";
 import { createExtensionUiHandler } from "../pi/extension-ui.mjs";
 import { PiModelCatalog } from "../pi/model-catalog.mjs";
@@ -159,7 +161,7 @@ export class PiAgentPlugin extends P.Plugin {
     await this.loadSettings();
 
     if (!P.Platform.isDesktopApp) {
-      new P.Notice("Pi Agent is desktop-only.");
+      new P.Notice(STRINGS.plugin.desktopOnly);
       return;
     }
 
@@ -199,9 +201,7 @@ export class PiAgentPlugin extends P.Plugin {
             this.annotationStore.list(oldPath).length > 0 &&
             !this.annotationStore.renamePath(oldPath, file.path)
           )
-            new P.Notice(
-              "Annotations could not follow the renamed note; their original records were kept."
-            );
+            new P.Notice(STRINGS.plugin.annotationsCouldNotFollow);
         } else {
           this.migrateQueuedAttachmentPaths(oldPath, file.path);
         }
@@ -215,19 +215,19 @@ export class PiAgentPlugin extends P.Plugin {
       })
     );
     this.registerView(PI_AGENT_VIEW_TYPE, (leaf) => new PiAgentView(leaf, this));
-    this.addRibbonIcon(PI_AGENT_ICON_ID, `Open ${PI_AGENT_DISPLAY_NAME}`, () => {
+    this.addRibbonIcon(PI_AGENT_ICON_ID, STRINGS.plugin.openAgent(PI_AGENT_DISPLAY_NAME), () => {
       this.activateView();
     });
     this.addCommand({
       id: "open-pi",
-      name: "Open agent chat",
+      name: STRINGS.plugin.commandOpenChat,
       callback: () => {
         this.activateView();
       }
     });
     this.addCommand({
       id: "toggle-annotations",
-      name: "Add or toggle annotation for active note",
+      name: STRINGS.plugin.commandToggleAnnotations,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.annotationController?.handleActiveMarkdownNote();
@@ -242,7 +242,7 @@ export class PiAgentPlugin extends P.Plugin {
     });
     this.addCommand({
       id: "ask-about-current-note",
-      name: "Ask about current note",
+      name: STRINGS.plugin.commandAskCurrentNote,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
@@ -252,7 +252,7 @@ export class PiAgentPlugin extends P.Plugin {
     });
     this.addCommand({
       id: "research-around-current-note",
-      name: "Research around current note",
+      name: STRINGS.plugin.commandResearchCurrentNote,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
@@ -262,7 +262,7 @@ export class PiAgentPlugin extends P.Plugin {
     });
     this.addCommand({
       id: "suggest-frontmatter",
-      name: "Suggest frontmatter for current note",
+      name: STRINGS.plugin.commandSuggestFrontmatter,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.suggestFrontmatterForCurrentNote();
@@ -270,7 +270,7 @@ export class PiAgentPlugin extends P.Plugin {
     });
     this.addCommand({
       id: "draft-base-from-current-note",
-      name: "Draft base from current note context",
+      name: STRINGS.plugin.commandDraftBase,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
@@ -310,7 +310,7 @@ export class PiAgentPlugin extends P.Plugin {
       try {
         importedHistory = await importVaultChatHistory(this.getVaultBasePath(), rawData);
       } catch (error) {
-        console.warn("Pi Agent: could not import vault chat history", error);
+        console.warn(STRINGS.plugin.historyImportFailed, error);
       }
       if (Array.isArray(rawSettings.ignoredFolders) && chatHistoryFolder) {
         rawSettings.ignoredFolders = rawSettings.ignoredFolders.filter(
@@ -323,7 +323,7 @@ export class PiAgentPlugin extends P.Plugin {
     if (!restoredHistory && isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
     if (!restoredHistory) {
       restoredHistory = await readChatHistoryBackup(this.getPluginDirectory());
-      if (restoredHistory) new P.Notice("Pi Agent recovered chat history from its local backup.");
+      if (restoredHistory) new P.Notice(STRINGS.plugin.historyRecovered);
     }
 
     this.settings = normalizeSettings(rawSettings);
@@ -353,7 +353,7 @@ export class PiAgentPlugin extends P.Plugin {
       await this.savePluginData();
       const persisted = (await this.loadData())?.chatHistory;
       if (!historiesMatch(persisted, this.threadHistory.toJSON())) {
-        throw new Error("Could not verify imported chat history in plugin data.");
+        throw new Error(STRINGS.plugin.verifyImportFailed);
       }
       await removeImportedVaultChatHistory(
         this.getVaultBasePath(),
@@ -361,13 +361,10 @@ export class PiAgentPlugin extends P.Plugin {
         this.app.vault
       );
       if (importedHistory.warnings.length > 0) {
-        console.warn(
-          "Pi Agent: some unrecognized chat files were left in place",
-          importedHistory.warnings
-        );
-        new P.Notice("Chat history was restored, but unreadable chat files were left in place.");
+        console.warn(STRINGS.plugin.historyUnrecognizedFiles, importedHistory.warnings);
+        new P.Notice(STRINGS.plugin.historyRestoredPartially);
       } else {
-        new P.Notice("Chat history was restored to Pi Agent's local plugin data.");
+        new P.Notice(STRINGS.plugin.historyRestored);
       }
     }
   }
@@ -380,7 +377,7 @@ export class PiAgentPlugin extends P.Plugin {
       await this.savePluginData();
     } catch (error) {
       new P.Notice(
-        `Pi Agent: 无法保存设置：${error instanceof Error ? error.message : String(error)}`
+        STRINGS.plugin.settingsSaveFailed(error instanceof Error ? error.message : String(error))
       );
       return;
     }
@@ -406,7 +403,7 @@ export class PiAgentPlugin extends P.Plugin {
   checkPiInstallation(showSuccess) {
     return checkPiInstallation(this.settings.piExecutablePath).then((result) => {
       if (result.ok) {
-        showSuccess && new P.Notice(`Pi CLI is available: ${result.version || result.message}`);
+        showSuccess && new P.Notice(STRINGS.plugin.cliAvailable(result.version || result.message));
         return result;
       }
 
@@ -422,7 +419,10 @@ export class PiAgentPlugin extends P.Plugin {
     if (showNotice) {
       new P.Notice(
         result.ok
-          ? `Loaded ${this.settings.availableModels.length} Pi models; default ${this.settings.effectiveModel}.`
+          ? STRINGS.plugin.modelsLoaded(
+              this.settings.availableModels.length,
+              this.settings.effectiveModel
+            )
           : this.modelCatalogError
       );
     }
@@ -433,7 +433,7 @@ export class PiAgentPlugin extends P.Plugin {
       while (true) {
         const generation = this.modelCatalogGeneration;
         const catalog = this.catalog;
-        if (!catalog) throw new Error("Pi model service is not ready.");
+        if (!catalog) throw new Error(STRINGS.plugin.modelServiceNotReady);
 
         let models;
         let effectiveConfig;
@@ -477,7 +477,7 @@ export class PiAgentPlugin extends P.Plugin {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       this.modelCatalogError = `Could not refresh models from Pi. Check the Pi executable and configuration, then try again. ${detail}`;
-      console.warn("Pi Agent: failed to refresh model catalog", error);
+      console.warn(STRINGS.plugin.modelCatalogFailed, error);
       this.refreshOpenModelControls();
       if (hasSafeRuntimeCatalog(this.settings)) return { ok: false, stale: true };
       throw new Error(this.modelCatalogError, { cause: error });
@@ -502,11 +502,11 @@ export class PiAgentPlugin extends P.Plugin {
       try {
         this.piCommands = (await this.commandCatalog?.getCommands(this.getVaultBasePath())) ?? [];
         this.commandCatalogLoaded = true;
-        if (showNotice) new P.Notice(`Loaded ${this.piCommands.length} Pi commands.`);
+        if (showNotice) new P.Notice(STRINGS.plugin.commandsLoaded(this.piCommands.length));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (showNotice) new P.Notice(message);
-        console.warn("Pi Agent: failed to refresh Pi commands", error);
+        console.warn(STRINGS.plugin.commandsFailed, error);
       }
       return this.piCommands;
     })().finally(() => {
@@ -540,7 +540,7 @@ export class PiAgentPlugin extends P.Plugin {
         if (clonedSession) {
           await runner
             .setSessionName(clonedSession, `${current.title} (fork)`)
-            .catch((error) => console.warn("Pi Agent: could not name cloned Pi session", error));
+            .catch((error) => console.warn(STRINGS.plugin.sessionCloneFailed, error));
         }
       } finally {
         this.threadRunners.dispose(current.id);
@@ -681,7 +681,7 @@ export class PiAgentPlugin extends P.Plugin {
       try {
         fs.unlinkSync(sessionPath);
       } catch (error) {
-        console.warn("Pi Agent: could not delete local Pi session", error);
+        console.warn(STRINGS.plugin.sessionDeleteFailed, error);
         return false;
       }
     }
@@ -737,7 +737,7 @@ export class PiAgentPlugin extends P.Plugin {
       const sessionName = this.threadHistory.getThread(threadId)?.title ?? title;
       void this.withSessionRunner(threadId, (runner) =>
         runner.setSessionName(thread.piSessionId, sessionName)
-      ).catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
+      ).catch((error) => console.warn(STRINGS.plugin.sessionRenameFailed, error));
     }
     return true;
   }
@@ -755,9 +755,9 @@ export class PiAgentPlugin extends P.Plugin {
       notify: (request) => {
         const prefix =
           request.notifyType === "error"
-            ? "Error: "
+            ? STRINGS.plugin.errorPrefix
             : request.notifyType === "warning"
-              ? "Warning: "
+              ? STRINGS.plugin.warningPrefix
               : "";
         new P.Notice(`${prefix}${String(request.message ?? "")}`);
       },
@@ -814,7 +814,7 @@ export class PiAgentPlugin extends P.Plugin {
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false);
       if (!leaf) {
-        new P.Notice("Could not open Pi view.");
+        new P.Notice(STRINGS.plugin.couldNotOpenView);
         return;
       }
       await leaf.setViewState({ type: PI_AGENT_VIEW_TYPE, active: true });
@@ -822,12 +822,12 @@ export class PiAgentPlugin extends P.Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
   async runPiPrompt(prompt, callbacks, threadId, runner = this.pi, images = [], promptContext) {
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     if (
       ((!this.graph || !this.contextBuilder || !this.pi) && this.rebuildServices(),
       !this.graph || !this.contextBuilder || !this.pi)
     )
-      throw new Error("Pi services are not available.");
+      throw new Error(STRINGS.plugin.servicesUnavailable);
     const selection = this.getEditorSelection();
     if (
       prompt.trim().startsWith("/") &&
@@ -840,7 +840,7 @@ export class PiAgentPlugin extends P.Plugin {
         ? (promptContext ??
           (await /** @type {ContextBuilder} */ (this.contextBuilder).build(prompt, selection)))
         : undefined;
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     if (isContextShowPrompt(prompt)) {
       return {
         finalResponse: formatContextShowResponse(context?.inspection),
@@ -855,10 +855,10 @@ export class PiAgentPlugin extends P.Plugin {
     const thread = threadId
       ? this.threadHistory.getThread(threadId)
       : this.threadHistory.getCurrentThread();
-    if (!thread) throw new Error("Chat thread no longer exists.");
-    if (!runner) throw new Error("Pi runner is not available.");
+    if (!thread) throw new Error(STRINGS.plugin.threadGone);
+    if (!runner) throw new Error(STRINGS.plugin.runnerUnavailable);
     const history = getPriorThreadHistory(thread.messages, prompt);
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     if (context) {
       callbacks?.onEvent?.({
         type: "context_ready",
@@ -868,7 +868,7 @@ export class PiAgentPlugin extends P.Plugin {
         }
       });
     }
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     const result = await runner.run(
       prompt,
       context,
@@ -1007,7 +1007,7 @@ export class PiAgentPlugin extends P.Plugin {
   }
   async inspectPiContext(prompt) {
     if (((!this.graph || !this.contextBuilder) && this.rebuildServices(), !this.contextBuilder))
-      throw new Error("Pi context builder is not available.");
+      throw new Error(STRINGS.plugin.contextBuilderUnavailable);
     return this.contextBuilder.inspectContext(prompt, this.getEditorSelection());
   }
   getCurrentContextFile() {
@@ -1021,7 +1021,7 @@ export class PiAgentPlugin extends P.Plugin {
   }
   buildPiRunner() {
     (!this.graph || !this.contextBuilder) && this.rebuildServices();
-    if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
+    if (!this.contextBuilder) throw new Error(STRINGS.plugin.contextBuilderUnavailable);
     return new PiRunner(
       this.settings,
       this.contextBuilder,
@@ -1069,7 +1069,7 @@ export class PiAgentPlugin extends P.Plugin {
     if (sourcePath) {
       const explicitFile = this.app.vault.getAbstractFileByPath(sourcePath);
       if (!(explicitFile instanceof P.TFile) || explicitFile.extension !== "md") {
-        new P.Notice("The annotated note no longer exists. Its annotations were not sent.");
+        new P.Notice(STRINGS.plugin.annotationNoteGone);
         return [];
       }
       const annotations = await this.getAnnotationsForContext(explicitFile.path);
@@ -1112,7 +1112,7 @@ export class PiAgentPlugin extends P.Plugin {
       }
     } catch (error) {
       new P.Notice(
-        error instanceof Error ? error.message : "Could not restore queued annotations."
+        error instanceof Error ? error.message : STRINGS.plugin.annotationsRestoreFailed
       );
     }
   }
@@ -1143,12 +1143,12 @@ export class PiAgentPlugin extends P.Plugin {
   }
   saveThreadHistory() {
     this.savePluginData().catch((error) => {
-      console.warn("Pi Agent: failed to save thread history", error);
+      console.warn(STRINGS.plugin.historySaveFailed, error);
     });
   }
   saveAnnotations() {
     this.savePluginData().catch(() => {
-      new P.Notice("Could not save annotations to plugin data.");
+      new P.Notice(STRINGS.plugin.annotationSaveFailed);
     });
   }
   savePluginData() {
@@ -1179,7 +1179,7 @@ export class PiAgentPlugin extends P.Plugin {
     const isMarkdown = !!activeFile && activeFile.extension === "md";
     if (checking) return isMarkdown;
     if (!isMarkdown) {
-      new P.Notice("Open a markdown note first.");
+      new P.Notice(STRINGS.plugin.openMarkdownFirst);
       return false;
     }
     action();
@@ -1193,17 +1193,17 @@ export class PiAgentPlugin extends P.Plugin {
       view.startPrompt(prompt);
       return;
     }
-    new P.Notice("Could not open Pi view.");
+    new P.Notice(STRINGS.plugin.couldNotOpenView);
   }
   async runAnnotationsPrompt(path) {
     if (this.annotationStore.list(path).length === 0) {
-      new P.Notice("There are no annotations to send for this note.");
+      new P.Notice(STRINGS.plugin.noAnnotationsToSend);
       return;
     }
     await this.activateView();
     const view = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0]?.view;
     if (!(view instanceof PiAgentView)) {
-      new P.Notice("Could not open Pi view.");
+      new P.Notice(STRINGS.plugin.couldNotOpenView);
       return;
     }
     try {
@@ -1219,7 +1219,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.graph || this.rebuildServices();
     const file = this.graph?.getActiveFile();
     if (!file) {
-      new P.Notice("Open a markdown note first.");
+      new P.Notice(STRINGS.plugin.openMarkdownFirst);
       return;
     }
     const content = await this.app.vault.cachedRead(file);

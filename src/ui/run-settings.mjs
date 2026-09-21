@@ -1,4 +1,5 @@
 import { Menu, Notice, setIcon } from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 import {
   buildReasoningMenuItems,
   CUSTOM_MODEL_VALUE,
@@ -39,8 +40,14 @@ export class RunSettingsControls {
     const control = this.controls?.[name];
     if (!control || !control.buttonEl.isConnected) return;
     control.labelEl.setText(label);
-    control.buttonEl.setAttr("aria-label", `${name}: ${label}`);
-    control.buttonEl.setAttr("title", `${name}: ${label}`);
+    control.buttonEl.setAttr(
+      "aria-label",
+      STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label)
+    );
+    control.buttonEl.setAttr(
+      "title",
+      STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label)
+    );
     this.renderControlIcon(control.iconEl, icon, control);
   }
 
@@ -55,7 +62,9 @@ export class RunSettingsControls {
         const menu = new Menu();
         const items = buildModelPickerItems(this.plugin.settings);
         if (items.length === 0) {
-          menu.addItem((menuItem) => menuItem.setTitle("没有可用的模型").setDisabled(true));
+          menu.addItem((menuItem) =>
+            menuItem.setTitle(STRINGS.controls.noModels).setDisabled(true)
+          );
         }
         for (const item of items) {
           menu.addItem((menuItem) =>
@@ -162,7 +171,10 @@ export class RunSettingsControls {
   addPickerSetting(containerEl, name, icon, label, onClick) {
     const buttonEl = containerEl.createEl("button", {
       cls: `clickable-icon pi-agent-run-setting pi-agent-run-setting-${name.toLowerCase()}`,
-      attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
+      attr: {
+        "aria-label": STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label),
+        title: STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label)
+      }
     });
     const iconEl = buttonEl.createSpan({ cls: "pi-agent-run-setting-icon" });
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });

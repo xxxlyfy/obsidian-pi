@@ -1,4 +1,5 @@
 import { extractEventTokenUsage } from "../pi/events.mjs";
+import { STRINGS } from "../shared/strings.mjs";
 import {
   createContextUsage,
   formatContextUsageTitle,
@@ -118,8 +119,11 @@ export function updateActivityDom() {
   const title = this.activityDetail || this.activityText;
   if (this.activityDetailsEl.getAttribute("title") !== title)
     this.activityDetailsEl.setAttr("title", title);
-  if (this.activityLabelEl.getAttribute("aria-label") !== `${this.activityText} in progress`)
-    this.activityLabelEl.setAttr("aria-label", `${this.activityText} in progress`);
+  if (
+    this.activityLabelEl.getAttribute("aria-label") !==
+    STRINGS.activity.inProgress(this.activityText)
+  )
+    this.activityLabelEl.setAttr("aria-label", STRINGS.activity.inProgress(this.activityText));
   if (this.activityLabelEl.textContent !== label) this.activityLabelEl.setText(label);
   return true;
 }
@@ -168,7 +172,7 @@ export function handleRunEvent(event, threadId) {
   if (type === "context_ready") {
     const skillName = this.getCurrentThreadRun()?.skillName;
     this.setActivity(
-      skillName ? `Skill · ${skillName}` : "Starting Pi",
+      skillName ? STRINGS.activity.skill(skillName) : STRINGS.activity.startingPi,
       skillName ? "skill" : "context"
     );
     return;
@@ -184,16 +188,16 @@ export function handleRunEvent(event, threadId) {
     this.currentRunContextUsage = undefined;
     this.syncRunContextUsage(threadId);
     this.renderToolBadges();
-    this.setActivity("Compacting context", "context", detail);
+    this.setActivity(STRINGS.activity.compactingContext, "context", detail);
     return;
   }
   if (type === "compaction_end") {
     if (event.raw && event.raw.errorMessage) {
-      this.setActivity("Compaction failed", "error", String(event.raw.errorMessage));
+      this.setActivity(STRINGS.activity.compactionFailed, "error", String(event.raw.errorMessage));
       return;
     }
     if (event.raw && event.raw.aborted) {
-      this.setActivity("Compaction skipped", "thinking");
+      this.setActivity(STRINGS.activity.compactionSkipped, "thinking");
       return;
     }
     let tokensBefore = event.raw && event.raw.result ? event.raw.result.tokensBefore : undefined;
@@ -205,21 +209,23 @@ export function handleRunEvent(event, threadId) {
     this.syncRunContextUsage(threadId);
     this.renderToolBadges();
     this.setActivity(
-      event.raw && event.raw.willRetry ? "Compacted context, retrying" : "Finishing",
+      event.raw && event.raw.willRetry
+        ? STRINGS.activity.compactedRetrying
+        : STRINGS.activity.finishing,
       event.raw && event.raw.willRetry ? "context" : "finishing",
       tokensBefore ? `Before compaction: ${formatTokenCount(tokensBefore)} tokens` : ""
     );
     return;
   }
   if (type === "auto_retry_start") {
-    this.setActivity("Retrying", "finishing", formatRetryDetail(event.raw));
+    this.setActivity(STRINGS.activity.retrying, "finishing", formatRetryDetail(event.raw));
     return;
   }
   if (type === "extension_error" || type === "extension_ui_error") {
     this.setActivity(
-      "Extension failed",
+      STRINGS.activity.extensionFailed,
       "error",
-      String(event.raw?.error ?? event.raw?.message ?? "Pi extension error")
+      String(event.raw?.error ?? event.raw?.message ?? STRINGS.activity.extensionError)
     );
     return;
   }
@@ -232,7 +238,7 @@ export function handleRunEvent(event, threadId) {
     type === "thinking_delta" ||
     type === "thinking_end"
   ) {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.streamingAssistantContent || this.setActivity(STRINGS.activity.thinking, "thinking");
     return;
   }
   if (type === "toolcall_start" || type === "toolcall_delta" || type === "toolcall_end") {
@@ -255,17 +261,17 @@ export function handleRunEvent(event, threadId) {
     }
     this.streamingAssistantContent ||
       this.setActivity(
-        event.isError ? "Tool failed" : "Reviewing results",
+        event.isError ? STRINGS.activity.toolFailedLabel : STRINGS.activity.reviewingResults,
         event.isError ? "error" : "thinking"
       );
     return;
   }
   if (type === "text_start") {
-    this.setActivity("Responding", "answer");
+    this.setActivity(STRINGS.messages.responding, "answer");
     return;
   }
   if (type === "message_end" || type === "turn_end") {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.streamingAssistantContent || this.setActivity(STRINGS.activity.thinking, "thinking");
     return;
   }
   if (type === "agent_end") {
@@ -311,7 +317,7 @@ export function untrackActiveTool(event, toolCalls) {
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function formatActiveToolStatus() {
   let tools = [...this.activeToolCalls.values()];
-  if (tools.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };
+  if (tools.length === 0) return { label: STRINGS.activity.thinking, kind: "thinking", detail: "" };
   if (tools.length === 1) return formatToolStatus(tools[0].name, tools[0].args, "running");
   let statuses = tools.map((status) => formatToolStatus(status.name, status.args, "running"));
   return {

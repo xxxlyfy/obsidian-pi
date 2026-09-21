@@ -1,4 +1,5 @@
 import * as f from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 import { chooseThreadDeletion } from "./modals/delete-thread-modal.mjs";
 import { chooseBulkThreadDeletion } from "./modals/delete-threads-modal.mjs";
 import { formatBulkDeleteResult, planBulkThreadDeletion } from "./thread-bulk-actions.mjs";
@@ -31,25 +32,25 @@ export function renderThreadList() {
   let header = root.createDiv({ cls: "pi-agent-thread-list-header" }),
     backButton = header.createEl("button", {
       cls: "clickable-icon pi-agent-header-action",
-      attr: { "aria-label": "Back to chat", title: "Back to chat" }
+      attr: { "aria-label": STRINGS.threads.backToChat, title: STRINGS.threads.backToChat }
     });
   (0, f.setIcon)(backButton, "arrow-left");
   backButton.addEventListener("click", () => this.renderChatView());
   let heading = header.createDiv({ cls: "pi-agent-thread-list-heading" });
-  heading.createDiv({ cls: "pi-agent-thread-list-title-heading", text: "Threads" });
+  heading.createDiv({ cls: "pi-agent-thread-list-title-heading", text: STRINGS.threads.heading });
   heading.createDiv({
     cls: "pi-agent-thread-list-subtitle",
-    text: `${threads.length} chat${threads.length === 1 ? "" : "s"}`
+    text: STRINGS.threads.count(threads.length)
   });
   let deleteChatsButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
-    attr: { "aria-label": "Delete chats", title: "Delete chats" }
+    attr: { "aria-label": STRINGS.threads.deleteChats, title: STRINGS.threads.deleteChats }
   });
   (0, f.setIcon)(deleteChatsButton, "trash-2");
   deleteChatsButton.addEventListener("click", () => this.deleteChats());
   let newChatButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
-    attr: { "aria-label": "New chat", title: "New chat" }
+    attr: { "aria-label": STRINGS.threads.newChat, title: STRINGS.threads.newChat }
   });
   (0, f.setIcon)(newChatButton, "plus");
   newChatButton.addEventListener("click", () => {
@@ -58,7 +59,7 @@ export function renderThreadList() {
   });
   let listEl = root.createDiv({ cls: "pi-agent-thread-list" });
   threads.length === 0
-    ? listEl.createDiv({ cls: "pi-agent-empty", text: "No chat threads." })
+    ? listEl.createDiv({ cls: "pi-agent-empty", text: STRINGS.threads.empty })
     : threads.forEach((thread) =>
         this.renderThreadListRow(listEl, thread, thread.id === currentThread.id)
       );
@@ -72,12 +73,12 @@ export function renderThreadListRow(listEl, thread, isCurrent) {
     info = row.createDiv({ cls: "pi-agent-thread-list-info" }),
     titleEl = info.createDiv({
       cls: "pi-agent-thread-list-title",
-      attr: { title: "Open chat" }
+      attr: { title: STRINGS.threads.openChat }
     });
   if (this.isThreadRunning(thread.id)) {
     let runningEl = titleEl.createSpan({
       cls: "pi-agent-thread-list-running",
-      attr: { title: "Agent is running in this chat" }
+      attr: { title: STRINGS.threads.agentRunningInChat }
     });
     (0, f.setIcon)(runningEl, "loader");
   }
@@ -94,18 +95,20 @@ export function renderThreadListRow(listEl, thread, isCurrent) {
     favoriteButton = actions.createEl("button", {
       cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${thread.favorite ? " is-favorite" : ""}`,
       attr: {
-        "aria-label": thread.favorite ? "Remove favorite" : "Mark as favorite",
-        title: thread.favorite ? "Remove favorite" : "Mark as favorite",
+        "aria-label": thread.favorite
+          ? STRINGS.threads.removeFavorite
+          : STRINGS.threads.markFavorite,
+        title: thread.favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite,
         "aria-pressed": String(thread.favorite === true)
       }
     }),
     deleteButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action pi-agent-thread-delete",
-      attr: { "aria-label": "Delete chat", title: "Delete chat" }
+      attr: { "aria-label": STRINGS.threads.deleteChat, title: STRINGS.threads.deleteChat }
     }),
     moreButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action",
-      attr: { "aria-label": "Thread actions", title: "Thread actions" }
+      attr: { "aria-label": STRINGS.threads.rowActions, title: STRINGS.threads.rowActions }
     });
   (0, f.setIcon)(favoriteButton, "star");
   favoriteButton.addEventListener("click", (event) => {
@@ -134,8 +137,8 @@ export async function deleteChats() {
   if (plan.all.deleteCount === 0) {
     new f.Notice(
       plan.all.skippedCount > 0
-        ? "Wait for active agent runs to finish before deleting chats."
-        : "There are no chats to delete."
+        ? STRINGS.threads.deleteBlockedByActiveRuns
+        : STRINGS.threads.nothingToDelete
     );
     return;
   }
@@ -163,7 +166,7 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
   let menu = new f.Menu();
   menu.addItem((item) =>
     item
-      .setTitle(isCurrent ? "Current chat" : "Open")
+      .setTitle(isCurrent ? STRINGS.threads.currentChat : STRINGS.threads.open)
       .setIcon(isCurrent ? "check" : "arrow-right")
       .setDisabled(isCurrent)
       .onClick(() => {
@@ -173,20 +176,20 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
   );
   menu.addItem((item) =>
     item
-      .setTitle(thread.favorite ? "Remove favorite" : "Mark as favorite")
+      .setTitle(thread.favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite)
       .setIcon("star")
       .onClick(() => this.toggleThreadFavorite(thread))
   );
   menu.addItem((item) =>
     item
-      .setTitle("Rename")
+      .setTitle(STRINGS.common.rename)
       .setIcon("pencil")
       .onClick(() => this.startThreadListRename(thread, titleEl))
   );
   if (thread.piSessionId) {
     menu.addItem((item) =>
       item
-        .setTitle(`${PI_BRAND_NAME} session info`)
+        .setTitle(STRINGS.threads.sessionInfo(PI_BRAND_NAME))
         .setIcon("info")
         .onClick(async () => {
           try {
@@ -197,8 +200,14 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
             const entryCount = countSessionEntries(tree?.tree ?? []);
             new f.Notice(
               stats
-                ? `${stats.sessionFile}\n${stats.totalMessages} messages · ${entryCount} tree entries · ${stats.tokens?.total ?? 0} tokens · $${Number(stats.cost ?? 0).toFixed(4)}`
-                : "No Pi session information is available."
+                ? STRINGS.threads.sessionStats(
+                    stats.sessionFile,
+                    stats.totalMessages,
+                    entryCount,
+                    stats.tokens?.total ?? 0,
+                    Number(stats.cost ?? 0).toFixed(4)
+                  )
+                : STRINGS.threads.noSessionInfo
             );
           } catch (error) {
             new f.Notice(error instanceof Error ? error.message : String(error));
@@ -207,12 +216,14 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
     );
     menu.addItem((item) =>
       item
-        .setTitle(`Export ${PI_BRAND_NAME} session to HTML`)
+        .setTitle(STRINGS.threads.exportSession(PI_BRAND_NAME))
         .setIcon("download")
         .onClick(async () => {
           try {
             const result = await this.plugin.exportThreadSession(thread.id);
-            new f.Notice(result?.path ? `Exported to ${result.path}` : "Session export failed.");
+            new f.Notice(
+              result?.path ? STRINGS.threads.exportTo(result.path) : STRINGS.threads.exportFailed
+            );
           } catch (error) {
             new f.Notice(error instanceof Error ? error.message : String(error));
           }
@@ -222,7 +233,7 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
   menu.addSeparator();
   menu.addItem((item) =>
     item
-      .setTitle("Delete")
+      .setTitle(STRINGS.common.delete)
       .setIcon("trash-2")
       .onClick(() => this.deleteThreadFromList(thread))
   );
@@ -234,7 +245,7 @@ export function startThreadListRename(thread, titleEl) {
   let input = document.createElement("input");
   input.addClass("pi-agent-thread-list-title-input");
   input.setAttr("type", "text");
-  input.setAttr("aria-label", "Chat title");
+  input.setAttr("aria-label", STRINGS.threads.chatTitle);
   input.value = thread.title;
   titleEl.replaceWith(input);
   let commit = (event) => {
@@ -261,22 +272,24 @@ export function startThreadListRename(thread, titleEl) {
 export function toggleThreadFavorite(thread) {
   this.plugin.toggleThreadFavorite(thread.id)
     ? this.renderThreadList()
-    : new f.Notice("Chat thread was not found.");
+    : new f.Notice(STRINGS.threads.threadNotFound);
 }
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function deleteThreadFromList(thread) {
   if (this.isThreadRunning(thread.id)) {
-    new f.Notice("Wait for the agent run to finish before deleting this chat.");
+    new f.Notice(STRINGS.threads.activeRunDeleteBlocked);
     return;
   }
   const choice = await chooseThreadDeletion(this.plugin.app, thread);
   if (choice === "cancel") return;
   if (this.plugin.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
-    new f.Notice(choice === "both" ? "Chat and local Pi session deleted." : "Chat deleted.");
+    new f.Notice(
+      choice === "both" ? STRINGS.threads.deletedChatAndSession : STRINGS.threads.deletedChat
+    );
     this.renderThreadList();
   } else {
-    new f.Notice("Chat or local Pi session could not be deleted.");
+    new f.Notice(STRINGS.threads.deleteFailed);
   }
 }
 
@@ -285,8 +298,10 @@ export function formatThreadMeta(thread, isCurrent) {
   let messageCount = this.plugin.getThreadDisplayMessageCount
       ? this.plugin.getThreadDisplayMessageCount(thread)
       : thread.messages.length,
-    meta = `${messageCount} message${messageCount === 1 ? "" : "s"} • Updated ${this.formatThreadDate(thread.updatedAt)}`;
-  return isCurrent ? `Current • ${meta}` : meta;
+    meta = `${STRINGS.threads.messageCount(messageCount)} • ${STRINGS.threads.updatedAt(
+      this.formatThreadDate(thread.updatedAt)
+    )}`;
+  return isCurrent ? `${STRINGS.threads.currentPrefix} • ${meta}` : meta;
 }
 
 export function countSessionEntries(nodes) {
@@ -301,6 +316,6 @@ export function formatThreadDate(value) {
   try {
     return new Date(value).toLocaleString();
   } catch {
-    return "unknown date";
+    return STRINGS.threads.unknownDate;
   }
 }

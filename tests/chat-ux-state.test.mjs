@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 import { getSendActionState } from "../src/ui/send-state.mjs";
 import { formatBulkDeleteResult, planBulkThreadDeletion } from "../src/ui/thread-bulk-actions.mjs";
 
@@ -48,7 +49,7 @@ describe("chat UX state", () => {
     expect(
       formatBulkDeleteResult({ deletedCount: 1, skippedCount: 1, createdEmptyChat: true })
     ).toBe(
-      "1 chat deleted; 1 active chat was skipped; a new empty chat was created. Local Pi sessions were kept."
+      `${STRINGS.threads.bulkDeleted(1)}；${STRINGS.threads.bulkSkipped(1)}；${STRINGS.threads.bulkCreatedEmpty}。${STRINGS.threads.bulkSessionsKept}`
     );
   });
 

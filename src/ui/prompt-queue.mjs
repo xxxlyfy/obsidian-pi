@@ -1,4 +1,5 @@
 import * as f from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 import {
   claimLocalPrompt,
   nextDeliverablePrompt,
@@ -37,11 +38,7 @@ export function enqueuePrompt(
   this.renderPromptQueue();
   this.syncCurrentRunFlags();
   this.setRunningState(this.running);
-  new f.Notice(
-    this.promptQueue.length === 1
-      ? "Message queued. It will send after the current run finishes."
-      : `${this.promptQueue.length} messages queued.`
-  );
+  new f.Notice(STRINGS.queue.queuedNotice(this.promptQueue.length));
 }
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
@@ -104,14 +101,14 @@ export async function steerQueuedPrompt(id) {
   this.renderPromptQueue();
   try {
     const run = this.activeRuns.get(taken.item.threadId);
-    if (!run) throw new Error("This run already settled; the message will run normally.");
+    if (!run) throw new Error(STRINGS.queue.settledNotice);
     const delivery = await this.plugin.enrichPromptDelivery(taken.item, {
       mode: "steer",
       threadId: taken.item.threadId
     });
     if (delivery.images?.length > 0) await this.plugin.ensureModelCatalogLoaded();
     if (delivery.images?.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo()))
-      throw new Error("The selected Pi model does not support image input.");
+      throw new Error(STRINGS.view.modelNoImage);
     const formattedPrompt = delivery.promptContext
       ? (this.plugin.contextBuilder?.formatPrompt(delivery.prompt, delivery.promptContext) ??
         delivery.prompt)
@@ -120,7 +117,7 @@ export async function steerQueuedPrompt(id) {
     await run.runner.steer(steerPrompt, delivery.images);
     if (this.activeRuns.get(taken.item.threadId) === run)
       this.plugin.beginAnnotationProcessing(taken.item.threadId, taken.item.annotations);
-    new f.Notice("Steering message sent to Pi.");
+    new f.Notice(STRINGS.queue.steeringSent);
   } catch (error) {
     this.promptQueue = restoreLocalPrompt(this.promptQueue, taken.item, taken.index);
     this.plugin.replaceLocalPromptQueue(this.promptQueue);
@@ -142,22 +139,22 @@ export function renderPromptQueue() {
   if (this.promptQueue.length > 0) {
     const heading = root.createDiv({ cls: "pi-agent-prompt-queue-heading" });
     heading.createSpan({
-      text: `${this.promptQueue.length} local follow-up${this.promptQueue.length === 1 ? "" : "s"}`
+      text: STRINGS.queue.followUpCount(this.promptQueue.length)
     });
     heading.createSpan({
       cls: "pi-agent-prompt-queue-hint",
       text: this.plugin.isLocalPromptQueuePaused()
-        ? "Saved from the previous plugin session. Review before sending."
-        : "Runs in order after settlement."
+        ? STRINGS.queue.savedFromPreviousSession
+        : STRINGS.queue.runsAfterSettlement
     });
     if (this.plugin.isLocalPromptQueuePaused()) {
       const controls = root.createDiv({ cls: "pi-agent-prompt-queue-actions" });
-      addTextAction(controls, "Resume saved follow-ups", "Resume", () => {
+      addTextAction(controls, STRINGS.queue.resumeSaved, STRINGS.queue.resume, () => {
         this.plugin.resumeLocalPromptQueue();
         this.renderPromptQueue();
         this.runNextQueuedPrompt();
       });
-      addTextAction(controls, "Discard all saved follow-ups", "Discard", () => {
+      addTextAction(controls, STRINGS.queue.discardSaved, STRINGS.queue.discard, () => {
         for (const item of this.promptQueue)
           this.plugin.restoreConsumedAnnotations(item.annotations);
         this.promptQueue = [];
@@ -171,7 +168,7 @@ export function renderPromptQueue() {
 
   for (const item of this.promptQueue) {
     const row = root.createDiv({ cls: "pi-agent-prompt-queue-item" });
-    row.setAttr("aria-label", `Queued follow-up: ${item.prompt || attachmentSummary(item)}`);
+    row.setAttr("aria-label", STRINGS.queue.queuedFollowUp(item.prompt || attachmentSummary(item)));
     const content = row.createDiv({ cls: "pi-agent-prompt-queue-content" });
     content.createDiv({
       cls: "pi-agent-prompt-queue-text",
@@ -182,7 +179,7 @@ export function renderPromptQueue() {
     addAction(
       actions,
       "corner-up-right",
-      "Steer now",
+      STRINGS.queue.steerNow,
       () => this.steerQueuedPrompt(item.id),
       item.state !== "pending"
     );
@@ -190,14 +187,14 @@ export function renderPromptQueue() {
       addAction(
         actions,
         "pencil",
-        "Edit queued message",
+        STRINGS.queue.editQueued,
         () => this.retrieveQueuedPrompt(item.id),
         item.state !== "pending"
       );
     addAction(
       actions,
       "x",
-      "Remove queued message",
+      STRINGS.queue.removeQueued,
       () => this.removeQueuedPrompt(item.id),
       item.state !== "pending"
     );
@@ -205,7 +202,7 @@ export function renderPromptQueue() {
 
   if (this.nativePiQueue?.steering?.length || this.nativePiQueue?.followUp?.length) {
     const native = root.createDiv({ cls: "pi-agent-native-queue", attr: { role: "status" } });
-    native.createDiv({ cls: "pi-agent-prompt-queue-heading", text: "Already handed to Pi" });
+    native.createDiv({ cls: "pi-agent-prompt-queue-heading", text: STRINGS.queue.handedToPi });
     const handedToPi = [
       ...(this.nativePiQueue.steering || []),
       ...(this.nativePiQueue.followUp || [])
@@ -241,25 +238,35 @@ function renderQueueAttachments(parent, images = [], attachments = []) {
     const item = previews.createDiv({ cls: "pi-agent-queue-attachment" });
     item.createEl("img", {
       cls: "pi-agent-queue-image-preview",
-      attr: { src: imagePreviewUrl(image), alt: image.fileName || "Queued image" }
+      attr: { src: imagePreviewUrl(image), alt: image.fileName || STRINGS.queue.queuedImage }
     });
-    item.createSpan({ text: `${image.fileName} · ${formatBytes(image.size)} · image` });
+    item.createSpan({
+      text: STRINGS.queue.imageSummary(
+        image.fileName || STRINGS.queue.queuedImage,
+        formatBytes(image.size)
+      )
+    });
   }
   for (const attachment of attachments) {
     const item = previews.createDiv({ cls: "pi-agent-queue-attachment" });
     const icon = item.createSpan({ cls: "pi-agent-attachment-icon" });
     f.setIcon(icon, "file-text");
     item.createSpan({
-      text: `${attachment.fileName} · ${attachment.mimeType} · ${formatBytes(attachment.originalSize)}${attachment.truncated ? " · truncated" : ""}`
+      text: STRINGS.queue.attachmentSummary(
+        attachment.fileName,
+        attachment.mimeType,
+        formatBytes(attachment.originalSize),
+        attachment.truncated
+      )
     });
   }
 }
 
 function attachmentSummary(item) {
   const count = (item.images?.length || 0) + (item.attachments?.length || 0);
-  return `${count} attached file${count === 1 ? "" : "s"}`;
+  return STRINGS.queue.attachmentCount(count);
 }
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return "unknown size";
+  if (!Number.isFinite(bytes)) return STRINGS.queue.unknownSize;
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`;
 }

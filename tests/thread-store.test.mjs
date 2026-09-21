@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 import { ThreadStore } from "../src/threads/thread-store.mjs";
 
 describe("ThreadStore", () => {
@@ -126,7 +127,11 @@ describe("ThreadStore", () => {
     expect(result.deletedIds).toEqual(["favorite"]);
     expect(result.createdThreadId).toBeTruthy();
     expect(store.listThreads({ includeArchived: true })).toEqual([
-      expect.objectContaining({ id: result.createdThreadId, title: "New chat", messages: [] })
+      expect.objectContaining({
+        id: result.createdThreadId,
+        title: STRINGS.threads.newChat,
+        messages: []
+      })
     ]);
   });
 

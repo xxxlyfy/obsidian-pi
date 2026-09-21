@@ -17,10 +17,10 @@ describe("pending context badges", () => {
     expect(viewSource).toContain("pi-agent-context-badge-remove");
     expect(viewSource).toContain("this.renderPendingBadge(badges, contextFile.name, {");
     expect(viewSource).toContain("title: contextFile.path");
-    expect(viewSource).toContain("removeLabel: `Remove ${contextFile.name}`");
-    expect(viewSource).toContain('`Remove ${image.fileName || "image"}`');
-    expect(viewSource).toContain("`Remove ${attachment.fileName}`");
-    expect(viewSource).toContain("`Clear ${label}`");
+    expect(viewSource).toContain("removeLabel: STRINGS.view.removeNote(contextFile.name)");
+    expect(viewSource).toContain('STRINGS.view.removePending(image.fileName || "image")');
+    expect(viewSource).toContain("STRINGS.view.removePending(attachment.fileName)");
+    expect(viewSource).toContain("STRINGS.view.clearAnnotations(annotations.length)");
     expect(styles).toMatch(
       /\.pi-agent-context-badge \{[\s\S]*?background: var\(--background-secondary\);[\s\S]*?max-width:/
     );
@@ -49,16 +49,16 @@ describe("compact annotation controls", () => {
     expect(controllerSource).toContain(
       "this.plugin.annotationStore.delete(annotation.path, annotation.id)"
     );
-    expect(controllerSource).toContain('"Delete annotation"');
+    expect(controllerSource).toContain("STRINGS.annotations.delete");
   });
 
   it("keeps labelled, validated, keyboard-accessible native-style dialog controls", () => {
     expect(modalSource).not.toContain("annotation-modal-quote");
     expect(modalSource).not.toContain("anchorLabel");
-    expect(modalSource).toContain('text: "Request"');
-    expect(modalSource).toContain('attr: { "aria-label": "Annotation intent" }');
+    expect(modalSource).toContain("text: STRINGS.annotations.request");
+    expect(modalSource).toContain('attr: { "aria-label": STRINGS.annotations.intent }');
     expect(modalSource).toContain('type: "radio"');
-    expect(modalSource).toContain('text: "Save"');
+    expect(modalSource).toContain("text: STRINGS.common.save");
     expect(modalSource).toContain('this.scope.register(["Mod"], "Enter"');
     expect(modalSource).toContain('this.contextEl.setAttr("aria-describedby", errorId)');
     expect(modalSource).toContain('this.contextEl?.setAttr("aria-invalid", "true")');

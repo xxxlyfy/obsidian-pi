@@ -1,3 +1,4 @@
+import { STRINGS } from "../shared/strings.mjs";
 export async function requestDesktopNotificationPermission(NotificationApi) {
   const activeWindow = /** @type {Window & typeof globalThis | undefined} */ (
     resolveActiveWindow()
@@ -51,7 +52,7 @@ export function showDesktopRunNotification({
 
   try {
     const notification = new activeNotificationApi("Pi Agent", {
-      body: String(body || "Agent response completed."),
+      body: String(body || STRINGS.view.notificationCompleted),
       silent: false
     });
     sentRunIds.add(runId);

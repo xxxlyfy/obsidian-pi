@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { STRINGS } from "../shared/strings.mjs";
 import path from "node:path";
 
 const MARKDOWN_STORAGE_VERSION = 3;
@@ -147,7 +148,7 @@ function parseMarkdownThread(content) {
   if (!frontmatterMatch) return undefined;
   const frontmatter = parseFrontmatter(frontmatterMatch[1]);
   if (frontmatter.pi_agent_chat !== true) return undefined;
-  if (frontmatter.pi_agent_schema !== 1) throw new Error("Unsupported chat schema.");
+  if (frontmatter.pi_agent_schema !== 1) throw new Error(STRINGS.history.unsupportedSchema);
 
   const thread = {
     id: requiredString(frontmatter.id, "thread ID"),
@@ -221,7 +222,7 @@ function validateThread(thread) {
     typeof thread.updatedAt !== "number" ||
     !Number.isFinite(thread.updatedAt)
   ) {
-    throw new Error("Invalid chat thread.");
+    throw new Error(STRINGS.history.invalidThread);
   }
   for (const message of thread.messages) validateMessage(message);
 }
@@ -236,7 +237,7 @@ function validateMessage(message) {
     typeof message.createdAt !== "number" ||
     !Number.isFinite(message.createdAt)
   ) {
-    throw new Error("Invalid chat message.");
+    throw new Error(STRINGS.history.invalidMessage);
   }
 }
 
@@ -278,7 +279,7 @@ function normalizeVaultFolder(value) {
 
 function resolveVaultFolder(basePath, folder) {
   const resolved = path.resolve(basePath, folder);
-  if (!isInside(basePath, resolved)) throw new Error("Unsafe chat history folder.");
+  if (!isInside(basePath, resolved)) throw new Error(STRINGS.history.unsafeFolder);
   return resolved;
 }
 

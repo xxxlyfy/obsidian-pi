@@ -1,4 +1,5 @@
 import { Modal, Notice, Setting, TFile } from "obsidian";
+import { STRINGS } from "../../shared/strings.mjs";
 import { previewFrontmatterPatch } from "../../shared/frontmatter.mjs";
 
 export class ApprovalModal extends Modal {
@@ -14,22 +15,22 @@ export class ApprovalModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("pi-agent-approval");
-    new Setting(contentEl).setName("Approve vault change").setHeading();
+    new Setting(contentEl).setName(STRINGS.modals.approveChange).setHeading();
     contentEl.createEl("p", { text: `${this.change.path} - ${this.change.reason}` });
 
     const previewEl = contentEl.createEl("div", { cls: "pi-agent-change-preview" });
-    previewEl.createEl("h3", { text: "Before" });
-    previewEl.createEl("pre", { text: this.change.before || "(new file)" });
-    previewEl.createEl("h3", { text: "After" });
+    previewEl.createEl("h3", { text: STRINGS.modals.before });
+    previewEl.createEl("pre", { text: this.change.before || STRINGS.modals.newFile });
+    previewEl.createEl("h3", { text: STRINGS.modals.after });
     previewEl.createEl("pre", { text: this.change.after });
 
     const actionsEl = contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    actionsEl.createEl("button", { text: "Reject" }).addEventListener("click", () => {
+    actionsEl.createEl("button", { text: STRINGS.common.reject }).addEventListener("click", () => {
       this.finish();
       this.close();
     });
     actionsEl
-      .createEl("button", { text: "Apply change", cls: "mod-cta" })
+      .createEl("button", { text: STRINGS.modals.applyChange, cls: "mod-cta" })
       .addEventListener("click", async () => {
         try {
           await this.applyChange();
@@ -52,7 +53,7 @@ export class ApprovalModal extends Modal {
     if (file instanceof TFile) {
       await this.app.vault.process(file, (content) => {
         if (this.change.before !== undefined && content !== this.change.before) {
-          throw new Error("File changed since Pi prepared this change.");
+          throw new Error(STRINGS.modals.fileChanged);
         }
 
         return this.change.frontmatterPatch

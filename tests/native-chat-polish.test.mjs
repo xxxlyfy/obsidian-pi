@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { STRINGS } from "../src/shared/strings.mjs";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({
@@ -82,7 +83,9 @@ describe("native chat polish", () => {
     expect(descendants.some((element) => element.tag === "pre")).toBe(false);
     expect(descendants.map((element) => element.icon).filter(Boolean)).toEqual(["chevron-right"]);
     expect(descendants.some((element) => element.text === "Live")).toBe(false);
-    expect(descendants.some((element) => element.text === "THINKING")).toBe(true);
+    expect(
+      descendants.some((element) => element.text === STRINGS.activity.thinking.toUpperCase())
+    ).toBe(true);
     expect(
       descendants.some(
         (element) => element.cls === "pi-agent-thinking-label" && element.attr.role === "status"
@@ -103,7 +106,7 @@ describe("native chat polish", () => {
       false,
       onToggle,
       false,
-      "Thinking",
+      STRINGS.activity.thinking,
       renderMarkdown
     );
     const descendants = rendered.details.descendants();
@@ -111,7 +114,9 @@ describe("native chat polish", () => {
     expect(rendered.details.open).toBe(false);
     expect(descendants.map((element) => element.icon).filter(Boolean)).toEqual(["chevron-right"]);
     expect(descendants.some((element) => element.attr.role === "status")).toBe(false);
-    expect(descendants.some((element) => element.text === "THINKING")).toBe(true);
+    expect(
+      descendants.some((element) => element.text === STRINGS.activity.thinking.toUpperCase())
+    ).toBe(true);
     expect(renderMarkdown).toHaveBeenCalledWith(rendered.text, "**Finished reasoning**");
 
     rendered.details.open = true;
@@ -252,7 +257,7 @@ describe("native chat polish", () => {
 
   it("keeps guarded bulk deletion directly visible and removes archive-all", () => {
     expect(threadListSource).toContain('setIcon)(deleteChatsButton, "trash-2")');
-    expect(threadListSource).toContain('"aria-label": "Delete chats"');
+    expect(threadListSource).toContain('"aria-label": STRINGS.threads.deleteChats');
     expect(threadListSource).toContain("chooseBulkThreadDeletion");
     expect(threadListSource).not.toContain("Archive all chats");
     expect(threadListSource).not.toContain("archiveAllChats");
@@ -275,8 +280,8 @@ describe("native chat polish", () => {
     expect(styles).not.toContain(".pi-agent-inline-activity");
     expect(messageRendererSource).not.toContain("pi-agent-inline-activity-spinner");
     expect(messageRendererSource).not.toContain("pi-agent-thinking-spinner");
-    expect(messageRendererSource).toContain('this.activityText || "Thinking"');
-    expect(messageRendererSource).toContain('this.activityText || "Responding"');
+    expect(messageRendererSource).toContain("this.activityText || STRINGS.activity.thinking");
+    expect(messageRendererSource).toContain("this.activityText || STRINGS.messages.responding");
     expect(messageRendererSource).toContain(".toUpperCase()");
     expect(styles).toMatch(
       /\.pi-agent-thinking-label \{[\s\S]*?font-weight: var\(--font-bold\);[\s\S]*?letter-spacing: 0\.04em;/

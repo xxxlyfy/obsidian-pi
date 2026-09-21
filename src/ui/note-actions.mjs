@@ -1,4 +1,5 @@
 import { Notice, normalizePath } from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 import { normalizeVaultFolder } from "../shared/paths.mjs";
 
 export class NoteActions {
@@ -9,13 +10,13 @@ export class NoteActions {
 
   async copyText(text) {
     await navigator.clipboard.writeText(text);
-    new Notice("Copied to clipboard.");
+    new Notice(STRINGS.common.copiedToClipboard);
   }
 
   insertIntoCurrentNote(text) {
     const editor = this.plugin.app.workspace.activeEditor?.editor;
     if (!editor) {
-      new Notice("Open a note first.");
+      new Notice(STRINGS.messages.openNoteFirst);
       return;
     }
 
@@ -33,7 +34,7 @@ export class NoteActions {
   async openCitedNotes(text) {
     const links = this.extractVaultLinks(text);
     if (links.length === 0) {
-      new Notice("No vault links found.");
+      new Notice(STRINGS.messages.noVaultLinks);
       return;
     }
 
@@ -78,10 +79,14 @@ export class NoteActions {
   getResponseTitle(response) {
     const heading = response.match(/^#\s+(.+)$/m)?.[1];
     return (
-      (heading ?? response.split(/\r?\n/).find((line) => line.trim()) ?? "Agent response")
+      (
+        heading ??
+        response.split(/\r?\n/).find((line) => line.trim()) ??
+        STRINGS.messages.responseTitle
+      )
         .replace(/[\\/:*?"<>|#[\]]/g, "")
         .trim()
-        .slice(0, 80) || "Agent response"
+        .slice(0, 80) || STRINGS.messages.responseTitle
     );
   }
 

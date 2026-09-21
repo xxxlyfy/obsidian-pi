@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 
 vi.mock("obsidian", () => ({
   Modal: class {}
@@ -27,8 +28,12 @@ describe("DeleteThreadModal choices", () => {
         exceptFavorites: { deleteCount: 3 }
       })
     ).toEqual([
-      { id: "except-favorites", label: "Delete all except favorites (3)", disabled: false },
-      { id: "all", label: "Delete all chats (5)", disabled: false }
+      {
+        id: "except-favorites",
+        label: STRINGS.modals.deleteAllExceptFavorites(3),
+        disabled: false
+      },
+      { id: "all", label: STRINGS.modals.deleteAllChats(5), disabled: false }
     ]);
   });
 

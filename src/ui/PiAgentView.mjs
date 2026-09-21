@@ -1,4 +1,6 @@
 import * as f from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
+import { isPiRunCanceled } from "../pi/run-canceled.mjs";
 import { formatContextUsageBadge, formatTokenCount } from "../pi/token-usage.mjs";
 import {
   PI_AGENT_DISPLAY_NAME,
@@ -47,7 +49,7 @@ export class PiAgentView extends f.ItemView {
     this.plugin = plugin;
     this.running = false;
     this.canceling = false;
-    this.activityText = "Thinking";
+    this.activityText = STRINGS.activity.thinking;
     this.activityKind = "thinking";
     this.activityDetail = "";
     this.activityStickyUntil = 0;
@@ -156,7 +158,7 @@ export class PiAgentView extends f.ItemView {
     this.renderPiIcon(brandIcon);
     this.threadTitleEl = brand.createSpan({
       cls: "pi-agent-thread-title",
-      attr: { role: "button", tabindex: "0", title: "Rename chat" }
+      attr: { role: "button", tabindex: "0", title: STRINGS.view.renameChat }
     });
     this.threadTitleEl.addEventListener("click", () => this.startThreadTitleRename());
     this.threadTitleEl.addEventListener("keydown", (event) => {
@@ -172,7 +174,7 @@ export class PiAgentView extends f.ItemView {
       }),
       newChatButton = headerActions.createEl("button", {
         cls: "clickable-icon pi-agent-header-action",
-        attr: { "aria-label": "New chat", title: "New chat" }
+        attr: { "aria-label": STRINGS.view.newChat, title: STRINGS.view.newChat }
       });
     this.threadFavoriteEl = favoriteButton;
     (0, f.setIcon)(favoriteButton, "star");
@@ -185,13 +187,13 @@ export class PiAgentView extends f.ItemView {
     });
     let forkButton = headerActions.createEl("button", {
       cls: "clickable-icon pi-agent-header-action",
-      attr: { "aria-label": "Fork chat", title: "Fork chat" }
+      attr: { "aria-label": STRINGS.view.forkChat, title: STRINGS.view.forkChat }
     });
     (0, f.setIcon)(forkButton, "split");
     forkButton.addEventListener("click", (event) => {
       event.preventDefault();
       if (this.isThreadRunning(this.plugin.getCurrentThread().id)) {
-        new f.Notice("Wait for this chat's agent run to finish before forking it.");
+        new f.Notice(STRINGS.view.forkBusy);
         return;
       }
       this.threadMenu?.forkChat();
@@ -200,8 +202,8 @@ export class PiAgentView extends f.ItemView {
     let threadListButton = headerActions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-menu",
       attr: {
-        "aria-label": "Manage chat threads",
-        title: "Manage chat threads"
+        "aria-label": STRINGS.view.manageThreads,
+        title: STRINGS.view.manageThreads
       }
     });
     (0, f.setIcon)(threadListButton, "list");
@@ -226,7 +228,7 @@ export class PiAgentView extends f.ItemView {
     this.extensionWidgetsAboveEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
     this.renderComposerImages();
     this.inputEl = composer.createEl("textarea", {
-      placeholder: "Ask the agent about your vault... Enter sends, Shift+Enter adds a line."
+      placeholder: STRINGS.view.inputPlaceholder
     });
     this.inputEl.addEventListener("keydown", (event) => {
       if (this.suggestions?.handleKeydown(event)) return;
@@ -289,10 +291,10 @@ export class PiAgentView extends f.ItemView {
     this.runSettings.render(composerBar);
     let sendButton = composerBar.createEl("button", {
       cls: "clickable-icon pi-agent-send-button",
-      attr: { "aria-label": "Send message", title: "Send message" }
+      attr: { "aria-label": STRINGS.view.sendMessage, title: STRINGS.view.sendMessage }
     });
     (0, f.setIcon)(sendButton, "send");
-    sendButton.createSpan({ cls: "pi-agent-control-label", text: "Send" });
+    sendButton.createSpan({ cls: "pi-agent-control-label", text: STRINGS.view.send });
     this.sendButtonEl = sendButton;
     sendButton.addEventListener("click", () => this.handleSendButtonClick());
     this.observeComposerBar(composerBar);
@@ -356,14 +358,14 @@ export class PiAgentView extends f.ItemView {
     root.empty();
     const badges = root.createDiv({
       cls: "pi-agent-context-badges",
-      attr: { role: "list", "aria-label": "Pending prompt context" }
+      attr: { role: "list", "aria-label": STRINGS.view.pendingContext }
     });
     const contextFile = this.plugin.getCurrentContextFile();
     const includeActiveNote = this.resolveActiveNoteInclusion(contextFile);
     if (includeActiveNote)
       this.renderPendingBadge(badges, contextFile.name, {
         title: contextFile.path,
-        removeLabel: `Remove ${contextFile.name}`,
+        removeLabel: STRINGS.view.removeNote(contextFile.name),
         onRemove: () => {
           this.excludedContextPath = contextFile.path;
           this.renderToolBadges();
@@ -371,7 +373,7 @@ export class PiAgentView extends f.ItemView {
       });
     for (const image of this.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
-        removeLabel: `Remove ${image.fileName || "image"}`,
+        removeLabel: STRINGS.view.removePending(image.fileName || "image"),
         onRemove: () => {
           this.composerImages = this.composerImages.filter((item) => item.id !== image.id);
           this.renderComposerImages();
@@ -379,7 +381,7 @@ export class PiAgentView extends f.ItemView {
       });
     for (const attachment of this.composerAttachments)
       this.renderPendingBadge(badges, attachment.fileName, {
-        removeLabel: `Remove ${attachment.fileName}`,
+        removeLabel: STRINGS.view.removePending(attachment.fileName),
         onRemove: () => {
           this.composerAttachments = this.composerAttachments.filter(
             (item) => item.id !== attachment.id
@@ -390,9 +392,9 @@ export class PiAgentView extends f.ItemView {
     const annotations =
       includeActiveNote && contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
     if (annotations.length > 0) {
-      const label = `${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`;
+      const label = STRINGS.view.annotationsCount(annotations.length);
       this.renderPendingBadge(badges, label, {
-        removeLabel: `Clear ${label}`,
+        removeLabel: STRINGS.view.clearAnnotations(annotations.length),
         onRemove: () => {
           this.plugin.annotationController?.cancelPick();
           this.plugin.annotationStore.deletePath(contextFile.path);
@@ -433,20 +435,17 @@ export class PiAgentView extends f.ItemView {
     let usage = this.getDisplayedContextUsage(),
       badge = usage?.compacted
         ? {
-            label: `ctx compacted · ?/${formatTokenCount(usage.contextWindow || 0)}`,
-            title:
-              "Pi compacted this session. Exact context usage is unknown until the next model response returns fresh token usage."
+            label: STRINGS.view.compactionBadge(formatTokenCount(usage.contextWindow || 0)),
+            title: STRINGS.view.compactionUnknownTitle
           }
         : usage
           ? formatContextUsageBadge(usage.contextUsage, usage.tokenUsage)
           : undefined;
     root.createSpan({
       cls: `pi-agent-tool-badge pi-agent-tool-badge-context${badge ? " is-enabled" : ""}`,
-      text: badge ? badge.label : "ctx --",
+      text: badge ? badge.label : STRINGS.view.contextUsageEmpty,
       attr: {
-        title: badge
-          ? badge.title
-          : "Context usage appears after Pi returns token usage for the selected model."
+        title: badge ? badge.title : STRINGS.view.contextUsagePendingTitle
       }
     });
   }
@@ -474,13 +473,14 @@ export class PiAgentView extends f.ItemView {
     const favorite = this.plugin.getCurrentThread().favorite === true;
     this.threadFavoriteEl.toggleClass("is-favorite", favorite);
     this.threadFavoriteEl.setAttr("aria-pressed", String(favorite));
-    this.threadFavoriteEl.setAttr("aria-label", favorite ? "Remove favorite" : "Mark as favorite");
-    this.threadFavoriteEl.setAttr("title", favorite ? "Remove favorite" : "Mark as favorite");
+    const favoriteLabel = favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite;
+    this.threadFavoriteEl.setAttr("aria-label", favoriteLabel);
+    this.threadFavoriteEl.setAttr("title", favoriteLabel);
   }
   toggleCurrentThreadFavorite() {
     const thread = this.plugin.getCurrentThread();
     if (!this.plugin.toggleThreadFavorite(thread.id)) {
-      new f.Notice("Chat thread was not found.");
+      new f.Notice(STRINGS.view.threadNotFound);
       return;
     }
     this.renderThreadFavorite();
@@ -493,7 +493,7 @@ export class PiAgentView extends f.ItemView {
     this.threadTitleEl.addClass("is-editing");
     const input = this.threadTitleEl.createEl("input", {
       cls: "pi-agent-thread-title-input",
-      attr: { type: "text", value: thread.title, "aria-label": "Chat title" }
+      attr: { type: "text", value: thread.title, "aria-label": STRINGS.view.chatTitle }
     });
     const commit = (save) => {
       const title = input.value.trim();
@@ -536,7 +536,7 @@ export class PiAgentView extends f.ItemView {
       }
     }
     if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
-      new f.Notice("The selected Pi model does not support image input.");
+      new f.Notice(STRINGS.view.modelNoImage);
       return;
     }
     if (this.inputEl) this.inputEl.value = "";
@@ -577,7 +577,7 @@ export class PiAgentView extends f.ItemView {
     if (run && !run.canceling) {
       run.canceling = true;
       this.canceling = true;
-      this.setActivity("Canceling", "finishing");
+      this.setActivity(STRINGS.view.canceling, "finishing");
       this.plugin.cancelPiRun(run.runner);
       this.setRunningState(true);
       this.renderThreadListIfVisible();
@@ -632,7 +632,7 @@ export class PiAgentView extends f.ItemView {
   renderImagePicker(parent) {
     const button = parent.createEl("button", {
       cls: "clickable-icon pi-agent-image-button",
-      attr: { "aria-label": "Attach files", title: "Attach files" }
+      attr: { "aria-label": STRINGS.view.attachFiles, title: STRINGS.view.attachFiles }
     });
     f.setIcon(button, "paperclip");
     button.addEventListener("click", (event) => this.showAttachmentMenu(event));
@@ -641,13 +641,13 @@ export class PiAgentView extends f.ItemView {
     const menu = new f.Menu();
     menu.addItem((item) =>
       item
-        .setTitle("Vault file")
+        .setTitle(STRINGS.view.vaultFile)
         .setIcon("vault")
         .onClick(() => this.showVaultFilePicker())
     );
     menu.addItem((item) =>
       item
-        .setTitle("Local file")
+        .setTitle(STRINGS.view.localFile)
         .setIcon("hard-drive")
         .onClick(() => this.imageInputEl?.click())
     );
@@ -671,7 +671,7 @@ export class PiAgentView extends f.ItemView {
       }
     }
     const modal = new VaultFileModal(this.plugin.app);
-    modal.setPlaceholder("Choose a vault image, text, code, or config file…");
+    modal.setPlaceholder(STRINGS.view.chooseAttachable);
     modal.open();
   }
   isAttachableFile(name, mimeType) {
@@ -716,7 +716,7 @@ export class PiAgentView extends f.ItemView {
       if (SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType)) {
         await this.plugin.ensureModelCatalogLoaded();
         if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
-          throw new Error("The selected Pi model does not support image input.");
+          throw new Error(STRINGS.view.modelNoImage);
         this.composerImages.push(
           bytesToPromptImage({
             bytes,
@@ -745,7 +745,7 @@ export class PiAgentView extends f.ItemView {
     if (imageFiles.length === 0) return;
     await this.plugin.ensureModelCatalogLoaded();
     if (!modelSupportsImages(this.plugin.getSelectedModelInfo())) {
-      new f.Notice("The selected Pi model does not support image input.");
+      new f.Notice(STRINGS.view.modelNoImage);
       return;
     }
     try {
@@ -1035,7 +1035,7 @@ export class PiAgentView extends f.ItemView {
     if (!prompt && images.length === 0 && attachments.length === 0) {
       if (queuedId) {
         this.requeueQueuedPrompt(queuedId);
-        new f.Notice("The queued message became empty and was not sent.");
+        new f.Notice(STRINGS.view.queuedEmpty);
       } else restoreUnsentAnnotations();
       return undefined;
     }
@@ -1044,7 +1044,7 @@ export class PiAgentView extends f.ItemView {
       if (queuedId) {
         this.requeueQueuedPrompt(queuedId);
       } else restoreUnsentAnnotations();
-      new f.Notice("The selected Pi model does not support image input.");
+      new f.Notice(STRINGS.view.modelNoImage);
       return undefined;
     }
     if (this.isThreadRunning(threadId)) {
@@ -1117,9 +1117,9 @@ export class PiAgentView extends f.ItemView {
     this.syncCurrentRunFlags();
     this.running = this.isCurrentThread(threadId);
     this.canceling = false;
-    this.activityText = "Preparing context";
+    this.activityText = STRINGS.view.preparingContext;
     this.activityKind = "context";
-    this.activityDetail = "Collecting current note, links, backlinks, and explicit attachments.";
+    this.activityDetail = STRINGS.view.collectingContext;
     this.activityStickyUntil = 0;
     this.pendingActivity = undefined;
     this.clearPendingActivityTimer();
@@ -1186,8 +1186,8 @@ export class PiAgentView extends f.ItemView {
         this.requeueQueuedPrompt(queuedId);
         skipQueueDrain = true;
       } else if (!run.accepted) restoreUnsentAnnotations();
-      if (message === "Pi run canceled.") {
-        new f.Notice("Agent run canceled.");
+      if (isPiRunCanceled(error)) {
+        new f.Notice(STRINGS.view.runCanceled);
         return;
       }
       const createdAt = Date.now();
@@ -1197,7 +1197,7 @@ export class PiAgentView extends f.ItemView {
       );
       this.plugin.addMessageToThread(threadId, {
         role: "assistant",
-        content: `Agent run failed: ${message}`,
+        content: `${STRINGS.view.runFailed}：${message}`,
         createdAt,
         thinking: run.thinking || undefined,
         toolErrors: run.toolErrors.length > 0 ? run.toolErrors : undefined
@@ -1208,11 +1208,7 @@ export class PiAgentView extends f.ItemView {
         this.renderToolBadges();
       }
       new f.Notice(message);
-      this.notifyRunCompleted(
-        run.notificationRunId,
-        threadId,
-        "Agent run failed. Click to open the chat."
-      );
+      this.notifyRunCompleted(run.notificationRunId, threadId, STRINGS.view.notificationFailed);
     } finally {
       this.activeRuns.delete(threadId);
       this.syncCurrentRunFlags();
@@ -1287,7 +1283,7 @@ export class PiAgentView extends f.ItemView {
     this.liveThinkingSetExpanded?.(run.thinkingExpanded);
     this.appendStreamingDelta(delta);
   }
-  notifyRunCompleted(runId, threadId, body = "Agent response completed. Click to open the chat.") {
+  notifyRunCompleted(runId, threadId, body = STRINGS.view.notificationCompleted) {
     if (!this.plugin.settings.desktopNotifications) return false;
     return showDesktopRunNotification({
       runId,

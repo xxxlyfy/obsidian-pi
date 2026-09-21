@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 import { ComposerSuggestions } from "../src/ui/suggestions.mjs";
 import { DEFAULT_SETTINGS } from "../src/plugin/settings.mjs";
 
@@ -68,13 +69,16 @@ describe("ComposerSuggestions", () => {
       "Folder/Note"
     ]);
     expect(suggestions.getTagSuggestions("front")).toEqual([
-      { label: "#frontmatter", detail: "Tag", insertText: "#frontmatter " }
+      { label: "#frontmatter", detail: STRINGS.suggestions.tag, insertText: "#frontmatter " }
     ]);
     expect(suggestions.getCommandSuggestions("search")).toContainEqual(
       expect.objectContaining({ label: "/search" })
     );
     expect(suggestions.getCommandSuggestions("rpc-skill")).toContainEqual(
-      expect.objectContaining({ label: "/skill:rpc-skill", detail: "Skill — Discovered by Pi" })
+      expect.objectContaining({
+        label: "/skill:rpc-skill",
+        detail: STRINGS.suggestions.skill("Discovered by Pi")
+      })
     );
   });
 
@@ -85,7 +89,9 @@ describe("ComposerSuggestions", () => {
       applied = true;
     });
     suggestions.activeSuggestRange = { start: 4, end: 8 };
-    suggestions.suggestions = [{ label: "Folder/", detail: "Folder", insertText: "@Folder/ " }];
+    suggestions.suggestions = [
+      { label: "Folder/", detail: STRINGS.suggestions.folder, insertText: "@Folder/ " }
+    ];
 
     suggestions.apply(0);
 

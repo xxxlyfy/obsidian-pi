@@ -49,7 +49,7 @@ Privacy reminder: prompts, selected text, note content, search excerpts, attachm
 
 ### Annotations
 
-Open a Markdown note and select text, then choose the **Annotations** header action to add a change request or question. With no selection, the action toggles block-pick mode; it works in both editing and reading views when Obsidian can map the rendered block to Markdown source. The command palette action **Pi Agent: Add or toggle annotation for active note** is the keyboard/fallback entry point. Annotations appear on the note, can be navigated, edited, or individually deleted, and are included with the active note in subsequent Pi prompts; detached anchors remain listed until edited or deleted.
+Open a Markdown note and select text, then choose the **添加或切换注解** header action to add a change request or question. With no selection, the action toggles block-pick mode; it works in both editing and reading views when Obsidian can map the rendered block to Markdown source. The command palette action **Pi Agent: 为当前笔记添加或切换注解** is the keyboard/fallback entry point. Annotations appear on the note, can be navigated, edited, or individually deleted, and are included with the active note in subsequent Pi prompts; detached anchors remain listed until edited or deleted.
 
 > Tool modes control which Pi CLI tools are enabled. They are not an operating-system sandbox.
 

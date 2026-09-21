@@ -1,45 +1,46 @@
+import { STRINGS } from "../shared/strings.mjs";
 export const BUILTIN_SLASH_COMMANDS = [
   {
     command: "/current",
-    label: "Current note",
-    detail: "Attach the active note, selection, links, tags, headings, and frontmatter.",
+    label: STRINGS.commands.currentLabel,
+    detail: STRINGS.commands.currentDetail,
     insertText: "/current ",
     implemented: true
   },
   {
     command: "/backlinks",
-    label: "Backlinks",
-    detail: "Attach notes that link to the active note.",
+    label: STRINGS.commands.backlinksLabel,
+    detail: STRINGS.commands.backlinksDetail,
     insertText: "/backlinks ",
     implemented: true
   },
   {
     command: "/links",
-    label: "Outgoing links",
-    detail: "Attach notes linked from the active note.",
+    label: STRINGS.commands.linksLabel,
+    detail: STRINGS.commands.linksDetail,
     insertText: "/links ",
     implemented: true
   },
   {
     command: "/search",
-    label: "Vault search",
-    detail: "Attach ranked vault note matches for a query.",
+    label: STRINGS.commands.searchLabel,
+    detail: STRINGS.commands.searchDetail,
     insertText: "/search ",
     argumentHint: "query",
     implemented: true
   },
   {
     command: "/compact",
-    label: "Compact Pi context",
-    detail: "Ask Pi to compact the current session context, optionally with custom instructions.",
+    label: STRINGS.commands.compactLabel,
+    detail: STRINGS.commands.compactDetail,
     insertText: "/compact ",
     argumentHint: "instructions",
     implemented: true
   },
   {
     command: "/context show",
-    label: "Show context",
-    detail: "Display the current Obsidian context packet without calling Pi.",
+    label: STRINGS.commands.contextShowLabel,
+    detail: STRINGS.commands.contextShowDetail,
     insertText: "/context show ",
     implemented: true
   }

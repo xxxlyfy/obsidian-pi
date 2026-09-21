@@ -1,4 +1,5 @@
 import { Modal } from "obsidian";
+import { STRINGS } from "../../shared/strings.mjs";
 
 export function chooseBulkThreadDeletion(app, plan) {
   return new Promise((resolve) => new DeleteThreadsModal(app, plan, resolve).open());
@@ -8,12 +9,12 @@ export function getBulkThreadDeletionChoices(plan) {
   return [
     {
       id: "except-favorites",
-      label: `Delete all except favorites (${plan.exceptFavorites.deleteCount})`,
+      label: STRINGS.modals.deleteAllExceptFavorites(plan.exceptFavorites.deleteCount),
       disabled: plan.exceptFavorites.deleteCount === 0
     },
     {
       id: "all",
-      label: `Delete all chats (${plan.all.deleteCount})`,
+      label: STRINGS.modals.deleteAllChats(plan.all.deleteCount),
       disabled: plan.all.deleteCount === 0
     }
   ];
@@ -29,24 +30,24 @@ export class DeleteThreadsModal extends Modal {
 
   onOpen() {
     this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "Delete chats?" });
+    this.contentEl.createEl("h2", { text: STRINGS.modals.deleteChatsTitle });
     this.contentEl.createEl("p", {
-      text: "Choose which chat history to delete. Local Pi session files will be kept."
+      text: STRINGS.modals.deleteChatsDescription
     });
 
     if (this.plan.favoriteCount > 0) {
       this.contentEl.createEl("p", {
-        text: `${this.plan.favoriteCount} favorite chat${this.plan.favoriteCount === 1 ? " is" : "s are"} protected by the first option.`
+        text: STRINGS.modals.favoriteProtected(this.plan.favoriteCount)
       });
     }
     if (this.plan.all.skippedCount > 0) {
       this.contentEl.createEl("p", {
-        text: `${this.plan.all.skippedCount} active chat${this.plan.all.skippedCount === 1 ? " cannot" : "s cannot"} be deleted until the agent run finishes.`
+        text: STRINGS.modals.activeRunBlocked(this.plan.all.skippedCount)
       });
     }
 
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    this.addButton(actions, "Cancel", "cancel");
+    this.addButton(actions, STRINGS.common.cancel, "cancel");
     for (const choice of getBulkThreadDeletionChoices(this.plan))
       this.addButton(actions, choice.label, choice.id, choice.disabled);
   }

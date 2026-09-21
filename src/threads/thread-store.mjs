@@ -1,4 +1,5 @@
-const DEFAULT_THREAD_TITLE = "New chat";
+import { STRINGS } from "../shared/strings.mjs";
+const DEFAULT_THREAD_TITLE = STRINGS.threads.newChat;
 
 export class ThreadStore {
   constructor(history, legacyMessages, legacyPiSessionId) {

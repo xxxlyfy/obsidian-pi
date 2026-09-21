@@ -1,3 +1,4 @@
+import { STRINGS } from "../shared/strings.mjs";
 export function isStickyActivityKind(kind) {
   return (
     kind === "skill" || kind === "read" || kind === "search" || kind === "edit" || kind === "shell"
@@ -57,9 +58,12 @@ export function formatToolStatus(toolName, toolArgs, phase = "running") {
   const skillName = getReadSkillName(name, toolArgs);
   if (skillName) {
     return {
-      label: truncateActivityText(`Skill · ${skillName}`),
+      label: truncateActivityText(STRINGS.activity.skill(skillName)),
       kind: "skill",
-      detail: phase === "preparing" ? "Loading skill instructions" : "Using skill instructions"
+      detail:
+        phase === "preparing"
+          ? STRINGS.activity.loadingSkillInstructions
+          : STRINGS.activity.usingSkillInstructions
     };
   }
   const kind = getToolKind(name);
@@ -93,18 +97,18 @@ export function getThinkingDelta(event) {
 
 export function formatToolError(event) {
   if (event?.type !== "tool_end" || event.isError !== true) return "";
-  const name = String(event.toolName || event.message || "Tool");
+  const name = String(event.toolName || event.message || STRINGS.activity.tool);
   const detail = sanitizeActivityDetail(
     event.errorMessage ?? event.raw?.errorMessage ?? event.raw?.error ?? event.raw?.result?.error
   );
-  return truncateActivityText(detail ? `${name}: ${detail}` : `${name} failed`);
+  return truncateActivityText(STRINGS.activity.toolFailed(name, detail));
 }
 
 export function formatRetryDetail(event) {
   if (!event || typeof event !== "object") return "";
 
   const attempt =
-    event.attempt && event.maxAttempts ? `attempt ${event.attempt}/${event.maxAttempts}` : "";
+    event.attempt && event.maxAttempts ? `第 ${event.attempt}/${event.maxAttempts} 次尝试` : "";
 
   return [attempt, event.errorMessage ? String(event.errorMessage).slice(0, 120) : ""]
     .filter(Boolean)
@@ -124,37 +128,37 @@ function getReadSkillName(toolName, toolArgs) {
 function getToolVerb(toolName, phase) {
   if (phase === "preparing") {
     return toolName === "bash"
-      ? "Preparing command"
+      ? STRINGS.activity.preparingCommand
       : toolName === "edit"
-        ? "Preparing edit"
+        ? STRINGS.activity.preparingEdit
         : toolName === "write"
-          ? "Preparing write"
+          ? STRINGS.activity.preparingWrite
           : toolName === "grep" || toolName === "find" || toolName === "ls"
-            ? "Preparing search"
+            ? STRINGS.activity.preparingSearch
             : toolName === "read"
-              ? "Preparing read"
-              : "Preparing action";
+              ? STRINGS.activity.preparingRead
+              : STRINGS.activity.preparingAction;
   }
 
   return toolName === "bash"
-    ? "Running"
+    ? STRINGS.activity.running
     : toolName === "edit"
-      ? "Editing"
+      ? STRINGS.activity.editing
       : toolName === "write"
-        ? "Writing"
+        ? STRINGS.activity.writing
         : toolName === "grep"
-          ? "Searching"
+          ? STRINGS.activity.searching
           : toolName === "find"
-            ? "Finding"
+            ? STRINGS.activity.finding
             : toolName === "ls"
-              ? "Listing"
+              ? STRINGS.activity.listing
               : toolName === "read"
-                ? "Reading"
-                : "Using";
+                ? STRINGS.activity.reading
+                : STRINGS.activity.using;
 }
 
 function formatToolTarget(toolName, toolArgs) {
-  if (toolName === "bash") return "command";
+  if (toolName === "bash") return STRINGS.activity.command;
 
   if (toolName === "grep") {
     const pattern = sanitizeActivityDetail(pickNestedString(toolArgs, ["pattern", "query"]));

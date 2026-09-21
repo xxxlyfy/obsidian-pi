@@ -1,4 +1,5 @@
 import { Modal } from "obsidian";
+import { STRINGS } from "../../shared/strings.mjs";
 
 export function chooseThreadDeletion(app, thread) {
   return new Promise((resolve) => new DeleteThreadModal(app, thread, resolve).open());
@@ -18,18 +19,18 @@ export class DeleteThreadModal extends Modal {
 
   onOpen() {
     this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "Delete chat?" });
+    this.contentEl.createEl("h2", { text: STRINGS.modals.deleteChatTitle });
     this.contentEl.createEl("p", {
       text: this.thread.piSessionId
-        ? `Choose whether to keep or delete the local Pi session for “${this.thread.title}”.`
-        : `Delete “${this.thread.title}” from plugin history?`
+        ? STRINGS.modals.deleteChatOrSessionQuestion(this.thread.title)
+        : STRINGS.modals.deleteChatQuestion(this.thread.title)
     });
 
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
     const labels = {
-      cancel: "Cancel",
-      chat: "Delete chat only",
-      both: "Delete chat and local Pi session"
+      cancel: STRINGS.common.cancel,
+      chat: STRINGS.modals.deleteChatOnly,
+      both: STRINGS.modals.deleteChatAndSession
     };
     for (const choice of getThreadDeletionChoices(this.thread))
       this.addButton(actions, labels[choice], choice);

@@ -43,6 +43,351 @@ module.exports = __toCommonJS(main_exports);
 
 // src/plugin/PiAgentPlugin.mjs
 var import_node_fs5 = __toESM(require("node:fs"), 1);
+
+// src/shared/strings.mjs
+var STRINGS = {
+  common: {
+    apply: "应用",
+    back: "返回",
+    cancel: "取消",
+    close: "关闭",
+    copiedToClipboard: "已复制到剪贴板。",
+    delete: "删除",
+    reject: "拒绝",
+    rename: "重命名",
+    save: "保存"
+  },
+  view: {
+    attachFiles: "添加附件",
+    canceling: "正在取消",
+    chatTitle: "会话标题",
+    contextUsageEmpty: "上下文 --",
+    markdownRenderError: "Pi Agent：Markdown 渲染出错",
+    modelProvider: "模型提供商",
+    renameChat: "重命名会话",
+    chooseAttachable: "选择库中的图片、文本、代码或配置文件…",
+    collectingContext: "收集当前笔记、链接、反向链接与显式附件。",
+    compactionUnknownTitle:
+      "Pi 已压缩本次会话。在下一次模型回复返回新的 token 用量前，无法得知确切的上下文占用。",
+    compactionBadge: (contextWindow) => `上下文已压缩 · ?/${contextWindow}`,
+    contextUsagePending: "上下文占用会在 Pi 返回所选模型的 token 用量后显示。",
+    contextUsagePendingTitle: "上下文占用会在 Pi 返回所选模型的 token 用量后显示。",
+    forkBusy: "请先等当前会话的智能体运行结束，再派生该会话。",
+    forkChat: "派生会话",
+    inputPlaceholder: "向智能体询问你的库… Enter 发送，Shift+Enter 换行。",
+    localFile: "本地文件",
+    manageThreads: "管理会话",
+    modelNoImage: "所选 Pi 模型不支持图片输入。",
+    newChat: "新建会话",
+    pendingContext: "本次将附带的上下文",
+    preparingContext: "正在准备上下文",
+    queuedEmpty: "排队中的消息已为空，未发送。",
+    runCanceled: "已取消运行。",
+    runFailed: "运行失败",
+    send: "发送",
+    sendMessage: "发送消息",
+    threadNotFound: "会话不存在。",
+    vaultFile: "库文件",
+    annotationsCount: (count) => `${count} 条注解`,
+    clearAnnotations: (count) => `清除 ${count} 条注解`,
+    notificationCompleted: "智能体回复完成。点击打开会话。",
+    notificationFailed: "智能体运行失败。点击打开会话。",
+    removeNote: (name) => `移除「${name}」`,
+    removePending: (name) => `移除「${name}」`
+  },
+  sendState: {
+    cancel: "取消",
+    cancelAria: "取消智能体运行",
+    canceling: "取消中",
+    cancelingAria: "正在取消智能体运行",
+    queue: "排队",
+    queueAria: "把消息加入队列",
+    queuedSuffix: (count) => `已排队 ${count} 条。`
+  },
+  controls: {
+    mode: "模式",
+    model: "模型",
+    noModels: "没有可用的模型",
+    think: "思考",
+    label: (name, value) => `${name}：${value}`
+  },
+  queue: {
+    discard: "全部丢弃",
+    discardSaved: "丢弃全部已保存的消息",
+    editQueued: "编辑排队消息",
+    queuedNotice: (count) =>
+      count === 1 ? "消息已排队，将在当前运行结束后发送。" : `${count} 条消息已排队。`,
+    removeQueued: "移除排队消息",
+    settledNotice: "本次运行已结束，消息将正常发送。",
+    steerNow: "立即插队",
+    unknownSize: "大小未知",
+    handedToPi: "已交给 Pi",
+    resume: "继续",
+    resumeSaved: "继续发送已保存的消息",
+    runsAfterSettlement: "当前运行结束后会按顺序发送。",
+    savedFromPreviousSession: "来自上一次插件会话，发送前请确认。",
+    steeringSent: "已向 Pi 发送插队消息。",
+    queuedImage: "排队图片",
+    attachmentCount: (count) => `${count} 个附件`,
+    followUpCount: (count) => `${count} 条本地排队消息`,
+    queuedFollowUp: (label) => `排队消息：${label}`,
+    attachmentSummary: (name, type, size, truncated) =>
+      `${name} · ${type} · ${size}${truncated ? " · 已截断" : ""}`,
+    imageSummary: (name, size) => `${name} · ${size} · 图片`
+  },
+  threads: {
+    activeRunDeleteBlocked: "请先等智能体运行结束，再删除该会话。",
+    agentRunningInChat: "该会话的智能体正在运行",
+    backToChat: "返回对话",
+    bulkCreatedEmpty: "已创建新的空会话",
+    bulkSessionsKept: "本地 Pi 会话文件已保留。",
+    chatTitle: "会话标题",
+    currentChat: "当前会话",
+    deletedChat: "会话已删除。",
+    deletedChatAndSession: "会话与本地 Pi 会话已删除。",
+    deleteBlockedByActiveRuns: "请先等待运行中的智能体结束后再删除会话。",
+    exportFailed: "会话导出失败。",
+    noSessionInfo: "没有可用的 Pi 会话信息。",
+    nothingToDelete: "没有可删除的会话。",
+    open: "打开",
+    openChat: "打开会话",
+    unknownDate: "未知日期",
+    bulkDeleted: (count) => `已删除 ${count} 个会话`,
+    bulkSkipped: (count) => `跳过 ${count} 个运行中的会话`,
+    exportTo: (path6) => `已导出到 ${path6}`,
+    messageCount: (count) => `${count} 条消息`,
+    sessionStats: (file, messages, entries, tokens, cost) => `${file}
+${messages} 条消息 · ${entries} 个树节点 · ${tokens} tokens · $${cost}`,
+    updatedAt: (date) => `更新于 ${date}`,
+    currentPrefix: "当前",
+    deleteChat: "删除会话",
+    deleteChats: "删除会话",
+    deleteFailed: "无法删除该会话或其本地 Pi 会话文件。",
+    empty: "暂无会话。",
+    favorite: "收藏",
+    heading: "会话",
+    markFavorite: "收藏会话",
+    removeFavorite: "取消收藏",
+    newChat: "新建会话",
+    nothingToFork: "暂无可派生的内容。",
+    rowActions: "会话操作",
+    threadNotFound: "会话不存在。",
+    count: (count) => `${count} 个会话`,
+    exportSession: (name) => `将 ${name} 会话导出为 HTML`,
+    sessionInfo: (name) => `${name} 会话信息`
+  },
+  messages: {
+    copied: "已复制回复。",
+    copyResponse: "复制回复",
+    createNote: "由回复创建笔记",
+    editAndResend: "编辑并重发",
+    insertIntoNote: "插入当前笔记",
+    messageActions: "消息操作",
+    noVaultLinks: "未找到库内链接。",
+    openCitedNotes: "打开引用的笔记",
+    openNoteFirst: "请先打开一篇笔记。",
+    regenerate: "重新生成",
+    responding: "回复中",
+    responseTitle: "智能体回复",
+    roleAgent: "智能体",
+    roleYou: "你",
+    searchVault: "在库中搜索相关内容",
+    noteNotFound: (label) => `找不到笔记：${label}`
+  },
+  activity: {
+    compactedRetrying: "已压缩上下文，正在重试",
+    command: "命令",
+    loadingSkillInstructions: "正在加载技能说明",
+    thinking: "思考",
+    usingSkillInstructions: "正在使用技能说明",
+    compactingContext: "正在压缩上下文",
+    compactionFailed: "压缩失败",
+    compactionSkipped: "已跳过压缩",
+    editing: "编辑",
+    extensionFailed: "扩展失败",
+    extensionError: "Pi 扩展错误",
+    tool: "工具",
+    finding: "查找",
+    finishing: "收尾",
+    listing: "列出",
+    preparingAction: "准备操作",
+    preparingCommand: "准备命令",
+    preparingEdit: "准备编辑",
+    preparingRead: "准备读取",
+    preparingSearch: "准备搜索",
+    preparingWrite: "准备写入",
+    reading: "读取",
+    retrying: "重试",
+    running: "运行",
+    searching: "搜索",
+    startingPi: "启动 Pi",
+    using: "使用",
+    writing: "写入",
+    inProgress: (label) => `正在${label}`,
+    skill: (name) => `技能 · ${name}`,
+    toolFailed: (name, detail) => (detail ? `${name}：${detail}` : `${name} 失败`),
+    reviewingResults: "正在查看结果",
+    toolFailedLabel: "工具执行失败"
+  },
+  modals: {
+    before: "修改前",
+    after: "修改后",
+    applyChange: "应用修改",
+    confirm: "确认",
+    deleteChatOnly: "仅删除会话",
+    deleteChatAndSession: "删除会话与本地 Pi 会话",
+    deleteChatTitle: "删除会话？",
+    deleteChatsDescription: "选择要删除哪些会话历史。本地 Pi 会话文件会保留。",
+    deleteChatsTitle: "删除会话？",
+    extensionFallback: "Pi 扩展",
+    deleteAllChats: (count) => `删除全部会话（${count}）`,
+    deleteAllExceptFavorites: (count) => `删除除收藏外的全部会话（${count}）`,
+    approveChange: "批准库内修改",
+    copyDiagnostics: "复制诊断命令",
+    copyInstall: "复制安装命令",
+    copiedDiagnostics: "已复制诊断命令。",
+    copiedInstall: "已复制 Pi 安装命令。",
+    fileChanged: "Pi 准备该修改后，文件已发生变化。",
+    newFile: "（新文件）",
+    doNotShowAgain: "不再显示",
+    select: "选择",
+    setupHeading: "设置 Pi CLI",
+    setupIntro: "先在对话或审阅模式下使用。仅在你愿意让 Pi 修改的库中启用编辑或完整智能体模式。",
+    setupMissingCli: "Pi Agent 需要先安装 Pi CLI 才能发送请求。",
+    setupNodeHint:
+      "安装 Node.js，或让你的 Node 版本管理器对 GUI 应用可见，然后完全重启 Obsidian。之后在终端运行 pi --version 确认 Pi 仍可用。",
+    setupPathHint: "在终端安装 Pi 并在需要时完成认证，然后重启 Obsidian 以便读取更新后的 PATH。",
+    favoriteProtected: (count) => `${count} 个收藏会话受第一个选项保护。`,
+    activeRunBlocked: (count) => `${count} 个运行中的会话需等运行结束后才能删除。`,
+    deleteChatQuestion: (title) => `要从插件历史中删除「${title}」吗？`,
+    deleteChatOrSessionQuestion: (title) => `选择保留还是删除「${title}」的本地 Pi 会话。`
+  },
+  annotations: {
+    change: "修改",
+    question: "提问",
+    intent: "注解意图",
+    request: "请求内容",
+    requestRequired: "请填写请求内容。",
+    action: "添加或切换注解",
+    addTitle: "添加注解",
+    editTitle: "编辑注解",
+    placeholder: "描述你的修改要求或问题",
+    saveFailed: "无法保存注解。",
+    pickModeHint: "注解拾取模式：悬停或聚焦某个段落，然后点击或按 Enter。",
+    annotateBlock: "为该 Markdown 块添加注解",
+    navigate: "跳转到注解",
+    edit: "编辑注解",
+    delete: "删除注解",
+    noContext: "无上下文",
+    renderedBlockGone: "该渲染块已不再对应当前笔记。",
+    pickRenderedBlock: "请选择一个非空的渲染 Markdown 块。",
+    renderedBlockTooLarge: "该渲染 Markdown 块过大，无法添加注解。",
+    renderedSelectionLabel: "渲染选区（锚定到所属源块）",
+    renderedSelectionNotMappable: "该渲染选区无法精确映射，将使用所属源块作为锚点。",
+    storageInvalid: "注解数据无效。",
+    storageDuplicateId: "注解 ID 已存在。",
+    storageInvalidUpdate: "注解更新无效。",
+    storageLimitReached: "注解存储已达上限。",
+    blockAnchor: "块锚点",
+    detached: "该注解已与当前笔记文本脱节。",
+    listHeading: (count) => `注解（${count}）`,
+    listTitle: "本文注解",
+    notRendered: "该注解对应的源块当前未渲染。",
+    send: "发送给 Pi",
+    sendAria: "将注解发送给 Pi",
+    sourceNotReady: "Markdown 编辑器尚未就绪。",
+    openMarkdownFirst: "请先打开一篇 Markdown 笔记再使用注解。",
+    selectionTooLarge: "所选 Markdown 文本过大，无法添加注解。",
+    noSourceBlocks: "该阅读视图中没有可用的、能对应到源文件的 Markdown 块。",
+    pickNonEmptyLine: "请选择一个非空的 Markdown 行或段落。",
+    blockTooLarge: "该 Markdown 块过大，无法添加注解。",
+    selectionAcrossBlocks: "请把选区限制在同一段可对应到源文件的 Markdown 文本内。",
+    pickNonEmptyRendered: "请选择一个非空的渲染选区。",
+    renderedSelectionGone: "该渲染选区已不属于当前 Markdown 视图。",
+    renderedSelectionTooLarge: "渲染选区过大，无法添加注解。",
+    mapFailed: "无法把该渲染选区映射到精确的源字符。",
+    readSourceFailed: "无法读取当前 Markdown 源文本。",
+    renderedTargetGone: "该渲染目标已不属于当前 Markdown 视图。"
+  },
+  suggestions: {
+    folder: "文件夹",
+    note: "笔记",
+    tag: "标签",
+    skill: (detail) => `技能 — ${detail}`
+  },
+  commands: {
+    backlinksDetail: "附加链接到当前笔记的笔记。",
+    backlinksLabel: "反向链接",
+    compactDetail: "请求 Pi 压缩当前会话上下文，可附加自定义说明。",
+    compactLabel: "压缩 Pi 上下文",
+    contextShowDetail: "不调用 Pi，直接显示当前 Obsidian 上下文包。",
+    contextShowHeading: "当前 Obsidian 上下文：",
+    contextShowLabel: "显示上下文",
+    currentDetail: "附加当前笔记、选区、链接、标签、标题与 frontmatter。",
+    currentLabel: "当前笔记",
+    linksDetail: "附加当前笔记链接出去的笔记。",
+    linksLabel: "出链",
+    searchDetail: "附加按相关度排序的库内笔记匹配结果。",
+    searchLabel: "库内搜索",
+    instructionsHint: "说明",
+    queryHint: "查询"
+  },
+  plugin: {
+    annotationsCouldNotFollow: "注解未能跟随重命名后的笔记；已保留它们的原始记录。",
+    annotationsRestoreFailed: "无法恢复排队中的注解。",
+    annotationNoteGone: "注解所属的笔记已不存在，未发送这些注解。",
+    annotationSaveFailed: "无法把注解保存到插件数据。",
+    commandsFailed: "Pi Agent：刷新 Pi 命令失败",
+    contextBuilderUnavailable: "Pi 上下文构建器不可用。",
+    errorPrefix: "错误：",
+    historyImportFailed: "Pi Agent：无法导入库内会话历史",
+    historySaveFailed: "Pi Agent：无法保存会话历史",
+    historyUnrecognizedFiles: "Pi Agent：有无法识别的会话文件被留在原处",
+    modelCatalogFailed: "Pi Agent：刷新模型目录失败",
+    modelServiceNotReady: "Pi 模型服务尚未就绪。",
+    runnerUnavailable: "Pi 运行器不可用。",
+    servicesUnavailable: "Pi 服务不可用。",
+    sessionCloneFailed: "Pi Agent：无法命名克隆的 Pi 会话",
+    sessionDeleteFailed: "Pi Agent：无法删除本地 Pi 会话",
+    sessionRenameFailed: "Pi Agent：无法重命名 Pi 会话",
+    threadGone: "会话已不存在。",
+    verifyImportFailed: "无法在插件数据中校验导入的会话历史。",
+    warningPrefix: "警告：",
+    commandsLoaded: (count) => `已加载 ${count} 个 Pi 命令。`,
+    couldNotOpenView: "无法打开 Pi 视图。",
+    desktopOnly: "Pi Agent 仅支持桌面端。",
+    historyRecovered: "Pi Agent 已从本地备份恢复会话历史。",
+    historyRestored: "会话历史已恢复到 Pi Agent 的本地插件数据。",
+    historyRestoredPartially: "会话历史已恢复，但无法读取的会话文件被留在原处。",
+    noAnnotationsToSend: "该笔记没有可发送的注解。",
+    openAgent: (name) => `打开 ${name}`,
+    commandOpenChat: "打开智能体会话",
+    commandToggleAnnotations: "为当前笔记添加或切换注解",
+    commandAskCurrentNote: "询问当前笔记",
+    commandResearchCurrentNote: "围绕当前笔记调研",
+    commandSuggestFrontmatter: "为当前笔记建议 frontmatter",
+    commandDraftBase: "根据当前笔记上下文草拟 Base",
+    openMarkdownFirst: "请先打开一篇 Markdown 笔记。",
+    settingsSaveFailed: (detail) => `Pi Agent：无法保存设置：${detail}`,
+    cliAvailable: (version) => `Pi CLI 可用：${version}`,
+    modelsLoaded: (count, model) => `已加载 ${count} 个 Pi 模型；默认 ${model}。`
+  },
+  history: {
+    invalidBackup: "会话历史备份无效。",
+    invalidMessage: "消息数据无效。",
+    invalidThread: "会话数据无效。",
+    pluginDirectoryUnavailable: "插件目录不可用。",
+    unsafeFolder: "不安全的会话历史目录。",
+    unsupportedSchema: "不支持的会话数据格式。"
+  },
+  picker: {
+    custom: "自定义",
+    noModelsReturned: "Pi 未返回任何模型。",
+    piDefault: "Pi 默认"
+  }
+};
+
+// src/plugin/PiAgentPlugin.mjs
 var P = __toESM(require("obsidian"), 1);
 
 // src/annotations/annotation-model.mjs
@@ -304,7 +649,7 @@ var AnnotationStore = class {
   }
   create(input) {
     const annotation = createAnnotation(input);
-    if (!annotation) throw new Error("Invalid annotation.");
+    if (!annotation) throw new Error(STRINGS.annotations.storageInvalid);
     const current = this.data.annotations[annotation.path] ?? [];
     if (current.length >= ANNOTATION_LIMITS.perPath)
       throw new Error(`A note can have at most ${ANNOTATION_LIMITS.perPath} annotations.`);
@@ -316,7 +661,7 @@ var AnnotationStore = class {
     if (this.count() >= ANNOTATION_LIMITS.total)
       throw new Error(`At most ${ANNOTATION_LIMITS.total} annotations can be stored.`);
     if (current.some((item) => item.id === annotation.id))
-      throw new Error("Annotation ID already exists.");
+      throw new Error(STRINGS.annotations.storageDuplicateId);
     this.assertStorageBudget({
       ...this.data.annotations,
       [annotation.path]: [...current, annotation]
@@ -342,7 +687,7 @@ var AnnotationStore = class {
       },
       existing.path
     );
-    if (!updated) throw new Error("Invalid annotation update.");
+    if (!updated) throw new Error(STRINGS.annotations.storageInvalidUpdate);
     const updatedItems = items.map((item, itemIndex) => (itemIndex === index ? updated : item));
     this.assertStorageBudget({ ...this.data.annotations, [existing.path]: updatedItems });
     items[index] = updated;
@@ -440,7 +785,7 @@ var AnnotationStore = class {
       annotationDataBytes({ schemaVersion: this.data.schemaVersion, annotations }) >
       ANNOTATION_LIMITS.storageBytes
     )
-      throw new Error("Annotation storage limit reached.");
+      throw new Error(STRINGS.annotations.storageLimitReached);
   }
   changed() {
     this.onChange(this.toJSON());
@@ -465,19 +810,24 @@ var AnnotationModal = class extends import_obsidian.Modal {
     this.intent = options.annotation?.intent ?? "change";
   }
   onOpen() {
-    this.titleEl.setText(this.options.annotation ? "Edit annotation" : "Add annotation");
+    this.titleEl.setText(
+      this.options.annotation ? STRINGS.annotations.editTitle : STRINGS.annotations.addTitle
+    );
     this.contentEl.empty();
     this.modalEl.addClass("pi-agent-annotation-modal");
     const controlId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const contextId = `pi-agent-annotation-context-${controlId}`;
-    this.contentEl.createEl("label", { text: "Request", attr: { for: contextId } });
+    this.contentEl.createEl("label", {
+      text: STRINGS.annotations.request,
+      attr: { for: contextId }
+    });
     this.contextEl = this.contentEl.createEl("textarea", {
       cls: "pi-agent-annotation-context",
       attr: {
         id: contextId,
         rows: "4",
         maxlength: String(ANNOTATION_LIMITS.context),
-        placeholder: "Describe the change or ask a question"
+        placeholder: STRINGS.annotations.placeholder
       }
     });
     this.contextEl.value = this.options.annotation?.context ?? "";
@@ -487,7 +837,7 @@ var AnnotationModal = class extends import_obsidian.Modal {
     });
     const fieldset = this.contentEl.createEl("fieldset", {
       cls: "pi-agent-annotation-intents",
-      attr: { "aria-label": "Annotation intent" }
+      attr: { "aria-label": STRINGS.annotations.intent }
     });
     for (const intent of ["change", "question"]) {
       const option = fieldset.createEl("label", { cls: "pi-agent-annotation-intent" });
@@ -498,7 +848,9 @@ var AnnotationModal = class extends import_obsidian.Modal {
       input.addEventListener("change", () => {
         if (input.checked) this.intent = intent;
       });
-      option.createSpan({ text: intent === "change" ? "Change" : "Question" });
+      option.createSpan({
+        text: intent === "change" ? STRINGS.annotations.change : STRINGS.annotations.question
+      });
     }
     const errorId = `pi-agent-annotation-error-${controlId}`;
     this.contextEl.setAttr("aria-describedby", errorId);
@@ -507,9 +859,11 @@ var AnnotationModal = class extends import_obsidian.Modal {
       attr: { id: errorId, role: "alert", "aria-live": "polite" }
     });
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    actions.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    actions
+      .createEl("button", { text: STRINGS.common.cancel })
+      .addEventListener("click", () => this.close());
     this.saveButton = actions.createEl("button", {
-      text: "Save",
+      text: STRINGS.common.save,
       cls: "mod-cta"
     });
     this.saveButton.addEventListener("click", () => this.submit());
@@ -524,7 +878,7 @@ var AnnotationModal = class extends import_obsidian.Modal {
     if (this.submitting) return;
     const context = this.contextEl?.value.trim() ?? "";
     if (!context) {
-      this.errorEl?.setText("Request is required.");
+      this.errorEl?.setText(STRINGS.annotations.requestRequired);
       this.contextEl?.setAttr("aria-invalid", "true");
       this.contextEl?.focus();
       return;
@@ -535,7 +889,9 @@ var AnnotationModal = class extends import_obsidian.Modal {
       await this.options.onSave({ context, intent: this.intent });
       this.close();
     } catch (error) {
-      this.errorEl?.setText(error instanceof Error ? error.message : "Could not save annotation.");
+      this.errorEl?.setText(
+        error instanceof Error ? error.message : STRINGS.annotations.saveFailed
+      );
       this.submitting = false;
       this.saveButton?.removeAttribute("disabled");
       this.contextEl?.focus();
@@ -585,11 +941,11 @@ function resolveMarkdownBlockRange(text, offset) {
 function resolveReadingModeCapture(source, sectionInfo, renderedSelection = "") {
   const text = String(source ?? "");
   const section = resolveSectionRange(text, sectionInfo);
-  if (!section) return { error: "This rendered block is no longer tied to the current note." };
-  if (section.to <= section.from) return { error: "Choose a non-empty rendered Markdown block." };
+  if (!section) return { error: STRINGS.annotations.renderedBlockGone };
+  if (section.to <= section.from) return { error: STRINGS.annotations.pickRenderedBlock };
   const selectedText = String(renderedSelection ?? "");
   if (selectedText.length > ANNOTATION_LIMITS.quote)
-    return { error: "The rendered selection is too large to annotate." };
+    return { error: STRINGS.annotations.renderedSelectionTooLarge };
   if (selectedText) {
     const sectionSource = text.slice(section.from, section.to);
     const first = sectionSource.indexOf(selectedText);
@@ -606,15 +962,14 @@ function resolveReadingModeCapture(source, sectionInfo, renderedSelection = "") 
     }
   }
   if (section.to - section.from > ANNOTATION_LIMITS.quote)
-    return { error: "This rendered Markdown block is too large to annotate." };
+    return { error: STRINGS.annotations.renderedBlockTooLarge };
   if (!selectedText) return { range: section, targetKind: "block" };
   return {
     range: section,
     targetKind: "block",
     renderedText: selectedText,
-    anchorLabel: "Rendered selection (anchored to containing source block)",
-    notice:
-      "This rendered selection cannot be mapped exactly; it will use the containing source block as its anchor."
+    anchorLabel: STRINGS.annotations.renderedSelectionLabel,
+    notice: STRINGS.annotations.renderedSelectionNotMappable
   };
 }
 function resolveSectionRange(source, sectionInfo) {
@@ -935,12 +1290,12 @@ var MarkdownAnnotationsController = class {
       this.handleHeaderAction(leaf)
     );
     actionEl.addClass("pi-agent-annotations-action");
-    actionEl.setAttr("aria-label", "Add or toggle annotation");
+    actionEl.setAttr("aria-label", STRINGS.annotations.action);
     actionEl.setAttr("aria-pressed", "false");
     const listEl = view.containerEl.createDiv({
       cls: "pi-agent-annotations-list",
       attr: {
-        "aria-label": "Annotations for this note",
+        "aria-label": STRINGS.annotations.listTitle,
         "aria-live": "polite",
         role: "region"
       }
@@ -979,7 +1334,7 @@ var MarkdownAnnotationsController = class {
     const activeLeaf = this.plugin.app.workspace.activeLeaf;
     const state = this.leaves.get(activeLeaf);
     if (!state || !state.view.file || state.view.file.extension !== "md") {
-      new import_obsidian2.Notice("Open an active Markdown note to use annotations.");
+      new import_obsidian2.Notice(STRINGS.annotations.openMarkdownFirst);
       return;
     }
     void this.handleHeaderAction(activeLeaf);
@@ -1016,7 +1371,7 @@ var MarkdownAnnotationsController = class {
     const to = offset(toPosition);
     if (to > from) {
       if (to - from > ANNOTATION_LIMITS.quote) {
-        new import_obsidian2.Notice("The selected Markdown text is too large to annotate.");
+        new import_obsidian2.Notice(STRINGS.annotations.selectionTooLarge);
         return;
       }
       if (!this.activateEditorPick(state)) return;
@@ -1034,7 +1389,7 @@ var MarkdownAnnotationsController = class {
     this.cancelPick();
     const editorView = this.editorViewForState(state);
     if (!editorView) {
-      new import_obsidian2.Notice("The Markdown editor is not ready yet.");
+      new import_obsidian2.Notice(STRINGS.annotations.sourceNotReady);
       return false;
     }
     this.pickState = {
@@ -1047,10 +1402,7 @@ var MarkdownAnnotationsController = class {
     state.actionEl.addClass("is-active");
     state.actionEl.setAttr("aria-pressed", "true");
     editorView.dom.classList.add("pi-agent-annotation-pick-mode");
-    editorView.dom.setAttribute(
-      "aria-label",
-      "Annotation pick mode. Hover or focus a paragraph, then click or press enter."
-    );
+    editorView.dom.setAttribute("aria-label", STRINGS.annotations.pickModeHint);
     state.view.editor.focus();
     requestAnnotationRefresh(editorView);
     return true;
@@ -1064,9 +1416,7 @@ var MarkdownAnnotationsController = class {
     this.cancelPick();
     const records = this.recordsForState(state);
     if (records.length === 0) {
-      new import_obsidian2.Notice(
-        "No source-backed Markdown blocks are available in this reading view."
-      );
+      new import_obsidian2.Notice(STRINGS.annotations.noSourceBlocks);
       return false;
     }
     this.pickState = { kind: "rendered", leaf: state.leaf, state, focused: void 0 };
@@ -1126,7 +1476,7 @@ var MarkdownAnnotationsController = class {
     const now = Date.now();
     if (previous?.signature === signature && now - previous.at < 100) return true;
     if (selection.to - selection.from > ANNOTATION_LIMITS.quote) {
-      new import_obsidian2.Notice("The selected Markdown text is too large to annotate.");
+      new import_obsidian2.Notice(STRINGS.annotations.selectionTooLarge);
       return true;
     }
     this.selectionPicks.set(view, { signature, at: now });
@@ -1144,11 +1494,11 @@ var MarkdownAnnotationsController = class {
     const text = view.state.doc.toString();
     const range = resolveMarkdownBlockRange(text, offset);
     if (range.to <= range.from) {
-      new import_obsidian2.Notice("Choose a non-empty Markdown line or paragraph.");
+      new import_obsidian2.Notice(STRINGS.annotations.pickNonEmptyLine);
       return;
     }
     if (range.to - range.from > ANNOTATION_LIMITS.quote) {
-      new import_obsidian2.Notice("This Markdown block is too large to annotate.");
+      new import_obsidian2.Notice(STRINGS.annotations.blockTooLarge);
       return;
     }
     const anchor = captureAnchor(text, range.from, range.to);
@@ -1243,7 +1593,7 @@ var MarkdownAnnotationsController = class {
       record.savedAriaLabel = record.element.getAttribute("aria-label") ?? null;
     }
     record.element.setAttribute("tabindex", "0");
-    record.element.setAttribute("aria-label", "Annotate this Markdown block");
+    record.element.setAttribute("aria-label", STRINGS.annotations.annotateBlock);
     record.element.classList.add("pi-agent-annotation-rendered-target");
   }
   disableRenderedTarget(record) {
@@ -1298,14 +1648,12 @@ var MarkdownAnnotationsController = class {
     const startRecord = this.closestRenderedRecord(elementFromNode(range.startContainer), state);
     const endRecord = this.closestRenderedRecord(elementFromNode(range.endContainer), state);
     if (!startRecord || !endRecord) {
-      new import_obsidian2.Notice(
-        "Start and end the selection inside source-backed Markdown text."
-      );
+      new import_obsidian2.Notice(STRINGS.annotations.selectionAcrossBlocks);
       return { invalid: true };
     }
     const text = selection.toString();
     if (!text) {
-      new import_obsidian2.Notice("Choose a non-empty rendered selection.");
+      new import_obsidian2.Notice(STRINGS.annotations.pickNonEmptyRendered);
       return { invalid: true };
     }
     return { state, startRecord, endRecord, range, text };
@@ -1330,13 +1678,11 @@ var MarkdownAnnotationsController = class {
       !startRecord.element.isConnected ||
       !endRecord.element.isConnected
     ) {
-      new import_obsidian2.Notice(
-        "That rendered selection is no longer part of this Markdown view."
-      );
+      new import_obsidian2.Notice(STRINGS.annotations.renderedSelectionGone);
       return;
     }
     if (text.length > ANNOTATION_LIMITS.quote) {
-      new import_obsidian2.Notice("The rendered selection is too large to annotate.");
+      new import_obsidian2.Notice(STRINGS.annotations.renderedSelectionTooLarge);
       return;
     }
     try {
@@ -1377,13 +1723,11 @@ var MarkdownAnnotationsController = class {
       const from = resolved?.from;
       const to = resolved?.to;
       if (!Number.isInteger(from) || !Number.isInteger(to) || to <= from) {
-        new import_obsidian2.Notice(
-          "Could not map that rendered selection to exact source characters."
-        );
+        new import_obsidian2.Notice(STRINGS.annotations.mapFailed);
         return;
       }
       if (to - from > ANNOTATION_LIMITS.quote) {
-        new import_obsidian2.Notice("The rendered selection is too large to annotate.");
+        new import_obsidian2.Notice(STRINGS.annotations.renderedSelectionTooLarge);
         return;
       }
       this.openCreateModal(
@@ -1392,7 +1736,7 @@ var MarkdownAnnotationsController = class {
         "selection"
       );
     } catch {
-      new import_obsidian2.Notice("Could not read the current Markdown source.");
+      new import_obsidian2.Notice(STRINGS.annotations.readSourceFailed);
     }
   }
   async captureRendered(record, renderedText) {
@@ -1404,7 +1748,7 @@ var MarkdownAnnotationsController = class {
       !this.isReadingState(state) ||
       !record.element.isConnected
     ) {
-      new import_obsidian2.Notice("That rendered target is no longer part of this Markdown view.");
+      new import_obsidian2.Notice(STRINGS.annotations.renderedTargetGone);
       return;
     }
     try {
@@ -1424,7 +1768,7 @@ var MarkdownAnnotationsController = class {
       };
       this.openCreateModal(record.sourcePath, anchor, resolved.targetKind);
     } catch {
-      new import_obsidian2.Notice("Could not read the current Markdown source.");
+      new import_obsidian2.Notice(STRINGS.annotations.readSourceFailed);
     }
   }
   refreshRenderedHighlights() {
@@ -1479,14 +1823,14 @@ var MarkdownAnnotationsController = class {
     state.listEl.toggleClass("is-empty", annotations.length === 0);
     if (annotations.length === 0) return;
     const heading = state.listEl.createDiv({ cls: "pi-agent-annotations-list-heading" });
-    heading.createSpan({ text: `Annotations (${annotations.length})` });
+    heading.createSpan({ text: STRINGS.annotations.listHeading(annotations.length) });
     const sendButton = heading.createEl("button", {
       cls: "mod-cta pi-agent-annotations-send",
-      attr: { "aria-label": "Send annotations to pi", type: "button" }
+      attr: { "aria-label": STRINGS.annotations.sendAria, type: "button" }
     });
     const sendIcon = sendButton.createSpan({ cls: "pi-agent-annotations-send-icon" });
     (0, import_obsidian2.setIcon)(sendIcon, "send");
-    sendButton.createSpan({ text: "Send to Pi" });
+    sendButton.createSpan({ text: STRINGS.annotations.send });
     sendButton.addEventListener("click", () => void this.plugin.runAnnotationsPrompt(path6));
     for (const annotation of annotations) {
       const row = state.listEl.createDiv({
@@ -1504,15 +1848,16 @@ var MarkdownAnnotationsController = class {
       const metadata = copy.createDiv({ cls: "pi-agent-annotation-meta" });
       metadata.createSpan({ text: annotation.intent === "change" ? "Change" : "Question" });
       metadata.createSpan({ text: annotation.status === "detached" ? "Detached" : "Attached" });
-      if (annotation.targetKind === "block") metadata.createSpan({ text: "Block anchor" });
+      if (annotation.targetKind === "block")
+        metadata.createSpan({ text: STRINGS.annotations.blockAnchor });
       const actions = row.createDiv({ cls: "pi-agent-annotation-item-actions" });
-      this.iconButton(actions, "locate-fixed", "Navigate to annotation", () =>
+      this.iconButton(actions, "locate-fixed", STRINGS.annotations.navigate, () =>
         this.navigateTo(state, annotation)
       );
-      this.iconButton(actions, "pencil", "Edit annotation", () =>
+      this.iconButton(actions, "pencil", STRINGS.annotations.edit, () =>
         this.openEditModal(state, annotation)
       );
-      this.iconButton(actions, "trash-2", "Delete annotation", () => {
+      this.iconButton(actions, "trash-2", STRINGS.annotations.delete, () => {
         this.plugin.annotationStore.delete(annotation.path, annotation.id);
         this.refresh();
       });
@@ -1529,7 +1874,7 @@ var MarkdownAnnotationsController = class {
   }
   navigateTo(state, annotation) {
     if (annotation.status !== "attached") {
-      new import_obsidian2.Notice("This annotation is detached from the current note text.");
+      new import_obsidian2.Notice(STRINGS.annotations.detached);
       return;
     }
     this.plugin.app.workspace.setActiveLeaf(state.leaf, { focus: true });
@@ -1540,7 +1885,7 @@ var MarkdownAnnotationsController = class {
         return range && rangesOverlap(annotation.range, range);
       });
       if (!record) {
-        new import_obsidian2.Notice("The annotated source block is not currently rendered.");
+        new import_obsidian2.Notice(STRINGS.annotations.notRendered);
         return;
       }
       const window2 = record.element.ownerDocument?.defaultView ?? this.hostWindow;
@@ -1870,20 +2215,20 @@ function truncate(value, limit) {
   const text = String(value ?? "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!text) return "No context";
-  return text.length > limit ? `${text.slice(0, limit - 1)}\u2026` : text;
+  if (!text) return STRINGS.annotations.noContext;
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }
 
 // src/plugin/settings.mjs
 var CUSTOM_MODEL_VALUE = "__custom";
 var REASONING_LABELS = {
-  off: "\u5173\u95ED",
-  minimal: "\u6700\u4F4E",
-  low: "\u4F4E",
-  medium: "\u4E2D",
-  high: "\u9AD8",
-  xhigh: "\u6781\u9AD8",
-  max: "\u6700\u9AD8"
+  off: "关闭",
+  minimal: "最低",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  max: "最高"
 };
 var DEFAULT_SETTINGS = {
   model: "",
@@ -1947,7 +2292,7 @@ function getReasoningOptions(settings) {
     : settings.effectiveReasoning || model?.defaultReasoningLevel;
   const effective = resolvedDefault
     ? (REASONING_LABELS[resolvedDefault] ?? resolvedDefault)
-    : "\u81EA\u52A8";
+    : "自动";
   if (supportedReasoningLevels.length === 0) return { "": effective };
   const options = { "": effective };
   for (const reasoningLevel of supportedReasoningLevels) {
@@ -1978,11 +2323,10 @@ function getReasoningModelInfo(settings) {
 }
 function getToolModeOptions() {
   return {
-    chat: "\u5BF9\u8BDD \u2014 \u4E0D\u542F\u7528 Pi CLI \u5DE5\u5177",
-    "read-only": "\u5BA1\u9605 \u2014 \u4EC5\u8BFB\u53D6\u3001\u641C\u7D22\u3001\u5217\u51FA",
-    edit: "\u7F16\u8F91 \u2014 \u53EF\u7F16\u8F91\u548C\u5199\u5165\uFF0C\u4E0D\u53EF\u6267\u884C shell",
-    "full-agent":
-      "\u5B8C\u6574\u667A\u80FD\u4F53 \u2014 \u53EF\u7F16\u8F91\u548C\u5199\u5165\uFF0C\u5E76\u53EF\u6267\u884C shell"
+    chat: "对话 — 不启用 Pi CLI 工具",
+    "read-only": "审阅 — 仅读取、搜索、列出",
+    edit: "编辑 — 可编辑和写入，不可执行 shell",
+    "full-agent": "完整智能体 — 可编辑和写入，并可执行 shell"
   };
 }
 function formatReasoningLevel(value) {
@@ -2069,45 +2413,45 @@ function dedupeReferences(references) {
 var BUILTIN_SLASH_COMMANDS = [
   {
     command: "/current",
-    label: "Current note",
-    detail: "Attach the active note, selection, links, tags, headings, and frontmatter.",
+    label: STRINGS.commands.currentLabel,
+    detail: STRINGS.commands.currentDetail,
     insertText: "/current ",
     implemented: true
   },
   {
     command: "/backlinks",
-    label: "Backlinks",
-    detail: "Attach notes that link to the active note.",
+    label: STRINGS.commands.backlinksLabel,
+    detail: STRINGS.commands.backlinksDetail,
     insertText: "/backlinks ",
     implemented: true
   },
   {
     command: "/links",
-    label: "Outgoing links",
-    detail: "Attach notes linked from the active note.",
+    label: STRINGS.commands.linksLabel,
+    detail: STRINGS.commands.linksDetail,
     insertText: "/links ",
     implemented: true
   },
   {
     command: "/search",
-    label: "Vault search",
-    detail: "Attach ranked vault note matches for a query.",
+    label: STRINGS.commands.searchLabel,
+    detail: STRINGS.commands.searchDetail,
     insertText: "/search ",
     argumentHint: "query",
     implemented: true
   },
   {
     command: "/compact",
-    label: "Compact Pi context",
-    detail: "Ask Pi to compact the current session context, optionally with custom instructions.",
+    label: STRINGS.commands.compactLabel,
+    detail: STRINGS.commands.compactDetail,
     insertText: "/compact ",
     argumentHint: "instructions",
     implemented: true
   },
   {
     command: "/context show",
-    label: "Show context",
-    detail: "Display the current Obsidian context packet without calling Pi.",
+    label: STRINGS.commands.contextShowLabel,
+    detail: STRINGS.commands.contextShowDetail,
     insertText: "/context show ",
     implemented: true
   }
@@ -2525,7 +2869,7 @@ function isContextShowPrompt(prompt) {
 }
 function formatContextShowResponse(inspection) {
   return [
-    "Current Obsidian context:",
+    STRINGS.commands.contextShowHeading,
     "",
     "```json",
     JSON.stringify(inspection ?? {}, null, 2),
@@ -3222,6 +3566,24 @@ function compareVersions(left, right) {
   return 0;
 }
 
+// src/pi/run-canceled.mjs
+var RUN_CANCELED_NAME = "PiRunCanceledError";
+var PiRunCanceledError = class extends Error {
+  /** @param {unknown} [cause] */
+  constructor(cause = void 0) {
+    super("Pi run canceled.", cause === void 0 ? void 0 : { cause });
+    this.name = RUN_CANCELED_NAME;
+  }
+};
+function isPiRunCanceled(error) {
+  let current = error;
+  for (let depth = 0; current instanceof Error && depth < 10; depth++) {
+    if (current instanceof PiRunCanceledError || current.name === RUN_CANCELED_NAME) return true;
+    current = current.cause;
+  }
+  return false;
+}
+
 // src/pi/rpc-client.mjs
 var import_node_child_process2 = require("node:child_process");
 var import_node_string_decoder = require("node:string_decoder");
@@ -3758,11 +4120,11 @@ function formatContextUsageBadge(contextUsage, tokenUsage) {
   const usageText = `${formatTokenCount(contextUsage.tokens)}/${contextUsage.contextWindow > 0 ? formatTokenCount(contextUsage.contextWindow) : "?"}`;
   const base =
     contextUsage.contextWindow > 0
-      ? `ctx ${formatPercent(contextUsage.percent)} \xB7 ${usageText}`
+      ? `ctx ${formatPercent(contextUsage.percent)} · ${usageText}`
       : `ctx ${usageText}`;
   return {
     label: tokenUsage
-      ? `${base} \xB7 \u2191${formatTokenCount(calculateContextTokens(tokenUsage))} \u2193${formatTokenCount(
+      ? `${base} · ↑${formatTokenCount(calculateContextTokens(tokenUsage))} ↓${formatTokenCount(
           tokenUsage.output || 0
         )}`
       : base,
@@ -3779,8 +4141,8 @@ function formatContextUsageTitle(contextUsage, tokenUsage) {
   ];
   if (tokenUsage) {
     lines.push(
-      `\u2191 Input context: ${formatTokenCount(calculateContextTokens(tokenUsage))} tokens`,
-      `\u2193 Output: ${formatTokenCount(tokenUsage.output || 0)} tokens`
+      `↑ Input context: ${formatTokenCount(calculateContextTokens(tokenUsage))} tokens`,
+      `↓ Output: ${formatTokenCount(tokenUsage.output || 0)} tokens`
     );
   }
   return lines.join("\n");
@@ -4401,7 +4763,7 @@ var PiRunner = class {
     this.cancelRequested = false;
   }
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== void 0)
       return this.settings.dryRun
@@ -4413,7 +4775,7 @@ var PiRunner = class {
       context,
       threadHistory
     );
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     return this.settings.dryRun
       ? {
           finalResponse: this.formatDryRunResponse(prompt, context),
@@ -4497,7 +4859,7 @@ var PiRunner = class {
   }
   async runPiRpc(prompt, sessionId, callbacks, images = []) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
@@ -4505,7 +4867,7 @@ var PiRunner = class {
     try {
       let session;
       ({ client, session } = await this.getOrCreateRpcClient(sessionId));
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
       const runtimeState = await client.request("get_state").catch(() => void 0);
       const events = [];
       let finalResponse = "";
@@ -4552,7 +4914,7 @@ var PiRunner = class {
       await promptRequest;
       callbacks?.onPromptAccepted?.();
       await completion;
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
       if (runState?.errorMessage) throw new Error(runState.errorMessage);
       return {
         finalResponse: this.getFinalResponse(finalResponse, runState?.fallbackText, events),
@@ -4568,8 +4930,7 @@ var PiRunner = class {
       const rpcError =
         /** @type {Error & { piRpcUncertain?: boolean, piRpcRequestType?: string }} */
         error;
-      if (this.cancelRequested || callbacks?.isCanceled?.())
-        throw new Error("Pi run canceled.", { cause: error });
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       if (rpcError?.piRpcUncertain) {
         await this.recoverUncertainRpcClient(client);
         throw new Error(
@@ -4619,7 +4980,7 @@ var PiRunner = class {
   }
   runPiCli(prompt, sessionId, callbacks) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     const session = this.resolveOrCreateSession(sessionId);
     const args = this.buildPiArgs(session.path, "json");
     return new Promise((resolve, reject) => {
@@ -4699,7 +5060,7 @@ var PiRunner = class {
         if (settled) return;
         if (this.cancelRequested) {
           this.cancelRequested = false;
-          failOnce(new Error("Pi run canceled."));
+          failOnce(new PiRunCanceledError());
           return;
         }
         flushStdoutBuffer();
@@ -4736,13 +5097,13 @@ var PiRunner = class {
   }
   async runPiRpcCompact(sessionId, customInstructions = "", callbacks) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
       const events = [];
       unsubscribe = client.subscribe((event) => {
         handlePiJsonEventLine(
@@ -4760,7 +5121,7 @@ var PiRunner = class {
         },
         { timeoutMs: 0 }
       );
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
       return {
         finalResponse: "Context compacted.",
         sessionId: session.reference,
@@ -4772,8 +5133,7 @@ var PiRunner = class {
         compactionResult: result
       };
     } catch (error) {
-      if (this.cancelRequested || callbacks?.isCanceled?.())
-        throw new Error("Pi run canceled.", { cause: error });
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       throw error;
     } finally {
       this.cancelRequested = false;
@@ -5028,14 +5388,14 @@ var ConfirmModal = class extends import_obsidian4.Modal {
     contentEl.createEl("p", { text: this.options.message });
     const actionsEl = contentEl.createDiv({ cls: "pi-agent-modal-actions" });
     actionsEl
-      .createEl("button", { text: this.options.cancelText ?? "Cancel" })
+      .createEl("button", { text: this.options.cancelText ?? STRINGS.common.cancel })
       .addEventListener("click", () => {
         this.finish(false);
         this.close();
       });
     actionsEl
       .createEl("button", {
-        text: this.options.confirmText ?? "Continue",
+        text: this.options.confirmText ?? STRINGS.modals.continueLabel,
         cls: this.options.warning ? "mod-warning" : "mod-cta"
       })
       .addEventListener("click", () => {
@@ -5079,7 +5439,7 @@ function needsRuntimeCatalogRefresh(settings, refreshedAt, now = Date.now(), max
 }
 function createRuntimeCatalogSnapshot(models, effectiveConfig) {
   if (!Array.isArray(models) || models.length === 0) {
-    throw new Error("Pi returned no models.");
+    throw new Error(STRINGS.picker.noModelsReturned);
   }
   const reportedModel = String(effectiveConfig?.effectiveModel || "").trim();
   const effectiveModelInfo = models.find((model) => model.slug === reportedModel);
@@ -5106,14 +5466,12 @@ function getModelPickerPrimary(item) {
 }
 function getModelPickerSecondary(item) {
   const capabilities = [
-    item.isDefault ? "Pi \u9ED8\u8BA4" : "",
-    item.model.reasoning ? "\u601D\u8003" : "",
-    item.model.supportsImages ? "\u56FE\u7247" : "",
-    item.model.contextWindow
-      ? `${formatTokenAmount(item.model.contextWindow)} \u4E0A\u4E0B\u6587`
-      : ""
+    item.isDefault ? "Pi 默认" : "",
+    item.model.reasoning ? "思考" : "",
+    item.model.supportsImages ? "图片" : "",
+    item.model.contextWindow ? `${formatTokenAmount(item.model.contextWindow)} 上下文` : ""
   ].filter(Boolean);
-  return [item.model.slug, ...capabilities].join(" \xB7 ");
+  return [item.model.slug, ...capabilities].join(" · ");
 }
 function formatTokenAmount(value) {
   return value >= 1e6
@@ -5176,7 +5534,7 @@ function resolveProviderBrand(providerOrModel) {
   const brand = PROVIDER_BRANDS.find((candidate) => candidate.match.test(provider));
   return brand
     ? { ...brand, provider }
-    : { name: provider || "Model provider", provider, icon: void 0, mark: void 0 };
+    : { name: provider || STRINGS.view.modelProvider, provider, icon: void 0, mark: void 0 };
 }
 function renderProviderIcon(container, providerOrModel) {
   const brand = resolveProviderBrand(providerOrModel);
@@ -5205,14 +5563,12 @@ var ModelPickerModal = class extends import_obsidian5.FuzzySuggestModal {
     this.settings = settings;
     this.onChoose = onChoose;
     this.limit = 1e3;
-    this.emptyStateText = "\u6CA1\u6709\u5339\u914D\u7684 Pi \u6A21\u578B\u3002";
-    this.setPlaceholder(
-      "\u6309\u540D\u79F0\u3001\u63D0\u4F9B\u5546\u3001\u6807\u8BC6\u6216\u80FD\u529B\u641C\u7D22\u6A21\u578B\u2026"
-    );
+    this.emptyStateText = "没有匹配的 Pi 模型。";
+    this.setPlaceholder("按名称、提供商、标识或能力搜索模型…");
     this.setInstructions([
-      { command: "\u2191\u2193", purpose: "\u5BFC\u822A" },
-      { command: "\u21B5", purpose: "\u9009\u62E9" },
-      { command: "esc", purpose: "\u5173\u95ED" }
+      { command: "↑↓", purpose: "导航" },
+      { command: "↵", purpose: "选择" },
+      { command: "esc", purpose: "关闭" }
     ]);
   }
   getItems() {
@@ -5230,7 +5586,7 @@ var ModelPickerModal = class extends import_obsidian5.FuzzySuggestModal {
     copy.createDiv({ cls: "pi-agent-suggestion-detail", text: getModelPickerSecondary(item) });
     el.setAttribute(
       "aria-label",
-      `${getModelPickerPrimary(item)}, ${getModelPickerSecondary(item)}${this.settings.model === item.value ? ", \u5DF2\u9009\u4E2D" : ""}`
+      `${getModelPickerPrimary(item)}, ${getModelPickerSecondary(item)}${this.settings.model === item.value ? ", 已选中" : ""}`
     );
   }
   onChooseItem(item) {
@@ -5244,13 +5600,12 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
-    this.emptyStateText =
-      "Pi \u672A\u89E3\u6790\u51FA\u8BE5\u6A21\u578B\u7684\u601D\u8003\u7EA7\u522B\u3002";
-    this.setPlaceholder("\u9009\u62E9\u601D\u8003\u7EA7\u522B\u2026");
+    this.emptyStateText = "Pi 未解析出该模型的思考级别。";
+    this.setPlaceholder("选择思考级别…");
     this.setInstructions([
-      { command: "\u2191\u2193", purpose: "\u5BFC\u822A" },
-      { command: "\u21B5", purpose: "\u9009\u62E9" },
-      { command: "esc", purpose: "\u5173\u95ED" }
+      { command: "↑↓", purpose: "导航" },
+      { command: "↵", purpose: "选择" },
+      { command: "esc", purpose: "关闭" }
     ]);
   }
   getSuggestions(query) {
@@ -5274,7 +5629,7 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
     }
     el.setAttribute(
       "aria-label",
-      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${item.selected ? ", \u5DF2\u9009\u4E2D" : ""}`
+      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${item.selected ? ", 已选中" : ""}`
     );
   }
   onChooseSuggestion(item) {
@@ -5334,7 +5689,7 @@ function showDesktopRunNotification({
     return false;
   try {
     const notification = new activeNotificationApi("Pi Agent", {
-      body: String(body || "Agent response completed."),
+      body: String(body || STRINGS.view.notificationCompleted),
       silent: false
     });
     sentRunIds.add(runId);
@@ -5389,7 +5744,7 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
       this.getCustomInstructionsDefinition(),
       {
         type: "group",
-        heading: "\u9AD8\u7EA7",
+        heading: "高级",
         items: [this.getCustomModelDefinition()]
       },
       {
@@ -5399,12 +5754,12 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
       },
       {
         type: "group",
-        heading: "\u6280\u80FD",
+        heading: "技能",
         items: [this.getDefaultSkillsDefinition(), this.getAdditionalSkillsDefinition()]
       },
       {
         type: "group",
-        heading: "\u4E0A\u4E0B\u6587\u4E0E\u6587\u4EF6\u8BBF\u95EE",
+        heading: "上下文与文件访问",
         items: [this.getIgnoredFoldersDefinition()]
       }
     ];
@@ -5435,17 +5790,17 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getModelDefinition() {
     return {
-      name: "\u6A21\u578B",
-      desc: "\u6765\u81EA Pi \u5185\u7F6E\u53CA\u81EA\u5B9A\u4E49\u6A21\u578B\u6CE8\u518C\u8868\u7684\u300C\u63D0\u4F9B\u5546/\u6A21\u578B\u300D\u3002\u9009\u62E9\u9ED8\u8BA4\u5C06\u9075\u5FAA ~/.pi/agent/settings.json \u6216 .pi/settings.json\u3002",
+      name: "模型",
+      desc: "来自 Pi 内置及自定义模型注册表的「提供商/模型」。选择默认将遵循 ~/.pi/agent/settings.json 或 .pi/settings.json。",
       render: (setting) =>
         setting
           .addButton((button) =>
             button
               .setButtonText(this.getModelButtonLabel())
-              .setTooltip("\u9009\u62E9\u6A21\u578B")
+              .setTooltip("选择模型")
               .onClick(async () => {
                 const label = this.getModelButtonLabel();
-                button.setButtonText("\u52A0\u8F7D\u4E2D\u2026");
+                button.setButtonText("加载中…");
                 button.setDisabled(true);
                 try {
                   await this.plugin.ensureRuntimeModelState();
@@ -5467,10 +5822,10 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
           )
           .addButton((button) =>
             button
-              .setButtonText("\u5237\u65B0")
-              .setTooltip("\u4ECE Pi \u5237\u65B0\u6A21\u578B")
+              .setButtonText("刷新")
+              .setTooltip("从 Pi 刷新模型")
               .onClick(async () => {
-                button.setButtonText("\u5237\u65B0\u4E2D\u2026");
+                button.setButtonText("刷新中…");
                 button.setDisabled(true);
                 try {
                   await this.plugin.refreshModelCatalog(true);
@@ -5486,16 +5841,16 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getThinkingDefinition() {
     return {
-      name: "\u601D\u8003\u7EA7\u522B",
-      desc: "\u4EC5\u63A7\u5236\u63A8\u7406\u5F3A\u5EA6\u3002\u53EF\u9009\u503C\u7531 Pi \u8FD4\u56DE\u7684\u6240\u9009\u6A21\u578B\u51B3\u5B9A\u3002",
+      name: "思考级别",
+      desc: "仅控制推理强度。可选值由 Pi 返回的所选模型决定。",
       render: (setting) =>
         setting.addButton((button) =>
           button
             .setButtonText(this.getReasoningButtonLabel())
-            .setTooltip("\u9009\u62E9\u601D\u8003\u7EA7\u522B")
+            .setTooltip("选择思考级别")
             .onClick(async () => {
               const label = this.getReasoningButtonLabel();
-              button.setButtonText("\u52A0\u8F7D\u4E2D\u2026");
+              button.setButtonText("加载中…");
               button.setDisabled(true);
               try {
                 await this.plugin.ensureRuntimeModelState();
@@ -5516,8 +5871,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getToolModeDefinition() {
     return {
-      name: "\u5DE5\u5177\u6A21\u5F0F",
-      desc: "\u63A7\u5236\u542F\u7528\u54EA\u4E9B Pi CLI \u5DE5\u5177\u3002\u5DE5\u5177\u6A21\u5F0F\u5E76\u975E\u64CD\u4F5C\u7CFB\u7EDF\u7EA7\u6C99\u7BB1\u3002",
+      name: "工具模式",
+      desc: "控制启用哪些 Pi CLI 工具。工具模式并非操作系统级沙箱。",
       render: (setting) =>
         setting.addDropdown((dropdown) =>
           dropdown
@@ -5528,10 +5883,10 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
                 (value === "edit" || value === "full-agent" || value === "workspace-write") &&
                 !this.plugin.settings.acknowledgedToolRisk &&
                 !(await confirmWithModal(this.app, {
-                  title: "\u542F\u7528\u5199\u5165\u5DE5\u5177\uFF1F",
+                  title: "启用写入工具？",
                   message:
-                    "Pi \u5DE5\u5177\u6A21\u5F0F\u5E76\u975E\u64CD\u4F5C\u7CFB\u7EDF\u7EA7\u6C99\u7BB1\u3002\u7F16\u8F91\u548C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u53EF\u4EE5\u4FEE\u6539\u5E93\u6216\u9879\u76EE\u6587\u4EF6\uFF0C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u8FD8\u53EF\u4EE5\u6267\u884C shell \u547D\u4EE4\u3002",
-                  confirmText: "\u542F\u7528\u5DE5\u5177",
+                    "Pi 工具模式并非操作系统级沙箱。编辑和完整智能体模式可以修改库或项目文件，完整智能体模式还可以执行 shell 命令。",
+                  confirmText: "启用工具",
                   warning: true
                 }))
               ) {
@@ -5549,14 +5904,14 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getDesktopNotificationsDefinition() {
     return {
-      name: "\u684C\u9762\u5B8C\u6210\u901A\u77E5",
-      desc: "\u5F53 Obsidian \u5904\u4E8E\u975E\u7126\u70B9\u72B6\u6001\u4E14\u667A\u80FD\u4F53\u8FD0\u884C\u7ED3\u675F\u65F6\u53D1\u9001\u901A\u77E5\u3002",
+      name: "桌面完成通知",
+      desc: "当 Obsidian 处于非焦点状态且智能体运行结束时发送通知。",
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.desktopNotifications).onChange(async (value) => {
             if (value && !(await requestDesktopNotificationPermission())) {
               new import_obsidian6.Notice(
-                "\u684C\u9762\u901A\u77E5\u4E0D\u53EF\u7528\u6216\u672A\u83B7\u6388\u6743\u3002\u4F60\u53EF\u4EE5\u5728\u64CD\u4F5C\u7CFB\u7EDF\u7684\u901A\u77E5\u8BBE\u7F6E\u4E2D\u542F\u7528\u5B83\u4EEC\u3002"
+                "桌面通知不可用或未获授权。你可以在操作系统的通知设置中启用它们。"
               );
             }
             this.plugin.settings.desktopNotifications = value;
@@ -5567,14 +5922,12 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getCustomInstructionsDefinition() {
     return {
-      name: "\u81EA\u5B9A\u4E49\u6307\u4EE4",
-      desc: "\u6DFB\u52A0\u5230\u6BCF\u6B21 Pi \u8FD0\u884C\u4E2D\u7684\u3001\u9488\u5BF9\u5F53\u524D\u5E93\u7684\u6307\u4EE4\u3002",
+      name: "自定义指令",
+      desc: "添加到每次 Pi 运行中的、针对当前库的指令。",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
-            .setPlaceholder(
-              "\u4F18\u5148\u4F7F\u7528 PARA \u6587\u4EF6\u5939\u3002\u4FDD\u6301\u9879\u76EE\u7B14\u8BB0\u7B80\u6D01\u3002"
-            )
+            .setPlaceholder("优先使用 PARA 文件夹。保持项目笔记简洁。")
             .setValue(this.plugin.settings.customInstructions)
             .onChange(async (value) => {
               this.plugin.settings.customInstructions = value;
@@ -5585,14 +5938,14 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getCustomModelDefinition() {
     return {
-      name: "\u81EA\u5B9A\u4E49\u6A21\u578B\u6807\u8BC6",
-      desc: "\u5F53 Pi \u7684\u6A21\u578B\u76EE\u5F55\u4E2D\u6CA1\u6709\u6240\u9700\u7684\u300C\u63D0\u4F9B\u5546/\u6A21\u578B\u300D\u6807\u8BC6\u65F6\u4F7F\u7528\u7684\u5907\u7528\u9879\u3002\u81EA\u5B9A\u4E49\u6807\u8BC6\u53EA\u80FD\u5728\u6B64\u5904\u9009\u7528\u3002",
+      name: "自定义模型标识",
+      desc: "当 Pi 的模型目录中没有所需的「提供商/模型」标识时使用的备用项。自定义标识只能在此处选用。",
       render: (setting) => {
         let useCustomButton;
         setting
           .addText((text) =>
             text
-              .setPlaceholder("\u63D0\u4F9B\u5546/\u6A21\u578B")
+              .setPlaceholder("提供商/模型")
               .setValue(this.plugin.settings.customModel)
               .onChange(async (value) => {
                 this.plugin.settings.customModel = value.trim();
@@ -5604,9 +5957,7 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
             useCustomButton = button;
             button
               .setButtonText(
-                this.plugin.settings.model === CUSTOM_MODEL_VALUE
-                  ? "\u4F7F\u7528\u4E2D"
-                  : "\u4F7F\u7528\u81EA\u5B9A\u4E49"
+                this.plugin.settings.model === CUSTOM_MODEL_VALUE ? "使用中" : "使用自定义"
               )
               .setDisabled(!this.plugin.settings.customModel)
               .onClick(async () => {
@@ -5621,8 +5972,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getPiExecutableDefinition() {
     return {
-      name: "Pi \u53EF\u6267\u884C\u6587\u4EF6\u8DEF\u5F84",
-      desc: "\u53EF\u9009\u7684 Pi CLI \u8DEF\u5F84\u3002\u7559\u7A7A\u5219\u81EA\u52A8\u68C0\u6D4B\u5E38\u89C1\u5B89\u88C5\u4F4D\u7F6E\u3002\u652F\u6301 ~ \u4EE5\u53CA\u8BF8\u5982 ${USER} \u7684\u73AF\u5883\u53D8\u91CF\u3002",
+      name: "Pi 可执行文件路径",
+      desc: "可选的 Pi CLI 路径。留空则自动检测常见安装位置。支持 ~ 以及诸如 ${USER} 的环境变量。",
       render: (setting) =>
         setting.addText((text) =>
           text
@@ -5637,11 +5988,11 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getPiInstallationDefinition() {
     return {
-      name: "\u68C0\u67E5 Pi \u5B89\u88C5",
-      desc: "\u9A8C\u8BC1 Obsidian \u80FD\u5426\u5728\u5F53\u524D\u73AF\u5883\u4E2D\u8FD0\u884C Pi CLI\u3002",
+      name: "检查 Pi 安装",
+      desc: "验证 Obsidian 能否在当前环境中运行 Pi CLI。",
       render: (setting) =>
         setting.addButton((button) =>
-          button.setButtonText("\u68C0\u67E5").onClick(() => {
+          button.setButtonText("检查").onClick(() => {
             void this.plugin.checkPiInstallation(true);
           })
         )
@@ -5649,8 +6000,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getDefaultSkillsDefinition() {
     return {
-      name: "\u5305\u542B Pi \u9ED8\u8BA4\u6280\u80FD",
-      desc: "\u52A0\u8F7D Pi \u4ECE\u5168\u5C40\u53CA\u5E93\u6216\u9879\u76EE\u6280\u80FD\u4F4D\u7F6E\u53D1\u73B0\u7684\u6280\u80FD\u3002\u5173\u95ED\u540E\u4EC5\u4F7F\u7528\u4E0B\u65B9\u7684\u9644\u52A0\u6280\u80FD\u6587\u4EF6\u5939\u3002",
+      name: "包含 Pi 默认技能",
+      desc: "加载 Pi 从全局及库或项目技能位置发现的技能。关闭后仅使用下方的附加技能文件夹。",
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle
@@ -5664,8 +6015,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getAdditionalSkillsDefinition() {
     return {
-      name: "\u9644\u52A0\u6280\u80FD\u6587\u4EF6\u5939",
-      desc: "\u6BCF\u884C\u4E00\u4E2A\u53D7\u4FE1\u4EFB\u7684\u6280\u80FD\u6587\u4EF6\u6216\u6587\u4EF6\u5939\uFF0C\u652F\u6301\u7EDD\u5BF9\u8DEF\u5F84\u548C\u5E93\u76F8\u5BF9\u8DEF\u5F84\u3002",
+      name: "附加技能文件夹",
+      desc: "每行一个受信任的技能文件或文件夹，支持绝对路径和库相对路径。",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -5685,8 +6036,8 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getIgnoredFoldersDefinition() {
     return {
-      name: "\u5FFD\u7565\u7684\u6587\u4EF6\u5939/\u76EE\u5F55",
-      desc: "\u4EE5\u9017\u53F7\u5206\u9694\u7684\u6587\u4EF6\u5939\u524D\u7F00\uFF1BPi \u5728\u9884\u9644\u52A0\u4E0A\u4E0B\u6587\u548C\u68C0\u7D22\u65F6\u4F1A\u5FFD\u7565\u8FD9\u4E9B\u76EE\u5F55\u3002",
+      name: "忽略的文件夹/目录",
+      desc: "以逗号分隔的文件夹前缀；Pi 在预附加上下文和检索时会忽略这些目录。",
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -5704,23 +6055,21 @@ var PiAgentSettingTab = class extends import_obsidian6.PluginSettingTab {
   }
   getModelButtonLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
-      return this.plugin.settings.customModel || "\u81EA\u5B9A\u4E49\u6A21\u578B";
+      return this.plugin.settings.customModel || "自定义模型";
     }
     const selected = getSelectedModelInfo(this.plugin.settings);
     if (selected) return selected.displayName;
     const effective = this.plugin.settings.availableModels.find(
       (model) => model.slug === this.plugin.settings.effectiveModel
     );
-    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi \u9ED8\u8BA4";
+    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi 默认";
   }
   getReasoningButtonLabel() {
     const options = this.getReasoningOptions();
     const value = this.getReasoningDropdownValue();
     if (value) return options[value] || value;
     const resolved = getResolvedReasoning(this.plugin.settings);
-    return resolved === "pi-default"
-      ? "\u52A0\u8F7D\u601D\u8003\u7EA7\u522B\u2026"
-      : options[""] || resolved;
+    return resolved === "pi-default" ? "加载思考级别…" : options[""] || resolved;
   }
   getReasoningOptions() {
     return getReasoningOptions(this.plugin.settings);
@@ -5856,20 +6205,20 @@ var ApprovalModal = class extends import_obsidian7.Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("pi-agent-approval");
-    new import_obsidian7.Setting(contentEl).setName("Approve vault change").setHeading();
+    new import_obsidian7.Setting(contentEl).setName(STRINGS.modals.approveChange).setHeading();
     contentEl.createEl("p", { text: `${this.change.path} - ${this.change.reason}` });
     const previewEl = contentEl.createEl("div", { cls: "pi-agent-change-preview" });
-    previewEl.createEl("h3", { text: "Before" });
-    previewEl.createEl("pre", { text: this.change.before || "(new file)" });
-    previewEl.createEl("h3", { text: "After" });
+    previewEl.createEl("h3", { text: STRINGS.modals.before });
+    previewEl.createEl("pre", { text: this.change.before || STRINGS.modals.newFile });
+    previewEl.createEl("h3", { text: STRINGS.modals.after });
     previewEl.createEl("pre", { text: this.change.after });
     const actionsEl = contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    actionsEl.createEl("button", { text: "Reject" }).addEventListener("click", () => {
+    actionsEl.createEl("button", { text: STRINGS.common.reject }).addEventListener("click", () => {
       this.finish();
       this.close();
     });
     actionsEl
-      .createEl("button", { text: "Apply change", cls: "mod-cta" })
+      .createEl("button", { text: STRINGS.modals.applyChange, cls: "mod-cta" })
       .addEventListener("click", async () => {
         try {
           await this.applyChange();
@@ -5889,7 +6238,7 @@ var ApprovalModal = class extends import_obsidian7.Modal {
     if (file instanceof import_obsidian7.TFile) {
       await this.app.vault.process(file, (content) => {
         if (this.change.before !== void 0 && content !== this.change.before) {
-          throw new Error("File changed since Pi prepared this change.");
+          throw new Error(STRINGS.modals.fileChanged);
         }
         return this.change.frontmatterPatch
           ? previewFrontmatterPatch(content, this.change.frontmatterPatch)
@@ -5919,15 +6268,13 @@ var PiSetupModal = class extends import_obsidian8.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    new import_obsidian8.Setting(contentEl).setName("Set up Pi CLI").setHeading();
+    new import_obsidian8.Setting(contentEl).setName(STRINGS.modals.setupHeading).setHeading();
     contentEl.createEl("p", {
-      text: this.health?.message ?? "Pi Agent needs the Pi CLI before it can run prompts."
+      text: this.health?.message ?? STRINGS.modals.setupMissingCli
     });
     const needsNode = this.health?.kind === "node-missing";
     contentEl.createEl("p", {
-      text: needsNode
-        ? "Install Node.js or make your Node version manager available to GUI apps, then fully restart Obsidian. After that, run pi --version in a terminal to confirm Pi still works."
-        : "Install Pi in a terminal, authenticate it if needed, then restart Obsidian so it can pick up your updated PATH."
+      text: needsNode ? STRINGS.modals.setupNodeHint : STRINGS.modals.setupPathHint
     });
     const commandText = needsNode
       ? "node --version\npi --version"
@@ -5935,23 +6282,25 @@ var PiSetupModal = class extends import_obsidian8.Modal {
 pi --version`;
     contentEl.createEl("pre", { text: commandText });
     contentEl.createEl("p", {
-      text: "Start in chat or review mode. Only enable edit or full agent in vaults you are comfortable letting Pi modify."
+      text: STRINGS.modals.setupIntro
     });
     const actionsEl = contentEl.createDiv({ cls: "pi-agent-modal-actions" });
     actionsEl
-      .createEl("button", { text: needsNode ? "Copy diagnostic commands" : "Copy install command" })
+      .createEl("button", {
+        text: needsNode ? STRINGS.modals.copyDiagnostics : STRINGS.modals.copyInstall
+      })
       .addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(needsNode ? commandText : INSTALL_COMMAND);
           new import_obsidian8.Notice(
-            needsNode ? "Copied diagnostic commands." : "Copied Pi install command."
+            needsNode ? STRINGS.modals.copiedDiagnostics : STRINGS.modals.copiedInstall
           );
         } catch (error) {
           new import_obsidian8.Notice(error instanceof Error ? error.message : String(error));
         }
       });
     actionsEl
-      .createEl("button", { text: "Do not show again" })
+      .createEl("button", { text: STRINGS.modals.doNotShowAgain })
       .addEventListener("click", async () => {
         this.plugin.settings.dismissedPiSetup = true;
         try {
@@ -5962,7 +6311,7 @@ pi --version`;
         this.close();
       });
     actionsEl
-      .createEl("button", { text: "Close", cls: "mod-cta" })
+      .createEl("button", { text: STRINGS.common.close, cls: "mod-cta" })
       .addEventListener("click", () => this.close());
   }
   onClose() {
@@ -5990,18 +6339,18 @@ var ExtensionUiModal = class extends import_obsidian9.Modal {
     }
     this.request.signal?.addEventListener("abort", this.abortHandler, { once: true });
     new import_obsidian9.Setting(this.contentEl)
-      .setName(this.request.title || "Pi extension")
+      .setName(this.request.title || STRINGS.modals.extensionFallback)
       .setHeading();
     if (this.request.method === "confirm") {
       if (this.request.message) this.contentEl.createEl("p", { text: this.request.message });
-      this.renderActions(() => this.finish(true), "Confirm");
+      this.renderActions(() => this.finish(true), STRINGS.modals.confirm);
       return;
     }
     if (this.request.method === "select") {
       const select = this.contentEl.createEl("select", { cls: "dropdown" });
       for (const option of this.request.options ?? [])
         select.createEl("option", { text: String(option), attr: { value: String(option) } });
-      this.renderActions(() => this.finish(select.value), "Select");
+      this.renderActions(() => this.finish(select.value), STRINGS.modals.select);
       select.focus();
       return;
     }
@@ -6029,7 +6378,9 @@ var ExtensionUiModal = class extends import_obsidian9.Modal {
   }
   renderActions(onSubmit, submitText) {
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    actions.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.finish());
+    actions
+      .createEl("button", { text: STRINGS.common.cancel })
+      .addEventListener("click", () => this.finish());
     actions
       .createEl("button", { text: submitText, cls: "mod-cta" })
       .addEventListener("click", onSubmit);
@@ -6065,7 +6416,7 @@ var MessageActions = class {
     if (message.role === "user") {
       menu.addItem((item) =>
         item
-          .setTitle("Edit and resend")
+          .setTitle(STRINGS.messages.editAndResend)
           .setIcon("pencil")
           .onClick(() => {
             const input = this.callbacks.getInput();
@@ -6077,7 +6428,7 @@ var MessageActions = class {
       );
       menu.addItem((item) =>
         item
-          .setTitle("Search vault for this")
+          .setTitle(STRINGS.messages.searchVault)
           .setIcon("search")
           .onClick(() =>
             this.callbacks.runPrompt(`Search the vault for notes related to:
@@ -6088,13 +6439,13 @@ ${message.content}`)
     } else {
       menu.addItem((item) =>
         item
-          .setTitle("Copy response")
+          .setTitle(STRINGS.messages.copyResponse)
           .setIcon("copy")
           .onClick(() => this.copyResponse(message.content))
       );
       menu.addItem((item) =>
         item
-          .setTitle("Insert into current note")
+          .setTitle(STRINGS.messages.insertIntoNote)
           .setIcon("file-plus")
           .onClick(() =>
             this.runSafely(() => this.callbacks.insertIntoCurrentNote(message.content))
@@ -6102,7 +6453,7 @@ ${message.content}`)
       );
       menu.addItem((item) =>
         item
-          .setTitle("Create note from response")
+          .setTitle(STRINGS.messages.createNote)
           .setIcon("file-text")
           .onClick(() =>
             this.runSafely(() => this.callbacks.createNoteFromResponse(message.content))
@@ -6110,7 +6461,7 @@ ${message.content}`)
       );
       menu.addItem((item) =>
         item
-          .setTitle("Open cited notes")
+          .setTitle(STRINGS.messages.openCitedNotes)
           .setIcon("links-coming-in")
           .setDisabled(this.callbacks.extractVaultLinks(message.content).length === 0)
           .onClick(() => this.runSafely(() => this.callbacks.openCitedNotes(message.content)))
@@ -6118,7 +6469,7 @@ ${message.content}`)
       menu.addSeparator();
       menu.addItem((item) =>
         item
-          .setTitle("Regenerate")
+          .setTitle(STRINGS.messages.regenerate)
           .setIcon("refresh-cw")
           .setDisabled(!this.callbacks.getPreviousUserPrompt(messageIndex))
           .onClick(() => {
@@ -6132,7 +6483,7 @@ ${message.content}`)
   async copyResponse(content) {
     try {
       await navigator.clipboard.writeText(content);
-      new import_obsidian10.Notice("Copied response.");
+      new import_obsidian10.Notice(STRINGS.messages.copied);
     } catch (error) {
       new import_obsidian10.Notice(error instanceof Error ? error.message : String(error));
     }
@@ -6156,12 +6507,12 @@ var NoteActions = class {
   }
   async copyText(text) {
     await navigator.clipboard.writeText(text);
-    new import_obsidian11.Notice("Copied to clipboard.");
+    new import_obsidian11.Notice(STRINGS.common.copiedToClipboard);
   }
   insertIntoCurrentNote(text) {
     const editor = this.plugin.app.workspace.activeEditor?.editor;
     if (!editor) {
-      new import_obsidian11.Notice("Open a note first.");
+      new import_obsidian11.Notice(STRINGS.messages.openNoteFirst);
       return;
     }
     editor.replaceSelection(text);
@@ -6176,7 +6527,7 @@ var NoteActions = class {
   async openCitedNotes(text) {
     const links = this.extractVaultLinks(text);
     if (links.length === 0) {
-      new import_obsidian11.Notice("No vault links found.");
+      new import_obsidian11.Notice(STRINGS.messages.noVaultLinks);
       return;
     }
     for (const link of links.slice(0, 5)) await this.callbacks.openVaultLink(link);
@@ -6212,10 +6563,14 @@ var NoteActions = class {
   getResponseTitle(response) {
     const heading = response.match(/^#\s+(.+)$/m)?.[1];
     return (
-      (heading ?? response.split(/\r?\n/).find((line) => line.trim()) ?? "Agent response")
+      (
+        heading ??
+        response.split(/\r?\n/).find((line) => line.trim()) ??
+        STRINGS.messages.responseTitle
+      )
         .replace(/[\\/:*?"<>|#[\]]/g, "")
         .trim()
-        .slice(0, 80) || "Agent response"
+        .slice(0, 80) || STRINGS.messages.responseTitle
     );
   }
   async ensureFolder(folder) {
@@ -6384,11 +6739,7 @@ function enqueuePrompt(
   this.renderPromptQueue();
   this.syncCurrentRunFlags();
   this.setRunningState(this.running);
-  new f.Notice(
-    this.promptQueue.length === 1
-      ? "Message queued. It will send after the current run finishes."
-      : `${this.promptQueue.length} messages queued.`
-  );
+  new f.Notice(STRINGS.queue.queuedNotice(this.promptQueue.length));
 }
 function runNextQueuedPrompt() {
   if (this.canceling || this.plugin.isLocalPromptQueuePaused() || this.steeringPromptIds.size > 0)
@@ -6443,14 +6794,14 @@ async function steerQueuedPrompt(id) {
   this.renderPromptQueue();
   try {
     const run = this.activeRuns.get(taken.item.threadId);
-    if (!run) throw new Error("This run already settled; the message will run normally.");
+    if (!run) throw new Error(STRINGS.queue.settledNotice);
     const delivery = await this.plugin.enrichPromptDelivery(taken.item, {
       mode: "steer",
       threadId: taken.item.threadId
     });
     if (delivery.images?.length > 0) await this.plugin.ensureModelCatalogLoaded();
     if (delivery.images?.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo()))
-      throw new Error("The selected Pi model does not support image input.");
+      throw new Error(STRINGS.view.modelNoImage);
     const formattedPrompt = delivery.promptContext
       ? (this.plugin.contextBuilder?.formatPrompt(delivery.prompt, delivery.promptContext) ??
         delivery.prompt)
@@ -6459,7 +6810,7 @@ async function steerQueuedPrompt(id) {
     await run.runner.steer(steerPrompt, delivery.images);
     if (this.activeRuns.get(taken.item.threadId) === run)
       this.plugin.beginAnnotationProcessing(taken.item.threadId, taken.item.annotations);
-    new f.Notice("Steering message sent to Pi.");
+    new f.Notice(STRINGS.queue.steeringSent);
   } catch (error) {
     this.promptQueue = restoreLocalPrompt(this.promptQueue, taken.item, taken.index);
     this.plugin.replaceLocalPromptQueue(this.promptQueue);
@@ -6479,22 +6830,22 @@ function renderPromptQueue() {
   if (this.promptQueue.length > 0) {
     const heading = root.createDiv({ cls: "pi-agent-prompt-queue-heading" });
     heading.createSpan({
-      text: `${this.promptQueue.length} local follow-up${this.promptQueue.length === 1 ? "" : "s"}`
+      text: STRINGS.queue.followUpCount(this.promptQueue.length)
     });
     heading.createSpan({
       cls: "pi-agent-prompt-queue-hint",
       text: this.plugin.isLocalPromptQueuePaused()
-        ? "Saved from the previous plugin session. Review before sending."
-        : "Runs in order after settlement."
+        ? STRINGS.queue.savedFromPreviousSession
+        : STRINGS.queue.runsAfterSettlement
     });
     if (this.plugin.isLocalPromptQueuePaused()) {
       const controls = root.createDiv({ cls: "pi-agent-prompt-queue-actions" });
-      addTextAction(controls, "Resume saved follow-ups", "Resume", () => {
+      addTextAction(controls, STRINGS.queue.resumeSaved, STRINGS.queue.resume, () => {
         this.plugin.resumeLocalPromptQueue();
         this.renderPromptQueue();
         this.runNextQueuedPrompt();
       });
-      addTextAction(controls, "Discard all saved follow-ups", "Discard", () => {
+      addTextAction(controls, STRINGS.queue.discardSaved, STRINGS.queue.discard, () => {
         for (const item of this.promptQueue)
           this.plugin.restoreConsumedAnnotations(item.annotations);
         this.promptQueue = [];
@@ -6507,7 +6858,7 @@ function renderPromptQueue() {
   }
   for (const item of this.promptQueue) {
     const row = root.createDiv({ cls: "pi-agent-prompt-queue-item" });
-    row.setAttr("aria-label", `Queued follow-up: ${item.prompt || attachmentSummary(item)}`);
+    row.setAttr("aria-label", STRINGS.queue.queuedFollowUp(item.prompt || attachmentSummary(item)));
     const content = row.createDiv({ cls: "pi-agent-prompt-queue-content" });
     content.createDiv({
       cls: "pi-agent-prompt-queue-text",
@@ -6518,7 +6869,7 @@ function renderPromptQueue() {
     addAction(
       actions,
       "corner-up-right",
-      "Steer now",
+      STRINGS.queue.steerNow,
       () => this.steerQueuedPrompt(item.id),
       item.state !== "pending"
     );
@@ -6526,21 +6877,21 @@ function renderPromptQueue() {
       addAction(
         actions,
         "pencil",
-        "Edit queued message",
+        STRINGS.queue.editQueued,
         () => this.retrieveQueuedPrompt(item.id),
         item.state !== "pending"
       );
     addAction(
       actions,
       "x",
-      "Remove queued message",
+      STRINGS.queue.removeQueued,
       () => this.removeQueuedPrompt(item.id),
       item.state !== "pending"
     );
   }
   if (this.nativePiQueue?.steering?.length || this.nativePiQueue?.followUp?.length) {
     const native = root.createDiv({ cls: "pi-agent-native-queue", attr: { role: "status" } });
-    native.createDiv({ cls: "pi-agent-prompt-queue-heading", text: "Already handed to Pi" });
+    native.createDiv({ cls: "pi-agent-prompt-queue-heading", text: STRINGS.queue.handedToPi });
     const handedToPi = [
       ...(this.nativePiQueue.steering || []),
       ...(this.nativePiQueue.followUp || [])
@@ -6573,25 +6924,35 @@ function renderQueueAttachments(parent, images = [], attachments = []) {
     const item = previews.createDiv({ cls: "pi-agent-queue-attachment" });
     item.createEl("img", {
       cls: "pi-agent-queue-image-preview",
-      attr: { src: imagePreviewUrl(image), alt: image.fileName || "Queued image" }
+      attr: { src: imagePreviewUrl(image), alt: image.fileName || STRINGS.queue.queuedImage }
     });
-    item.createSpan({ text: `${image.fileName} \xB7 ${formatBytes(image.size)} \xB7 image` });
+    item.createSpan({
+      text: STRINGS.queue.imageSummary(
+        image.fileName || STRINGS.queue.queuedImage,
+        formatBytes(image.size)
+      )
+    });
   }
   for (const attachment of attachments) {
     const item = previews.createDiv({ cls: "pi-agent-queue-attachment" });
     const icon = item.createSpan({ cls: "pi-agent-attachment-icon" });
     f.setIcon(icon, "file-text");
     item.createSpan({
-      text: `${attachment.fileName} \xB7 ${attachment.mimeType} \xB7 ${formatBytes(attachment.originalSize)}${attachment.truncated ? " \xB7 truncated" : ""}`
+      text: STRINGS.queue.attachmentSummary(
+        attachment.fileName,
+        attachment.mimeType,
+        formatBytes(attachment.originalSize),
+        attachment.truncated
+      )
     });
   }
 }
 function attachmentSummary(item) {
   const count = (item.images?.length || 0) + (item.attachments?.length || 0);
-  return `${count} attached file${count === 1 ? "" : "s"}`;
+  return STRINGS.queue.attachmentCount(count);
 }
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return "unknown size";
+  if (!Number.isFinite(bytes)) return STRINGS.queue.unknownSize;
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`;
 }
 
@@ -6629,17 +6990,17 @@ var DeleteThreadModal = class extends import_obsidian12.Modal {
   }
   onOpen() {
     this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "Delete chat?" });
+    this.contentEl.createEl("h2", { text: STRINGS.modals.deleteChatTitle });
     this.contentEl.createEl("p", {
       text: this.thread.piSessionId
-        ? `Choose whether to keep or delete the local Pi session for \u201C${this.thread.title}\u201D.`
-        : `Delete \u201C${this.thread.title}\u201D from plugin history?`
+        ? STRINGS.modals.deleteChatOrSessionQuestion(this.thread.title)
+        : STRINGS.modals.deleteChatQuestion(this.thread.title)
     });
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
     const labels = {
-      cancel: "Cancel",
-      chat: "Delete chat only",
-      both: "Delete chat and local Pi session"
+      cancel: STRINGS.common.cancel,
+      chat: STRINGS.modals.deleteChatOnly,
+      both: STRINGS.modals.deleteChatAndSession
     };
     for (const choice of getThreadDeletionChoices(this.thread))
       this.addButton(actions, labels[choice], choice);
@@ -6667,12 +7028,12 @@ function getBulkThreadDeletionChoices(plan) {
   return [
     {
       id: "except-favorites",
-      label: `Delete all except favorites (${plan.exceptFavorites.deleteCount})`,
+      label: STRINGS.modals.deleteAllExceptFavorites(plan.exceptFavorites.deleteCount),
       disabled: plan.exceptFavorites.deleteCount === 0
     },
     {
       id: "all",
-      label: `Delete all chats (${plan.all.deleteCount})`,
+      label: STRINGS.modals.deleteAllChats(plan.all.deleteCount),
       disabled: plan.all.deleteCount === 0
     }
   ];
@@ -6686,22 +7047,22 @@ var DeleteThreadsModal = class extends import_obsidian13.Modal {
   }
   onOpen() {
     this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "Delete chats?" });
+    this.contentEl.createEl("h2", { text: STRINGS.modals.deleteChatsTitle });
     this.contentEl.createEl("p", {
-      text: "Choose which chat history to delete. Local Pi session files will be kept."
+      text: STRINGS.modals.deleteChatsDescription
     });
     if (this.plan.favoriteCount > 0) {
       this.contentEl.createEl("p", {
-        text: `${this.plan.favoriteCount} favorite chat${this.plan.favoriteCount === 1 ? " is" : "s are"} protected by the first option.`
+        text: STRINGS.modals.favoriteProtected(this.plan.favoriteCount)
       });
     }
     if (this.plan.all.skippedCount > 0) {
       this.contentEl.createEl("p", {
-        text: `${this.plan.all.skippedCount} active chat${this.plan.all.skippedCount === 1 ? " cannot" : "s cannot"} be deleted until the agent run finishes.`
+        text: STRINGS.modals.activeRunBlocked(this.plan.all.skippedCount)
       });
     }
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    this.addButton(actions, "Cancel", "cancel");
+    this.addButton(actions, STRINGS.common.cancel, "cancel");
     for (const choice of getBulkThreadDeletionChoices(this.plan))
       this.addButton(actions, choice.label, choice.id, choice.disabled);
   }
@@ -6747,13 +7108,10 @@ function planBulkThreadDeletion(threads, runningThreadIds = []) {
   };
 }
 function formatBulkDeleteResult({ deletedCount, skippedCount, createdEmptyChat }) {
-  const deleted = `${deletedCount} chat${deletedCount === 1 ? "" : "s"} deleted`;
-  const skipped =
-    skippedCount > 0
-      ? `; ${skippedCount} active chat${skippedCount === 1 ? " was" : "s were"} skipped`
-      : "";
-  const replacement = createdEmptyChat ? "; a new empty chat was created" : "";
-  return `${deleted}${skipped}${replacement}. Local Pi sessions were kept.`;
+  const parts = [STRINGS.threads.bulkDeleted(deletedCount)];
+  if (skippedCount > 0) parts.push(STRINGS.threads.bulkSkipped(skippedCount));
+  if (createdEmptyChat) parts.push(STRINGS.threads.bulkCreatedEmpty);
+  return `${parts.join("；")}。${STRINGS.threads.bulkSessionsKept}`;
 }
 
 // src/ui/thread-list-view.mjs
@@ -6781,25 +7139,25 @@ function renderThreadList() {
   let header = root.createDiv({ cls: "pi-agent-thread-list-header" }),
     backButton = header.createEl("button", {
       cls: "clickable-icon pi-agent-header-action",
-      attr: { "aria-label": "Back to chat", title: "Back to chat" }
+      attr: { "aria-label": STRINGS.threads.backToChat, title: STRINGS.threads.backToChat }
     });
   (0, f2.setIcon)(backButton, "arrow-left");
   backButton.addEventListener("click", () => this.renderChatView());
   let heading = header.createDiv({ cls: "pi-agent-thread-list-heading" });
-  heading.createDiv({ cls: "pi-agent-thread-list-title-heading", text: "Threads" });
+  heading.createDiv({ cls: "pi-agent-thread-list-title-heading", text: STRINGS.threads.heading });
   heading.createDiv({
     cls: "pi-agent-thread-list-subtitle",
-    text: `${threads.length} chat${threads.length === 1 ? "" : "s"}`
+    text: STRINGS.threads.count(threads.length)
   });
   let deleteChatsButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
-    attr: { "aria-label": "Delete chats", title: "Delete chats" }
+    attr: { "aria-label": STRINGS.threads.deleteChats, title: STRINGS.threads.deleteChats }
   });
   (0, f2.setIcon)(deleteChatsButton, "trash-2");
   deleteChatsButton.addEventListener("click", () => this.deleteChats());
   let newChatButton = header.createEl("button", {
     cls: "clickable-icon pi-agent-header-action",
-    attr: { "aria-label": "New chat", title: "New chat" }
+    attr: { "aria-label": STRINGS.threads.newChat, title: STRINGS.threads.newChat }
   });
   (0, f2.setIcon)(newChatButton, "plus");
   newChatButton.addEventListener("click", () => {
@@ -6808,7 +7166,7 @@ function renderThreadList() {
   });
   let listEl = root.createDiv({ cls: "pi-agent-thread-list" });
   threads.length === 0
-    ? listEl.createDiv({ cls: "pi-agent-empty", text: "No chat threads." })
+    ? listEl.createDiv({ cls: "pi-agent-empty", text: STRINGS.threads.empty })
     : threads.forEach((thread) =>
         this.renderThreadListRow(listEl, thread, thread.id === currentThread.id)
       );
@@ -6820,12 +7178,12 @@ function renderThreadListRow(listEl, thread, isCurrent) {
     info = row.createDiv({ cls: "pi-agent-thread-list-info" }),
     titleEl = info.createDiv({
       cls: "pi-agent-thread-list-title",
-      attr: { title: "Open chat" }
+      attr: { title: STRINGS.threads.openChat }
     });
   if (this.isThreadRunning(thread.id)) {
     let runningEl = titleEl.createSpan({
       cls: "pi-agent-thread-list-running",
-      attr: { title: "Agent is running in this chat" }
+      attr: { title: STRINGS.threads.agentRunningInChat }
     });
     (0, f2.setIcon)(runningEl, "loader");
   }
@@ -6842,18 +7200,20 @@ function renderThreadListRow(listEl, thread, isCurrent) {
     favoriteButton = actions.createEl("button", {
       cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${thread.favorite ? " is-favorite" : ""}`,
       attr: {
-        "aria-label": thread.favorite ? "Remove favorite" : "Mark as favorite",
-        title: thread.favorite ? "Remove favorite" : "Mark as favorite",
+        "aria-label": thread.favorite
+          ? STRINGS.threads.removeFavorite
+          : STRINGS.threads.markFavorite,
+        title: thread.favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite,
         "aria-pressed": String(thread.favorite === true)
       }
     }),
     deleteButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action pi-agent-thread-delete",
-      attr: { "aria-label": "Delete chat", title: "Delete chat" }
+      attr: { "aria-label": STRINGS.threads.deleteChat, title: STRINGS.threads.deleteChat }
     }),
     moreButton = actions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-list-action",
-      attr: { "aria-label": "Thread actions", title: "Thread actions" }
+      attr: { "aria-label": STRINGS.threads.rowActions, title: STRINGS.threads.rowActions }
     });
   (0, f2.setIcon)(favoriteButton, "star");
   favoriteButton.addEventListener("click", (event) => {
@@ -6880,8 +7240,8 @@ async function deleteChats() {
   if (plan.all.deleteCount === 0) {
     new f2.Notice(
       plan.all.skippedCount > 0
-        ? "Wait for active agent runs to finish before deleting chats."
-        : "There are no chats to delete."
+        ? STRINGS.threads.deleteBlockedByActiveRuns
+        : STRINGS.threads.nothingToDelete
     );
     return;
   }
@@ -6905,7 +7265,7 @@ function showThreadRowMenu(event, thread, isCurrent, titleEl) {
   let menu = new f2.Menu();
   menu.addItem((item) =>
     item
-      .setTitle(isCurrent ? "Current chat" : "Open")
+      .setTitle(isCurrent ? STRINGS.threads.currentChat : STRINGS.threads.open)
       .setIcon(isCurrent ? "check" : "arrow-right")
       .setDisabled(isCurrent)
       .onClick(() => {
@@ -6915,20 +7275,20 @@ function showThreadRowMenu(event, thread, isCurrent, titleEl) {
   );
   menu.addItem((item) =>
     item
-      .setTitle(thread.favorite ? "Remove favorite" : "Mark as favorite")
+      .setTitle(thread.favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite)
       .setIcon("star")
       .onClick(() => this.toggleThreadFavorite(thread))
   );
   menu.addItem((item) =>
     item
-      .setTitle("Rename")
+      .setTitle(STRINGS.common.rename)
       .setIcon("pencil")
       .onClick(() => this.startThreadListRename(thread, titleEl))
   );
   if (thread.piSessionId) {
     menu.addItem((item) =>
       item
-        .setTitle(`${PI_BRAND_NAME} session info`)
+        .setTitle(STRINGS.threads.sessionInfo(PI_BRAND_NAME))
         .setIcon("info")
         .onClick(async () => {
           try {
@@ -6939,9 +7299,14 @@ function showThreadRowMenu(event, thread, isCurrent, titleEl) {
             const entryCount = countSessionEntries(tree?.tree ?? []);
             new f2.Notice(
               stats
-                ? `${stats.sessionFile}
-${stats.totalMessages} messages \xB7 ${entryCount} tree entries \xB7 ${stats.tokens?.total ?? 0} tokens \xB7 $${Number(stats.cost ?? 0).toFixed(4)}`
-                : "No Pi session information is available."
+                ? STRINGS.threads.sessionStats(
+                    stats.sessionFile,
+                    stats.totalMessages,
+                    entryCount,
+                    stats.tokens?.total ?? 0,
+                    Number(stats.cost ?? 0).toFixed(4)
+                  )
+                : STRINGS.threads.noSessionInfo
             );
           } catch (error) {
             new f2.Notice(error instanceof Error ? error.message : String(error));
@@ -6950,12 +7315,14 @@ ${stats.totalMessages} messages \xB7 ${entryCount} tree entries \xB7 ${stats.tok
     );
     menu.addItem((item) =>
       item
-        .setTitle(`Export ${PI_BRAND_NAME} session to HTML`)
+        .setTitle(STRINGS.threads.exportSession(PI_BRAND_NAME))
         .setIcon("download")
         .onClick(async () => {
           try {
             const result = await this.plugin.exportThreadSession(thread.id);
-            new f2.Notice(result?.path ? `Exported to ${result.path}` : "Session export failed.");
+            new f2.Notice(
+              result?.path ? STRINGS.threads.exportTo(result.path) : STRINGS.threads.exportFailed
+            );
           } catch (error) {
             new f2.Notice(error instanceof Error ? error.message : String(error));
           }
@@ -6965,7 +7332,7 @@ ${stats.totalMessages} messages \xB7 ${entryCount} tree entries \xB7 ${stats.tok
   menu.addSeparator();
   menu.addItem((item) =>
     item
-      .setTitle("Delete")
+      .setTitle(STRINGS.common.delete)
       .setIcon("trash-2")
       .onClick(() => this.deleteThreadFromList(thread))
   );
@@ -6975,7 +7342,7 @@ function startThreadListRename(thread, titleEl) {
   let input = document.createElement("input");
   input.addClass("pi-agent-thread-list-title-input");
   input.setAttr("type", "text");
-  input.setAttr("aria-label", "Chat title");
+  input.setAttr("aria-label", STRINGS.threads.chatTitle);
   input.value = thread.title;
   titleEl.replaceWith(input);
   let commit = (event) => {
@@ -7000,28 +7367,32 @@ function startThreadListRename(thread, titleEl) {
 function toggleThreadFavorite(thread) {
   this.plugin.toggleThreadFavorite(thread.id)
     ? this.renderThreadList()
-    : new f2.Notice("Chat thread was not found.");
+    : new f2.Notice(STRINGS.threads.threadNotFound);
 }
 async function deleteThreadFromList(thread) {
   if (this.isThreadRunning(thread.id)) {
-    new f2.Notice("Wait for the agent run to finish before deleting this chat.");
+    new f2.Notice(STRINGS.threads.activeRunDeleteBlocked);
     return;
   }
   const choice = await chooseThreadDeletion(this.plugin.app, thread);
   if (choice === "cancel") return;
   if (this.plugin.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
-    new f2.Notice(choice === "both" ? "Chat and local Pi session deleted." : "Chat deleted.");
+    new f2.Notice(
+      choice === "both" ? STRINGS.threads.deletedChatAndSession : STRINGS.threads.deletedChat
+    );
     this.renderThreadList();
   } else {
-    new f2.Notice("Chat or local Pi session could not be deleted.");
+    new f2.Notice(STRINGS.threads.deleteFailed);
   }
 }
 function formatThreadMeta(thread, isCurrent) {
   let messageCount = this.plugin.getThreadDisplayMessageCount
       ? this.plugin.getThreadDisplayMessageCount(thread)
       : thread.messages.length,
-    meta = `${messageCount} message${messageCount === 1 ? "" : "s"} \u2022 Updated ${this.formatThreadDate(thread.updatedAt)}`;
-  return isCurrent ? `Current \u2022 ${meta}` : meta;
+    meta = `${STRINGS.threads.messageCount(messageCount)} • ${STRINGS.threads.updatedAt(
+      this.formatThreadDate(thread.updatedAt)
+    )}`;
+  return isCurrent ? `${STRINGS.threads.currentPrefix} • ${meta}` : meta;
 }
 function countSessionEntries(nodes) {
   return nodes.reduce(
@@ -7034,7 +7405,7 @@ function formatThreadDate(value) {
   try {
     return new Date(value).toLocaleString();
   } catch {
-    return "unknown date";
+    return STRINGS.threads.unknownDate;
   }
 }
 
@@ -7076,7 +7447,8 @@ async function openVaultLink(value, newLeaf = false) {
         ? { kind: "internal", linkText: value.path, line: value.line }
         : { kind: "invalid" };
   if (target.kind !== "internal") {
-    if (target.kind === "invalid") new import_obsidian14.Notice(`Note not found: ${String(value)}`);
+    if (target.kind === "invalid")
+      new import_obsidian14.Notice(STRINGS.messages.noteNotFound(String(value)));
     return false;
   }
   try {
@@ -7089,7 +7461,7 @@ async function openVaultLink(value, newLeaf = false) {
     return true;
   } catch (error) {
     console.error("Pi Agent: failed to open vault link", error);
-    new import_obsidian14.Notice(`Note not found: ${this.formatVaultLinkTarget(target)}`);
+    new import_obsidian14.Notice(STRINGS.messages.noteNotFound(this.formatVaultLinkTarget(target)));
     return false;
   }
 }
@@ -7219,7 +7591,7 @@ function renderMessage(message, index) {
       this.completedThinkingExpansion.get(key) === true,
       (expanded) => this.completedThinkingExpansion.set(key, expanded),
       false,
-      "Thinking",
+      STRINGS.activity.thinking,
       (container, content) => this.renderPlainMessageContent(container, content)
     );
     answer = response.createDiv({ cls: "pi-agent-message-answer" });
@@ -7236,7 +7608,7 @@ function renderThinkingDisclosure(
   expanded,
   onToggle,
   live = false,
-  activityLabel = "Thinking",
+  activityLabel = STRINGS.activity.thinking,
   renderMarkdown,
   hasResponse = false
 ) {
@@ -7251,9 +7623,12 @@ function renderThinkingDisclosure(
   (0, f3.setIcon)(chevron, "chevron-right");
   const label = summary.createSpan({
     cls: "pi-agent-thinking-label",
-    text: String(activityLabel || "Thinking").toUpperCase(),
+    text: String(activityLabel || STRINGS.activity.thinking).toUpperCase(),
     attr: live
-      ? { role: "status", "aria-label": `${activityLabel || "Thinking"} in progress` }
+      ? {
+          role: "status",
+          "aria-label": STRINGS.activity.inProgress(activityLabel || STRINGS.activity.thinking)
+        }
       : void 0
   });
   const canRenderMarkdown = Boolean(thinking && renderMarkdown);
@@ -7308,7 +7683,7 @@ function renderPlainMessageContent(container, content) {
     this.getLinkSourcePath(),
     component
   ).catch((err) => {
-    console.error("Pi Agent: Markdown render error", err);
+    console.error(STRINGS.view.markdownRenderError, err);
     container.setText(content || "");
   });
 }
@@ -7333,7 +7708,7 @@ function renderStreamingAssistantMessage() {
     this.thinkingDisclosureExpanded,
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
-    this.activityText || "Responding",
+    this.activityText || STRINGS.messages.responding,
     (container, content) => this.renderPlainMessageContent(container, content),
     true
   );
@@ -7349,7 +7724,7 @@ function renderStreamingAnswer() {
   if (!this.streamingTextEl) return;
   if (!this.streamingTextEl.isConnected && this.streamingTextEl.isConnected !== void 0) return;
   this.streamingTextEl.setText(this.streamingAssistantContent || "");
-  this.streamingTextEl.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
+  this.streamingTextEl.createSpan({ cls: "pi-agent-typing-cursor", text: "▌" });
 }
 function renderStreamingThinking() {
   if (!this.liveThinkingTextEl?.isConnected) return;
@@ -7398,7 +7773,7 @@ function renderActivityMessage() {
     this.streamingThinkingContent ? this.thinkingDisclosureExpanded : false,
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
-    this.activityText || "Thinking",
+    this.activityText || STRINGS.activity.thinking,
     (container, content) => this.renderPlainMessageContent(container, content)
   );
   this.activityDetailsEl = rendered.details;
@@ -7415,15 +7790,15 @@ function renderRoleLabel(parent, role, message, index) {
     });
   if (role === "user") {
     (0, f3.setIcon)(iconEl, "user");
-    titleEl.createSpan({ text: "You" });
+    titleEl.createSpan({ text: STRINGS.messages.roleYou });
   } else {
     this.renderPiIcon(iconEl);
-    titleEl.createSpan({ text: "Agent" });
+    titleEl.createSpan({ text: STRINGS.messages.roleAgent });
   }
   if (message && index !== void 0) {
     let actionsButton = roleEl.createEl("button", {
       cls: "clickable-icon pi-agent-message-actions",
-      attr: { "aria-label": "Message actions" }
+      attr: { "aria-label": STRINGS.messages.messageActions }
     });
     (0, f3.setIcon)(actionsButton, "ellipsis");
     actionsButton.addEventListener("click", (event) => {
@@ -7481,9 +7856,12 @@ function formatToolStatus(toolName, toolArgs, phase = "running") {
   const skillName = getReadSkillName(name, toolArgs);
   if (skillName) {
     return {
-      label: truncateActivityText(`Skill \xB7 ${skillName}`),
+      label: truncateActivityText(STRINGS.activity.skill(skillName)),
       kind: "skill",
-      detail: phase === "preparing" ? "Loading skill instructions" : "Using skill instructions"
+      detail:
+        phase === "preparing"
+          ? STRINGS.activity.loadingSkillInstructions
+          : STRINGS.activity.usingSkillInstructions
     };
   }
   const kind = getToolKind(name);
@@ -7512,19 +7890,19 @@ function getThinkingDelta(event) {
 }
 function formatToolError(event) {
   if (event?.type !== "tool_end" || event.isError !== true) return "";
-  const name = String(event.toolName || event.message || "Tool");
+  const name = String(event.toolName || event.message || STRINGS.activity.tool);
   const detail = sanitizeActivityDetail(
     event.errorMessage ?? event.raw?.errorMessage ?? event.raw?.error ?? event.raw?.result?.error
   );
-  return truncateActivityText(detail ? `${name}: ${detail}` : `${name} failed`);
+  return truncateActivityText(STRINGS.activity.toolFailed(name, detail));
 }
 function formatRetryDetail(event) {
   if (!event || typeof event !== "object") return "";
   const attempt =
-    event.attempt && event.maxAttempts ? `attempt ${event.attempt}/${event.maxAttempts}` : "";
+    event.attempt && event.maxAttempts ? `第 ${event.attempt}/${event.maxAttempts} 次尝试` : "";
   return [attempt, event.errorMessage ? String(event.errorMessage).slice(0, 120) : ""]
     .filter(Boolean)
-    .join(" \u2014 ");
+    .join(" — ");
 }
 function getReadSkillName(toolName, toolArgs) {
   if (toolName !== "read") return "";
@@ -7538,35 +7916,35 @@ function getReadSkillName(toolName, toolArgs) {
 function getToolVerb(toolName, phase) {
   if (phase === "preparing") {
     return toolName === "bash"
-      ? "Preparing command"
+      ? STRINGS.activity.preparingCommand
       : toolName === "edit"
-        ? "Preparing edit"
+        ? STRINGS.activity.preparingEdit
         : toolName === "write"
-          ? "Preparing write"
+          ? STRINGS.activity.preparingWrite
           : toolName === "grep" || toolName === "find" || toolName === "ls"
-            ? "Preparing search"
+            ? STRINGS.activity.preparingSearch
             : toolName === "read"
-              ? "Preparing read"
-              : "Preparing action";
+              ? STRINGS.activity.preparingRead
+              : STRINGS.activity.preparingAction;
   }
   return toolName === "bash"
-    ? "Running"
+    ? STRINGS.activity.running
     : toolName === "edit"
-      ? "Editing"
+      ? STRINGS.activity.editing
       : toolName === "write"
-        ? "Writing"
+        ? STRINGS.activity.writing
         : toolName === "grep"
-          ? "Searching"
+          ? STRINGS.activity.searching
           : toolName === "find"
-            ? "Finding"
+            ? STRINGS.activity.finding
             : toolName === "ls"
-              ? "Listing"
+              ? STRINGS.activity.listing
               : toolName === "read"
-                ? "Reading"
-                : "Using";
+                ? STRINGS.activity.reading
+                : STRINGS.activity.using;
 }
 function formatToolTarget(toolName, toolArgs) {
-  if (toolName === "bash") return "command";
+  if (toolName === "bash") return STRINGS.activity.command;
   if (toolName === "grep") {
     const pattern = sanitizeActivityDetail(pickNestedString(toolArgs, ["pattern", "query"]));
     const path6 = formatPathForActivity(pickNestedString(toolArgs, ["path", "directory", "dir"]));
@@ -7600,7 +7978,7 @@ function sanitizeActivityDetail(value) {
 }
 function truncateActivityText(value) {
   const detail = sanitizeActivityDetail(value);
-  return detail.length > 120 ? `${detail.slice(0, 117)}\u2026` : detail;
+  return detail.length > 120 ? `${detail.slice(0, 117)}…` : detail;
 }
 function pickNestedString(value, keys, seen = /* @__PURE__ */ new Set()) {
   if (!value || typeof value !== "object" || seen.has(value)) return "";
@@ -7703,8 +8081,11 @@ function updateActivityDom() {
   const title = this.activityDetail || this.activityText;
   if (this.activityDetailsEl.getAttribute("title") !== title)
     this.activityDetailsEl.setAttr("title", title);
-  if (this.activityLabelEl.getAttribute("aria-label") !== `${this.activityText} in progress`)
-    this.activityLabelEl.setAttr("aria-label", `${this.activityText} in progress`);
+  if (
+    this.activityLabelEl.getAttribute("aria-label") !==
+    STRINGS.activity.inProgress(this.activityText)
+  )
+    this.activityLabelEl.setAttr("aria-label", STRINGS.activity.inProgress(this.activityText));
   if (this.activityLabelEl.textContent !== label) this.activityLabelEl.setText(label);
   return true;
 }
@@ -7739,7 +8120,7 @@ function handleRunEvent(event, threadId) {
   if (type === "context_ready") {
     const skillName = this.getCurrentThreadRun()?.skillName;
     this.setActivity(
-      skillName ? `Skill \xB7 ${skillName}` : "Starting Pi",
+      skillName ? STRINGS.activity.skill(skillName) : STRINGS.activity.startingPi,
       skillName ? "skill" : "context"
     );
     return;
@@ -7755,16 +8136,16 @@ function handleRunEvent(event, threadId) {
     this.currentRunContextUsage = void 0;
     this.syncRunContextUsage(threadId);
     this.renderToolBadges();
-    this.setActivity("Compacting context", "context", detail);
+    this.setActivity(STRINGS.activity.compactingContext, "context", detail);
     return;
   }
   if (type === "compaction_end") {
     if (event.raw && event.raw.errorMessage) {
-      this.setActivity("Compaction failed", "error", String(event.raw.errorMessage));
+      this.setActivity(STRINGS.activity.compactionFailed, "error", String(event.raw.errorMessage));
       return;
     }
     if (event.raw && event.raw.aborted) {
-      this.setActivity("Compaction skipped", "thinking");
+      this.setActivity(STRINGS.activity.compactionSkipped, "thinking");
       return;
     }
     let tokensBefore = event.raw && event.raw.result ? event.raw.result.tokensBefore : void 0;
@@ -7776,21 +8157,23 @@ function handleRunEvent(event, threadId) {
     this.syncRunContextUsage(threadId);
     this.renderToolBadges();
     this.setActivity(
-      event.raw && event.raw.willRetry ? "Compacted context, retrying" : "Finishing",
+      event.raw && event.raw.willRetry
+        ? STRINGS.activity.compactedRetrying
+        : STRINGS.activity.finishing,
       event.raw && event.raw.willRetry ? "context" : "finishing",
       tokensBefore ? `Before compaction: ${formatTokenCount(tokensBefore)} tokens` : ""
     );
     return;
   }
   if (type === "auto_retry_start") {
-    this.setActivity("Retrying", "finishing", formatRetryDetail(event.raw));
+    this.setActivity(STRINGS.activity.retrying, "finishing", formatRetryDetail(event.raw));
     return;
   }
   if (type === "extension_error" || type === "extension_ui_error") {
     this.setActivity(
-      "Extension failed",
+      STRINGS.activity.extensionFailed,
       "error",
-      String(event.raw?.error ?? event.raw?.message ?? "Pi extension error")
+      String(event.raw?.error ?? event.raw?.message ?? STRINGS.activity.extensionError)
     );
     return;
   }
@@ -7803,7 +8186,7 @@ function handleRunEvent(event, threadId) {
     type === "thinking_delta" ||
     type === "thinking_end"
   ) {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.streamingAssistantContent || this.setActivity(STRINGS.activity.thinking, "thinking");
     return;
   }
   if (type === "toolcall_start" || type === "toolcall_delta" || type === "toolcall_end") {
@@ -7826,17 +8209,17 @@ function handleRunEvent(event, threadId) {
     }
     this.streamingAssistantContent ||
       this.setActivity(
-        event.isError ? "Tool failed" : "Reviewing results",
+        event.isError ? STRINGS.activity.toolFailedLabel : STRINGS.activity.reviewingResults,
         event.isError ? "error" : "thinking"
       );
     return;
   }
   if (type === "text_start") {
-    this.setActivity("Responding", "answer");
+    this.setActivity(STRINGS.messages.responding, "answer");
     return;
   }
   if (type === "message_end" || type === "turn_end") {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.streamingAssistantContent || this.setActivity(STRINGS.activity.thinking, "thinking");
     return;
   }
   if (type === "agent_end") {
@@ -7867,7 +8250,7 @@ function untrackActiveTool(event, toolCalls) {
 }
 function formatActiveToolStatus() {
   let tools = [...this.activeToolCalls.values()];
-  if (tools.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };
+  if (tools.length === 0) return { label: STRINGS.activity.thinking, kind: "thinking", detail: "" };
   if (tools.length === 1) return formatToolStatus(tools[0].name, tools[0].args, "running");
   let statuses = tools.map((status) => formatToolStatus(status.name, status.args, "running"));
   return {
@@ -7879,7 +8262,7 @@ function formatActiveToolStatus() {
         : statuses.some((status) => status.kind === "search")
           ? "search"
           : "read",
-    detail: statuses.map((status) => status.label).join(" \u2022 ")
+    detail: statuses.map((status) => status.label).join(" • ")
   };
 }
 
@@ -7894,19 +8277,19 @@ function getCurrentRunMetadata(settings, runtimeState) {
       runtimeState?.thinkingLevel ||
       settings.reasoningEffort ||
       settings.effectiveReasoning ||
-      "Pi default",
+      STRINGS.picker.piDefault,
     toolMode: settings.sandboxMode,
     toolModeLabel: formatToolModeLabel(settings.sandboxMode)
   };
 }
 function formatToolModeLabel(toolMode) {
   return toolMode === "chat"
-    ? "\u5BF9\u8BDD"
+    ? "对话"
     : toolMode === "edit" || toolMode === "workspace-write"
-      ? "\u7F16\u8F91"
+      ? "编辑"
       : toolMode === "full-agent"
-        ? "\u5B8C\u6574\u667A\u80FD\u4F53"
-        : "\u5BA1\u9605";
+        ? "完整智能体"
+        : "审阅";
 }
 function getDisplayedModel(settings, runtimeState) {
   const runtimeSlug = runtimeState?.model
@@ -7918,9 +8301,9 @@ function getDisplayedModel(settings, runtimeState) {
     );
     return runtimeModel?.displayName || runtimeState.model.name || runtimeSlug;
   }
-  if (settings.model === CUSTOM_MODEL_VALUE) return settings.customModel || "Custom";
+  if (settings.model === CUSTOM_MODEL_VALUE) return settings.customModel || STRINGS.picker.custom;
   const model = settings.availableModels?.find((candidate) => candidate.slug === settings.model);
-  return model?.displayName || settings.model || "Pi default";
+  return model?.displayName || settings.model || STRINGS.picker.piDefault;
 }
 
 // src/ui/run-settings.mjs
@@ -7944,8 +8327,14 @@ var RunSettingsControls = class {
     const control = this.controls?.[name];
     if (!control || !control.buttonEl.isConnected) return;
     control.labelEl.setText(label);
-    control.buttonEl.setAttr("aria-label", `${name}: ${label}`);
-    control.buttonEl.setAttr("title", `${name}: ${label}`);
+    control.buttonEl.setAttr(
+      "aria-label",
+      STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label)
+    );
+    control.buttonEl.setAttr(
+      "title",
+      STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label)
+    );
     this.renderControlIcon(control.iconEl, icon, control);
   }
   populate(containerEl) {
@@ -7960,7 +8349,7 @@ var RunSettingsControls = class {
         const items = buildModelPickerItems(this.plugin.settings);
         if (items.length === 0) {
           menu.addItem((menuItem) =>
-            menuItem.setTitle("\u6CA1\u6709\u53EF\u7528\u7684\u6A21\u578B").setDisabled(true)
+            menuItem.setTitle(STRINGS.controls.noModels).setDisabled(true)
           );
         }
         for (const item of items) {
@@ -8043,10 +8432,10 @@ var RunSettingsControls = class {
       (value === "edit" || value === "full-agent" || value === "workspace-write") &&
       !this.plugin.settings.acknowledgedToolRisk &&
       !(await confirmWithModal(this.plugin.app, {
-        title: "\u542F\u7528\u5199\u5165\u5DE5\u5177\uFF1F",
+        title: "启用写入工具？",
         message:
-          "Pi \u5DE5\u5177\u6A21\u5F0F\u5E76\u975E\u64CD\u4F5C\u7CFB\u7EDF\u7EA7\u6C99\u7BB1\u3002\u7F16\u8F91\u548C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u53EF\u4EE5\u4FEE\u6539\u5E93\u6216\u9879\u76EE\u6587\u4EF6\uFF0C\u5B8C\u6574\u667A\u80FD\u4F53\u6A21\u5F0F\u8FD8\u53EF\u4EE5\u6267\u884C shell \u547D\u4EE4\u3002",
-        confirmText: "\u542F\u7528\u5DE5\u5177",
+          "Pi 工具模式并非操作系统级沙箱。编辑和完整智能体模式可以修改库或项目文件，完整智能体模式还可以执行 shell 命令。",
+        confirmText: "启用工具",
         warning: true
       }))
     ) {
@@ -8062,7 +8451,10 @@ var RunSettingsControls = class {
   addPickerSetting(containerEl, name, icon, label, onClick) {
     const buttonEl = containerEl.createEl("button", {
       cls: `clickable-icon pi-agent-run-setting pi-agent-run-setting-${name.toLowerCase()}`,
-      attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
+      attr: {
+        "aria-label": STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label),
+        title: STRINGS.controls.label(STRINGS.controls[name.toLowerCase()], label)
+      }
     });
     const iconEl = buttonEl.createSpan({ cls: "pi-agent-run-setting-icon" });
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
@@ -8090,14 +8482,14 @@ var RunSettingsControls = class {
   }
   getModelLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
-      return this.plugin.settings.customModel.trim() || "\u81EA\u5B9A\u4E49\u6A21\u578B";
+      return this.plugin.settings.customModel.trim() || "自定义模型";
     }
     const model = getSelectedModelInfo(this.plugin.settings);
     if (model) return model.displayName;
     const effective = this.plugin.settings.availableModels.find(
       (candidate) => candidate.slug === this.plugin.settings.effectiveModel
     );
-    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi \u9ED8\u8BA4";
+    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi 默认";
   }
   getModelProvider() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
@@ -8130,9 +8522,7 @@ var RunSettingsControls = class {
   }
   formatDefaultReasoningLabel() {
     const reasoning = getResolvedReasoning(this.plugin.settings);
-    return reasoning === "pi-default"
-      ? "\u52A0\u8F7D\u601D\u8003\u7EA7\u522B\u2026"
-      : formatReasoningLevel(reasoning);
+    return reasoning === "pi-default" ? "加载思考级别…" : formatReasoningLevel(reasoning);
   }
 };
 
@@ -8228,14 +8618,14 @@ var ComposerSuggestions = class {
     }
     const folderSuggestions = [...folders].map((folder) => ({
       label: `${folder}/`,
-      detail: "Folder",
+      detail: STRINGS.suggestions.folder,
       insertText: this.formatAttachmentInsert(`${folder}/`)
     }));
     const noteSuggestions = files.map((file) => {
       const label = file.path.replace(/\.md$/i, "");
       return {
         label,
-        detail: "Note",
+        detail: STRINGS.suggestions.note,
         insertText: this.formatAttachmentInsert(label)
       };
     });
@@ -8259,14 +8649,14 @@ var ComposerSuggestions = class {
     return [...tags]
       .filter((tag) => tag.toLowerCase().includes(query))
       .sort()
-      .map((tag) => ({ label: tag, detail: "Tag", insertText: `${tag} ` }));
+      .map((tag) => ({ label: tag, detail: STRINGS.suggestions.tag, insertText: `${tag} ` }));
   }
   getCommandSuggestions(query) {
     return getSlashCommands(this.plugin.getPiCommands?.() ?? [])
       .map((command) => ({
         label: command.command,
         detail: command.command.startsWith("/skill:")
-          ? `Skill \u2014 ${command.detail}`
+          ? STRINGS.suggestions.skill(command.detail)
           : command.detail,
         insertText: command.insertText
       }))
@@ -8341,7 +8731,7 @@ var ThreadActions = class {
         this.callbacks.renderMessages();
         this.callbacks.renderToolBadges?.();
       } else {
-        new import_obsidian16.Notice("Nothing to fork yet.");
+        new import_obsidian16.Notice(STRINGS.threads.nothingToFork);
       }
     } catch (error) {
       new import_obsidian16.Notice(error instanceof Error ? error.message : String(error));
@@ -8355,8 +8745,8 @@ function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
     return {
       state: "canceling",
       icon: "loader",
-      label: "Canceling",
-      ariaLabel: "Canceling agent run",
+      label: STRINGS.sendState.canceling,
+      ariaLabel: STRINGS.sendState.cancelingAria,
       disabled: true
     };
   }
@@ -8364,8 +8754,8 @@ function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
     return {
       state: "queue",
       icon: "list-plus",
-      label: "Queue",
-      ariaLabel: "Queue message",
+      label: STRINGS.sendState.queue,
+      ariaLabel: STRINGS.sendState.queueAria,
       disabled: false
     };
   }
@@ -8373,18 +8763,18 @@ function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
     return {
       state: "cancel",
       icon: "square",
-      label: "Cancel",
-      ariaLabel: "Cancel agent run",
+      label: STRINGS.sendState.cancel,
+      ariaLabel: STRINGS.sendState.cancelAria,
       disabled: false
     };
   }
   return {
     state: "send",
     icon: "send",
-    label: "Send",
-    ariaLabel: "Send message",
+    label: STRINGS.view.send,
+    ariaLabel: STRINGS.view.sendMessage,
     disabled: false,
-    titleSuffix: queuedCount > 0 ? `${queuedCount} queued.` : ""
+    titleSuffix: queuedCount > 0 ? STRINGS.sendState.queuedSuffix(queuedCount) : ""
   };
 }
 
@@ -8455,7 +8845,7 @@ var PiAgentView = class extends f4.ItemView {
     this.plugin = plugin;
     this.running = false;
     this.canceling = false;
-    this.activityText = "Thinking";
+    this.activityText = STRINGS.activity.thinking;
     this.activityKind = "thinking";
     this.activityDetail = "";
     this.activityStickyUntil = 0;
@@ -8563,7 +8953,7 @@ var PiAgentView = class extends f4.ItemView {
     this.renderPiIcon(brandIcon);
     this.threadTitleEl = brand.createSpan({
       cls: "pi-agent-thread-title",
-      attr: { role: "button", tabindex: "0", title: "Rename chat" }
+      attr: { role: "button", tabindex: "0", title: STRINGS.view.renameChat }
     });
     this.threadTitleEl.addEventListener("click", () => this.startThreadTitleRename());
     this.threadTitleEl.addEventListener("keydown", (event) => {
@@ -8579,7 +8969,7 @@ var PiAgentView = class extends f4.ItemView {
       }),
       newChatButton = headerActions.createEl("button", {
         cls: "clickable-icon pi-agent-header-action",
-        attr: { "aria-label": "New chat", title: "New chat" }
+        attr: { "aria-label": STRINGS.view.newChat, title: STRINGS.view.newChat }
       });
     this.threadFavoriteEl = favoriteButton;
     (0, f4.setIcon)(favoriteButton, "star");
@@ -8592,13 +8982,13 @@ var PiAgentView = class extends f4.ItemView {
     });
     let forkButton = headerActions.createEl("button", {
       cls: "clickable-icon pi-agent-header-action",
-      attr: { "aria-label": "Fork chat", title: "Fork chat" }
+      attr: { "aria-label": STRINGS.view.forkChat, title: STRINGS.view.forkChat }
     });
     (0, f4.setIcon)(forkButton, "split");
     forkButton.addEventListener("click", (event) => {
       event.preventDefault();
       if (this.isThreadRunning(this.plugin.getCurrentThread().id)) {
-        new f4.Notice("Wait for this chat's agent run to finish before forking it.");
+        new f4.Notice(STRINGS.view.forkBusy);
         return;
       }
       this.threadMenu?.forkChat();
@@ -8607,8 +8997,8 @@ var PiAgentView = class extends f4.ItemView {
     let threadListButton = headerActions.createEl("button", {
       cls: "clickable-icon pi-agent-thread-menu",
       attr: {
-        "aria-label": "Manage chat threads",
-        title: "Manage chat threads"
+        "aria-label": STRINGS.view.manageThreads,
+        title: STRINGS.view.manageThreads
       }
     });
     (0, f4.setIcon)(threadListButton, "list");
@@ -8633,7 +9023,7 @@ var PiAgentView = class extends f4.ItemView {
     this.extensionWidgetsAboveEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
     this.renderComposerImages();
     this.inputEl = composer.createEl("textarea", {
-      placeholder: "Ask the agent about your vault... Enter sends, Shift+Enter adds a line."
+      placeholder: STRINGS.view.inputPlaceholder
     });
     this.inputEl.addEventListener("keydown", (event) => {
       if (this.suggestions?.handleKeydown(event)) return;
@@ -8696,10 +9086,10 @@ var PiAgentView = class extends f4.ItemView {
     this.runSettings.render(composerBar);
     let sendButton = composerBar.createEl("button", {
       cls: "clickable-icon pi-agent-send-button",
-      attr: { "aria-label": "Send message", title: "Send message" }
+      attr: { "aria-label": STRINGS.view.sendMessage, title: STRINGS.view.sendMessage }
     });
     (0, f4.setIcon)(sendButton, "send");
-    sendButton.createSpan({ cls: "pi-agent-control-label", text: "Send" });
+    sendButton.createSpan({ cls: "pi-agent-control-label", text: STRINGS.view.send });
     this.sendButtonEl = sendButton;
     sendButton.addEventListener("click", () => this.handleSendButtonClick());
     this.observeComposerBar(composerBar);
@@ -8763,14 +9153,14 @@ var PiAgentView = class extends f4.ItemView {
     root.empty();
     const badges = root.createDiv({
       cls: "pi-agent-context-badges",
-      attr: { role: "list", "aria-label": "Pending prompt context" }
+      attr: { role: "list", "aria-label": STRINGS.view.pendingContext }
     });
     const contextFile = this.plugin.getCurrentContextFile();
     const includeActiveNote = this.resolveActiveNoteInclusion(contextFile);
     if (includeActiveNote)
       this.renderPendingBadge(badges, contextFile.name, {
         title: contextFile.path,
-        removeLabel: `Remove ${contextFile.name}`,
+        removeLabel: STRINGS.view.removeNote(contextFile.name),
         onRemove: () => {
           this.excludedContextPath = contextFile.path;
           this.renderToolBadges();
@@ -8778,7 +9168,7 @@ var PiAgentView = class extends f4.ItemView {
       });
     for (const image of this.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
-        removeLabel: `Remove ${image.fileName || "image"}`,
+        removeLabel: STRINGS.view.removePending(image.fileName || "image"),
         onRemove: () => {
           this.composerImages = this.composerImages.filter((item) => item.id !== image.id);
           this.renderComposerImages();
@@ -8786,7 +9176,7 @@ var PiAgentView = class extends f4.ItemView {
       });
     for (const attachment of this.composerAttachments)
       this.renderPendingBadge(badges, attachment.fileName, {
-        removeLabel: `Remove ${attachment.fileName}`,
+        removeLabel: STRINGS.view.removePending(attachment.fileName),
         onRemove: () => {
           this.composerAttachments = this.composerAttachments.filter(
             (item) => item.id !== attachment.id
@@ -8797,9 +9187,9 @@ var PiAgentView = class extends f4.ItemView {
     const annotations =
       includeActiveNote && contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
     if (annotations.length > 0) {
-      const label = `${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`;
+      const label = STRINGS.view.annotationsCount(annotations.length);
       this.renderPendingBadge(badges, label, {
-        removeLabel: `Clear ${label}`,
+        removeLabel: STRINGS.view.clearAnnotations(annotations.length),
         onRemove: () => {
           this.plugin.annotationController?.cancelPick();
           this.plugin.annotationStore.deletePath(contextFile.path);
@@ -8840,20 +9230,17 @@ var PiAgentView = class extends f4.ItemView {
     let usage = this.getDisplayedContextUsage(),
       badge = usage?.compacted
         ? {
-            label: `ctx compacted \xB7 ?/${formatTokenCount(usage.contextWindow || 0)}`,
-            title:
-              "Pi compacted this session. Exact context usage is unknown until the next model response returns fresh token usage."
+            label: STRINGS.view.compactionBadge(formatTokenCount(usage.contextWindow || 0)),
+            title: STRINGS.view.compactionUnknownTitle
           }
         : usage
           ? formatContextUsageBadge(usage.contextUsage, usage.tokenUsage)
           : void 0;
     root.createSpan({
       cls: `pi-agent-tool-badge pi-agent-tool-badge-context${badge ? " is-enabled" : ""}`,
-      text: badge ? badge.label : "ctx --",
+      text: badge ? badge.label : STRINGS.view.contextUsageEmpty,
       attr: {
-        title: badge
-          ? badge.title
-          : "Context usage appears after Pi returns token usage for the selected model."
+        title: badge ? badge.title : STRINGS.view.contextUsagePendingTitle
       }
     });
   }
@@ -8881,13 +9268,14 @@ var PiAgentView = class extends f4.ItemView {
     const favorite = this.plugin.getCurrentThread().favorite === true;
     this.threadFavoriteEl.toggleClass("is-favorite", favorite);
     this.threadFavoriteEl.setAttr("aria-pressed", String(favorite));
-    this.threadFavoriteEl.setAttr("aria-label", favorite ? "Remove favorite" : "Mark as favorite");
-    this.threadFavoriteEl.setAttr("title", favorite ? "Remove favorite" : "Mark as favorite");
+    const favoriteLabel = favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite;
+    this.threadFavoriteEl.setAttr("aria-label", favoriteLabel);
+    this.threadFavoriteEl.setAttr("title", favoriteLabel);
   }
   toggleCurrentThreadFavorite() {
     const thread = this.plugin.getCurrentThread();
     if (!this.plugin.toggleThreadFavorite(thread.id)) {
-      new f4.Notice("Chat thread was not found.");
+      new f4.Notice(STRINGS.view.threadNotFound);
       return;
     }
     this.renderThreadFavorite();
@@ -8900,7 +9288,7 @@ var PiAgentView = class extends f4.ItemView {
     this.threadTitleEl.addClass("is-editing");
     const input = this.threadTitleEl.createEl("input", {
       cls: "pi-agent-thread-title-input",
-      attr: { type: "text", value: thread.title, "aria-label": "Chat title" }
+      attr: { type: "text", value: thread.title, "aria-label": STRINGS.view.chatTitle }
     });
     const commit = (save) => {
       const title = input.value.trim();
@@ -8943,7 +9331,7 @@ var PiAgentView = class extends f4.ItemView {
       }
     }
     if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
-      new f4.Notice("The selected Pi model does not support image input.");
+      new f4.Notice(STRINGS.view.modelNoImage);
       return;
     }
     if (this.inputEl) this.inputEl.value = "";
@@ -8984,7 +9372,7 @@ var PiAgentView = class extends f4.ItemView {
     if (run && !run.canceling) {
       run.canceling = true;
       this.canceling = true;
-      this.setActivity("Canceling", "finishing");
+      this.setActivity(STRINGS.view.canceling, "finishing");
       this.plugin.cancelPiRun(run.runner);
       this.setRunningState(true);
       this.renderThreadListIfVisible();
@@ -9039,7 +9427,7 @@ var PiAgentView = class extends f4.ItemView {
   renderImagePicker(parent) {
     const button = parent.createEl("button", {
       cls: "clickable-icon pi-agent-image-button",
-      attr: { "aria-label": "Attach files", title: "Attach files" }
+      attr: { "aria-label": STRINGS.view.attachFiles, title: STRINGS.view.attachFiles }
     });
     f4.setIcon(button, "paperclip");
     button.addEventListener("click", (event) => this.showAttachmentMenu(event));
@@ -9048,13 +9436,13 @@ var PiAgentView = class extends f4.ItemView {
     const menu = new f4.Menu();
     menu.addItem((item) =>
       item
-        .setTitle("Vault file")
+        .setTitle(STRINGS.view.vaultFile)
         .setIcon("vault")
         .onClick(() => this.showVaultFilePicker())
     );
     menu.addItem((item) =>
       item
-        .setTitle("Local file")
+        .setTitle(STRINGS.view.localFile)
         .setIcon("hard-drive")
         .onClick(() => this.imageInputEl?.click())
     );
@@ -9078,7 +9466,7 @@ var PiAgentView = class extends f4.ItemView {
       }
     }
     const modal = new VaultFileModal(this.plugin.app);
-    modal.setPlaceholder("Choose a vault image, text, code, or config file\u2026");
+    modal.setPlaceholder(STRINGS.view.chooseAttachable);
     modal.open();
   }
   isAttachableFile(name, mimeType) {
@@ -9123,7 +9511,7 @@ var PiAgentView = class extends f4.ItemView {
       if (SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType)) {
         await this.plugin.ensureModelCatalogLoaded();
         if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
-          throw new Error("The selected Pi model does not support image input.");
+          throw new Error(STRINGS.view.modelNoImage);
         this.composerImages.push(
           bytesToPromptImage({
             bytes,
@@ -9152,7 +9540,7 @@ var PiAgentView = class extends f4.ItemView {
     if (imageFiles.length === 0) return;
     await this.plugin.ensureModelCatalogLoaded();
     if (!modelSupportsImages(this.plugin.getSelectedModelInfo())) {
-      new f4.Notice("The selected Pi model does not support image input.");
+      new f4.Notice(STRINGS.view.modelNoImage);
       return;
     }
     try {
@@ -9444,7 +9832,7 @@ var PiAgentView = class extends f4.ItemView {
     if (!prompt && images.length === 0 && attachments.length === 0) {
       if (queuedId) {
         this.requeueQueuedPrompt(queuedId);
-        new f4.Notice("The queued message became empty and was not sent.");
+        new f4.Notice(STRINGS.view.queuedEmpty);
       } else restoreUnsentAnnotations();
       return void 0;
     }
@@ -9453,7 +9841,7 @@ var PiAgentView = class extends f4.ItemView {
       if (queuedId) {
         this.requeueQueuedPrompt(queuedId);
       } else restoreUnsentAnnotations();
-      new f4.Notice("The selected Pi model does not support image input.");
+      new f4.Notice(STRINGS.view.modelNoImage);
       return void 0;
     }
     if (this.isThreadRunning(threadId)) {
@@ -9528,9 +9916,9 @@ var PiAgentView = class extends f4.ItemView {
     this.syncCurrentRunFlags();
     this.running = this.isCurrentThread(threadId);
     this.canceling = false;
-    this.activityText = "Preparing context";
+    this.activityText = STRINGS.view.preparingContext;
     this.activityKind = "context";
-    this.activityDetail = "Collecting current note, links, backlinks, and explicit attachments.";
+    this.activityDetail = STRINGS.view.collectingContext;
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
@@ -9597,8 +9985,8 @@ var PiAgentView = class extends f4.ItemView {
         this.requeueQueuedPrompt(queuedId);
         skipQueueDrain = true;
       } else if (!run.accepted) restoreUnsentAnnotations();
-      if (message === "Pi run canceled.") {
-        new f4.Notice("Agent run canceled.");
+      if (isPiRunCanceled(error)) {
+        new f4.Notice(STRINGS.view.runCanceled);
         return;
       }
       const createdAt = Date.now();
@@ -9608,7 +9996,7 @@ var PiAgentView = class extends f4.ItemView {
       );
       this.plugin.addMessageToThread(threadId, {
         role: "assistant",
-        content: `Agent run failed: ${message}`,
+        content: `${STRINGS.view.runFailed}：${message}`,
         createdAt,
         thinking: run.thinking || void 0,
         toolErrors: run.toolErrors.length > 0 ? run.toolErrors : void 0
@@ -9619,11 +10007,7 @@ var PiAgentView = class extends f4.ItemView {
         this.renderToolBadges();
       }
       new f4.Notice(message);
-      this.notifyRunCompleted(
-        run.notificationRunId,
-        threadId,
-        "Agent run failed. Click to open the chat."
-      );
+      this.notifyRunCompleted(run.notificationRunId, threadId, STRINGS.view.notificationFailed);
     } finally {
       this.activeRuns.delete(threadId);
       this.syncCurrentRunFlags();
@@ -9698,7 +10082,7 @@ var PiAgentView = class extends f4.ItemView {
     this.liveThinkingSetExpanded?.(run.thinkingExpanded);
     this.appendStreamingDelta(delta);
   }
-  notifyRunCompleted(runId, threadId, body = "Agent response completed. Click to open the chat.") {
+  notifyRunCompleted(runId, threadId, body = STRINGS.view.notificationCompleted) {
     if (!this.plugin.settings.desktopNotifications) return false;
     return showDesktopRunNotification({
       runId,
@@ -9829,7 +10213,7 @@ var BACKUP_SCHEMA_VERSION = 1;
 var BACKUP_FILE = "chat-history.backup.json";
 var PREVIOUS_BACKUP_FILE = "chat-history.backup.previous.json";
 async function writeChatHistoryBackup(pluginDirectory, history) {
-  if (!pluginDirectory) throw new Error("The plugin directory is unavailable.");
+  if (!pluginDirectory) throw new Error(STRINGS.history.pluginDirectoryUnavailable);
   const normalized = cloneHistory(history);
   const payload = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -9878,7 +10262,7 @@ async function readValidBackup(filePath) {
   }
 }
 function cloneHistory(history) {
-  if (!history || !Array.isArray(history.threads)) throw new Error("Invalid chat history backup.");
+  if (!history || !Array.isArray(history.threads)) throw new Error(STRINGS.history.invalidBackup);
   const cloned = JSON.parse(JSON.stringify(history));
   if (
     typeof cloned.currentThreadId !== "string" ||
@@ -9890,7 +10274,7 @@ function cloneHistory(history) {
         !Array.isArray(thread.messages)
     )
   ) {
-    throw new Error("Invalid chat history backup.");
+    throw new Error(STRINGS.history.invalidBackup);
   }
   return cloned;
 }
@@ -10064,7 +10448,7 @@ function parseMarkdownThread(content) {
   if (!frontmatterMatch) return void 0;
   const frontmatter = parseFrontmatter(frontmatterMatch[1]);
   if (frontmatter.pi_agent_chat !== true) return void 0;
-  if (frontmatter.pi_agent_schema !== 1) throw new Error("Unsupported chat schema.");
+  if (frontmatter.pi_agent_schema !== 1) throw new Error(STRINGS.history.unsupportedSchema);
   const thread = {
     id: requiredString(frontmatter.id, "thread ID"),
     title: requiredString(frontmatter.title, "title"),
@@ -10132,7 +10516,7 @@ function validateThread(thread) {
     typeof thread.updatedAt !== "number" ||
     !Number.isFinite(thread.updatedAt)
   ) {
-    throw new Error("Invalid chat thread.");
+    throw new Error(STRINGS.history.invalidThread);
   }
   for (const message of thread.messages) validateMessage(message);
 }
@@ -10146,7 +10530,7 @@ function validateMessage(message) {
     typeof message.createdAt !== "number" ||
     !Number.isFinite(message.createdAt)
   ) {
-    throw new Error("Invalid chat message.");
+    throw new Error(STRINGS.history.invalidMessage);
   }
 }
 function parseFrontmatter(source) {
@@ -10183,7 +10567,7 @@ function normalizeVaultFolder2(value) {
 }
 function resolveVaultFolder(basePath, folder) {
   const resolved = import_node_path5.default.resolve(basePath, folder);
-  if (!isInside(basePath, resolved)) throw new Error("Unsafe chat history folder.");
+  if (!isInside(basePath, resolved)) throw new Error(STRINGS.history.unsafeFolder);
   return resolved;
 }
 function isInside(basePath, candidate) {
@@ -10246,7 +10630,7 @@ function errorMessage(error) {
 }
 
 // src/threads/thread-store.mjs
-var DEFAULT_THREAD_TITLE = "New chat";
+var DEFAULT_THREAD_TITLE = STRINGS.threads.newChat;
 var ThreadStore = class {
   constructor(history, legacyMessages, legacyPiSessionId) {
     this.history = normalizeThreadHistory(history, legacyMessages, legacyPiSessionId);
@@ -10713,7 +11097,7 @@ var PiAgentPlugin = class extends P.Plugin {
   async onload() {
     await this.loadSettings();
     if (!P.Platform.isDesktopApp) {
-      new P.Notice("Pi Agent is desktop-only.");
+      new P.Notice(STRINGS.plugin.desktopOnly);
       return;
     }
     if (this.settings.desktopNotifications)
@@ -10746,9 +11130,7 @@ var PiAgentPlugin = class extends P.Plugin {
             this.annotationStore.list(oldPath).length > 0 &&
             !this.annotationStore.renamePath(oldPath, file.path)
           )
-            new P.Notice(
-              "Annotations could not follow the renamed note; their original records were kept."
-            );
+            new P.Notice(STRINGS.plugin.annotationsCouldNotFollow);
         } else {
           this.migrateQueuedAttachmentPaths(oldPath, file.path);
         }
@@ -10762,19 +11144,19 @@ var PiAgentPlugin = class extends P.Plugin {
       })
     );
     this.registerView(PI_AGENT_VIEW_TYPE, (leaf) => new PiAgentView(leaf, this));
-    this.addRibbonIcon(PI_AGENT_ICON_ID, `Open ${PI_AGENT_DISPLAY_NAME}`, () => {
+    this.addRibbonIcon(PI_AGENT_ICON_ID, STRINGS.plugin.openAgent(PI_AGENT_DISPLAY_NAME), () => {
       this.activateView();
     });
     this.addCommand({
       id: "open-pi",
-      name: "Open agent chat",
+      name: STRINGS.plugin.commandOpenChat,
       callback: () => {
         this.activateView();
       }
     });
     this.addCommand({
       id: "toggle-annotations",
-      name: "Add or toggle annotation for active note",
+      name: STRINGS.plugin.commandToggleAnnotations,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.annotationController?.handleActiveMarkdownNote();
@@ -10789,7 +11171,7 @@ var PiAgentPlugin = class extends P.Plugin {
     });
     this.addCommand({
       id: "ask-about-current-note",
-      name: "Ask about current note",
+      name: STRINGS.plugin.commandAskCurrentNote,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
@@ -10799,7 +11181,7 @@ var PiAgentPlugin = class extends P.Plugin {
     });
     this.addCommand({
       id: "research-around-current-note",
-      name: "Research around current note",
+      name: STRINGS.plugin.commandResearchCurrentNote,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
@@ -10809,7 +11191,7 @@ var PiAgentPlugin = class extends P.Plugin {
     });
     this.addCommand({
       id: "suggest-frontmatter",
-      name: "Suggest frontmatter for current note",
+      name: STRINGS.plugin.commandSuggestFrontmatter,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.suggestFrontmatterForCurrentNote();
@@ -10817,7 +11199,7 @@ var PiAgentPlugin = class extends P.Plugin {
     });
     this.addCommand({
       id: "draft-base-from-current-note",
-      name: "Draft base from current note context",
+      name: STRINGS.plugin.commandDraftBase,
       checkCallback: (checking) =>
         this.runWithActiveMarkdownNote(checking, () => {
           this.runCommandPrompt(
@@ -10857,7 +11239,7 @@ var PiAgentPlugin = class extends P.Plugin {
       try {
         importedHistory = await importVaultChatHistory(this.getVaultBasePath(), rawData);
       } catch (error) {
-        console.warn("Pi Agent: could not import vault chat history", error);
+        console.warn(STRINGS.plugin.historyImportFailed, error);
       }
       if (Array.isArray(rawSettings.ignoredFolders) && chatHistoryFolder) {
         rawSettings.ignoredFolders = rawSettings.ignoredFolders.filter(
@@ -10869,7 +11251,7 @@ var PiAgentPlugin = class extends P.Plugin {
     if (!restoredHistory && isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
     if (!restoredHistory) {
       restoredHistory = await readChatHistoryBackup(this.getPluginDirectory());
-      if (restoredHistory) new P.Notice("Pi Agent recovered chat history from its local backup.");
+      if (restoredHistory) new P.Notice(STRINGS.plugin.historyRecovered);
     }
     this.settings = normalizeSettings(rawSettings);
     this.localPromptQueue = restorePersistedLocalPromptQueue(localPromptQueue, localPromptSteering);
@@ -10897,7 +11279,7 @@ var PiAgentPlugin = class extends P.Plugin {
       await this.savePluginData();
       const persisted = (await this.loadData())?.chatHistory;
       if (!historiesMatch(persisted, this.threadHistory.toJSON())) {
-        throw new Error("Could not verify imported chat history in plugin data.");
+        throw new Error(STRINGS.plugin.verifyImportFailed);
       }
       await removeImportedVaultChatHistory(
         this.getVaultBasePath(),
@@ -10905,13 +11287,10 @@ var PiAgentPlugin = class extends P.Plugin {
         this.app.vault
       );
       if (importedHistory.warnings.length > 0) {
-        console.warn(
-          "Pi Agent: some unrecognized chat files were left in place",
-          importedHistory.warnings
-        );
-        new P.Notice("Chat history was restored, but unreadable chat files were left in place.");
+        console.warn(STRINGS.plugin.historyUnrecognizedFiles, importedHistory.warnings);
+        new P.Notice(STRINGS.plugin.historyRestoredPartially);
       } else {
-        new P.Notice("Chat history was restored to Pi Agent's local plugin data.");
+        new P.Notice(STRINGS.plugin.historyRestored);
       }
     }
   }
@@ -10922,7 +11301,7 @@ var PiAgentPlugin = class extends P.Plugin {
       await this.savePluginData();
     } catch (error) {
       new P.Notice(
-        `Pi Agent: \u65E0\u6CD5\u4FDD\u5B58\u8BBE\u7F6E\uFF1A${error instanceof Error ? error.message : String(error)}`
+        STRINGS.plugin.settingsSaveFailed(error instanceof Error ? error.message : String(error))
       );
       return;
     }
@@ -10947,7 +11326,7 @@ var PiAgentPlugin = class extends P.Plugin {
   checkPiInstallation(showSuccess) {
     return checkPiInstallation(this.settings.piExecutablePath).then((result) => {
       if (result.ok) {
-        showSuccess && new P.Notice(`Pi CLI is available: ${result.version || result.message}`);
+        showSuccess && new P.Notice(STRINGS.plugin.cliAvailable(result.version || result.message));
         return result;
       }
       showSuccess ? new P.Notice(result.message) : new PiSetupModal(this, result).open();
@@ -10962,7 +11341,10 @@ var PiAgentPlugin = class extends P.Plugin {
     if (showNotice) {
       new P.Notice(
         result.ok
-          ? `Loaded ${this.settings.availableModels.length} Pi models; default ${this.settings.effectiveModel}.`
+          ? STRINGS.plugin.modelsLoaded(
+              this.settings.availableModels.length,
+              this.settings.effectiveModel
+            )
           : this.modelCatalogError
       );
     }
@@ -10973,7 +11355,7 @@ var PiAgentPlugin = class extends P.Plugin {
       while (true) {
         const generation = this.modelCatalogGeneration;
         const catalog = this.catalog;
-        if (!catalog) throw new Error("Pi model service is not ready.");
+        if (!catalog) throw new Error(STRINGS.plugin.modelServiceNotReady);
         let models;
         let effectiveConfig;
         try {
@@ -11013,7 +11395,7 @@ var PiAgentPlugin = class extends P.Plugin {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       this.modelCatalogError = `Could not refresh models from Pi. Check the Pi executable and configuration, then try again. ${detail}`;
-      console.warn("Pi Agent: failed to refresh model catalog", error);
+      console.warn(STRINGS.plugin.modelCatalogFailed, error);
       this.refreshOpenModelControls();
       if (hasSafeRuntimeCatalog(this.settings)) return { ok: false, stale: true };
       throw new Error(this.modelCatalogError, { cause: error });
@@ -11040,11 +11422,11 @@ var PiAgentPlugin = class extends P.Plugin {
       try {
         this.piCommands = (await this.commandCatalog?.getCommands(this.getVaultBasePath())) ?? [];
         this.commandCatalogLoaded = true;
-        if (showNotice) new P.Notice(`Loaded ${this.piCommands.length} Pi commands.`);
+        if (showNotice) new P.Notice(STRINGS.plugin.commandsLoaded(this.piCommands.length));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (showNotice) new P.Notice(message);
-        console.warn("Pi Agent: failed to refresh Pi commands", error);
+        console.warn(STRINGS.plugin.commandsFailed, error);
       }
       return this.piCommands;
     })().finally(() => {
@@ -11077,7 +11459,7 @@ var PiAgentPlugin = class extends P.Plugin {
         if (clonedSession) {
           await runner
             .setSessionName(clonedSession, `${current.title} (fork)`)
-            .catch((error) => console.warn("Pi Agent: could not name cloned Pi session", error));
+            .catch((error) => console.warn(STRINGS.plugin.sessionCloneFailed, error));
         }
       } finally {
         this.threadRunners.dispose(current.id);
@@ -11210,7 +11592,7 @@ var PiAgentPlugin = class extends P.Plugin {
       try {
         import_node_fs5.default.unlinkSync(sessionPath);
       } catch (error) {
-        console.warn("Pi Agent: could not delete local Pi session", error);
+        console.warn(STRINGS.plugin.sessionDeleteFailed, error);
         return false;
       }
     }
@@ -11262,7 +11644,7 @@ var PiAgentPlugin = class extends P.Plugin {
       const sessionName = this.threadHistory.getThread(threadId)?.title ?? title;
       void this.withSessionRunner(threadId, (runner) =>
         runner.setSessionName(thread.piSessionId, sessionName)
-      ).catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
+      ).catch((error) => console.warn(STRINGS.plugin.sessionRenameFailed, error));
     }
     return true;
   }
@@ -11280,9 +11662,9 @@ var PiAgentPlugin = class extends P.Plugin {
       notify: (request) => {
         const prefix =
           request.notifyType === "error"
-            ? "Error: "
+            ? STRINGS.plugin.errorPrefix
             : request.notifyType === "warning"
-              ? "Warning: "
+              ? STRINGS.plugin.warningPrefix
               : "";
         new P.Notice(`${prefix}${String(request.message ?? "")}`);
       },
@@ -11298,7 +11680,7 @@ var PiAgentPlugin = class extends P.Plugin {
     const statusKey = String(key || "extension");
     if (text === void 0 || text === null || text === "") this.extensionStatuses.delete(statusKey);
     else this.extensionStatuses.set(statusKey, String(text));
-    this.extensionStatusEl?.setText([...this.extensionStatuses.values()].join(" \xB7 "));
+    this.extensionStatusEl?.setText([...this.extensionStatuses.values()].join(" · "));
   }
   setExtensionWidget(key, lines, placement = "aboveEditor") {
     const widgetKey = String(key || "extension");
@@ -11343,7 +11725,7 @@ var PiAgentPlugin = class extends P.Plugin {
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false);
       if (!leaf) {
-        new P.Notice("Could not open Pi view.");
+        new P.Notice(STRINGS.plugin.couldNotOpenView);
         return;
       }
       await leaf.setViewState({ type: PI_AGENT_VIEW_TYPE, active: true });
@@ -11351,12 +11733,12 @@ var PiAgentPlugin = class extends P.Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
   async runPiPrompt(prompt, callbacks, threadId, runner = this.pi, images = [], promptContext) {
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     if (
       ((!this.graph || !this.contextBuilder || !this.pi) && this.rebuildServices(),
       !this.graph || !this.contextBuilder || !this.pi)
     )
-      throw new Error("Pi services are not available.");
+      throw new Error(STRINGS.plugin.servicesUnavailable);
     const selection = this.getEditorSelection();
     if (
       prompt.trim().startsWith("/") &&
@@ -11370,7 +11752,7 @@ var PiAgentPlugin = class extends P.Plugin {
           (await /** @type {ContextBuilder} */
           this.contextBuilder.build(prompt, selection)))
         : void 0;
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     if (isContextShowPrompt(prompt)) {
       return {
         finalResponse: formatContextShowResponse(context?.inspection),
@@ -11385,10 +11767,10 @@ var PiAgentPlugin = class extends P.Plugin {
     const thread = threadId
       ? this.threadHistory.getThread(threadId)
       : this.threadHistory.getCurrentThread();
-    if (!thread) throw new Error("Chat thread no longer exists.");
-    if (!runner) throw new Error("Pi runner is not available.");
+    if (!thread) throw new Error(STRINGS.plugin.threadGone);
+    if (!runner) throw new Error(STRINGS.plugin.runnerUnavailable);
     const history = getPriorThreadHistory(thread.messages, prompt);
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     if (context) {
       callbacks?.onEvent?.({
         type: "context_ready",
@@ -11398,7 +11780,7 @@ var PiAgentPlugin = class extends P.Plugin {
         }
       });
     }
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     const result = await runner.run(
       prompt,
       context,
@@ -11534,7 +11916,7 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   async inspectPiContext(prompt) {
     if (((!this.graph || !this.contextBuilder) && this.rebuildServices(), !this.contextBuilder))
-      throw new Error("Pi context builder is not available.");
+      throw new Error(STRINGS.plugin.contextBuilderUnavailable);
     return this.contextBuilder.inspectContext(prompt, this.getEditorSelection());
   }
   getCurrentContextFile() {
@@ -11548,7 +11930,7 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   buildPiRunner() {
     (!this.graph || !this.contextBuilder) && this.rebuildServices();
-    if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
+    if (!this.contextBuilder) throw new Error(STRINGS.plugin.contextBuilderUnavailable);
     return new PiRunner(
       this.settings,
       this.contextBuilder,
@@ -11596,7 +11978,7 @@ var PiAgentPlugin = class extends P.Plugin {
     if (sourcePath) {
       const explicitFile = this.app.vault.getAbstractFileByPath(sourcePath);
       if (!(explicitFile instanceof P.TFile) || explicitFile.extension !== "md") {
-        new P.Notice("The annotated note no longer exists. Its annotations were not sent.");
+        new P.Notice(STRINGS.plugin.annotationNoteGone);
         return [];
       }
       const annotations2 = await this.getAnnotationsForContext(explicitFile.path);
@@ -11639,7 +12021,7 @@ var PiAgentPlugin = class extends P.Plugin {
       }
     } catch (error) {
       new P.Notice(
-        error instanceof Error ? error.message : "Could not restore queued annotations."
+        error instanceof Error ? error.message : STRINGS.plugin.annotationsRestoreFailed
       );
     }
   }
@@ -11670,12 +12052,12 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   saveThreadHistory() {
     this.savePluginData().catch((error) => {
-      console.warn("Pi Agent: failed to save thread history", error);
+      console.warn(STRINGS.plugin.historySaveFailed, error);
     });
   }
   saveAnnotations() {
     this.savePluginData().catch(() => {
-      new P.Notice("Could not save annotations to plugin data.");
+      new P.Notice(STRINGS.plugin.annotationSaveFailed);
     });
   }
   savePluginData() {
@@ -11706,7 +12088,7 @@ var PiAgentPlugin = class extends P.Plugin {
     const isMarkdown = !!activeFile && activeFile.extension === "md";
     if (checking) return isMarkdown;
     if (!isMarkdown) {
-      new P.Notice("Open a markdown note first.");
+      new P.Notice(STRINGS.plugin.openMarkdownFirst);
       return false;
     }
     action();
@@ -11720,17 +12102,17 @@ var PiAgentPlugin = class extends P.Plugin {
       view.startPrompt(prompt);
       return;
     }
-    new P.Notice("Could not open Pi view.");
+    new P.Notice(STRINGS.plugin.couldNotOpenView);
   }
   async runAnnotationsPrompt(path6) {
     if (this.annotationStore.list(path6).length === 0) {
-      new P.Notice("There are no annotations to send for this note.");
+      new P.Notice(STRINGS.plugin.noAnnotationsToSend);
       return;
     }
     await this.activateView();
     const view = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0]?.view;
     if (!(view instanceof PiAgentView)) {
-      new P.Notice("Could not open Pi view.");
+      new P.Notice(STRINGS.plugin.couldNotOpenView);
       return;
     }
     try {
@@ -11746,7 +12128,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.graph || this.rebuildServices();
     const file = this.graph?.getActiveFile();
     if (!file) {
-      new P.Notice("Open a markdown note first.");
+      new P.Notice(STRINGS.plugin.openMarkdownFirst);
       return;
     }
     const content = await this.app.vault.cachedRead(file);

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 
 const obsidian = vi.hoisted(() => {
   class TFile {
@@ -75,7 +76,7 @@ describe("PiAgentPlugin annotation consumption", () => {
 
     expect(plugin.deletedPaths).toEqual([]);
     expect(plugin.getAnnotationsForContext).not.toHaveBeenCalled();
-    expect(obsidian.Notice.messages.join(" ")).toContain("no longer exists");
+    expect(obsidian.Notice.messages.join(" ")).toContain(STRINGS.plugin.annotationNoteGone);
   });
 
   it("treats non-markdown explicit source paths as missing", async () => {

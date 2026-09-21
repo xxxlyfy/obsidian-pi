@@ -181,7 +181,7 @@ describe("composer current-note exclusion", () => {
     expect(viewSource).toContain(
       "if (includeActiveNote === undefined) includeActiveNote = this.shouldIncludeActiveNote();"
     );
-    expect(viewSource).toContain("removeLabel: `Remove ${contextFile.name}`");
+    expect(viewSource).toContain("removeLabel: STRINGS.view.removeNote(contextFile.name)");
     expect(pluginSource).toContain("includeActiveNote: enriched.includeActiveNote !== false");
     expect(contextSource).toContain("if (options?.includeActiveNote === false) return undefined;");
   });

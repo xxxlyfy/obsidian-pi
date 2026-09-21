@@ -1,3 +1,4 @@
+import { STRINGS } from "../shared/strings.mjs";
 export function planBulkThreadDeletion(threads, runningThreadIds = []) {
   const running = new Set(runningThreadIds);
   const createScope = (candidates) => {
@@ -24,11 +25,8 @@ export function planBulkThreadDeletion(threads, runningThreadIds = []) {
 }
 
 export function formatBulkDeleteResult({ deletedCount, skippedCount, createdEmptyChat }) {
-  const deleted = `${deletedCount} chat${deletedCount === 1 ? "" : "s"} deleted`;
-  const skipped =
-    skippedCount > 0
-      ? `; ${skippedCount} active chat${skippedCount === 1 ? " was" : "s were"} skipped`
-      : "";
-  const replacement = createdEmptyChat ? "; a new empty chat was created" : "";
-  return `${deleted}${skipped}${replacement}. Local Pi sessions were kept.`;
+  const parts = [STRINGS.threads.bulkDeleted(deletedCount)];
+  if (skippedCount > 0) parts.push(STRINGS.threads.bulkSkipped(skippedCount));
+  if (createdEmptyChat) parts.push(STRINGS.threads.bulkCreatedEmpty);
+  return `${parts.join("；")}。${STRINGS.threads.bulkSessionsKept}`;
 }

@@ -62,7 +62,7 @@ describe("annotation processing UX", () => {
   });
 
   it("exposes annotation-only sending from the sticky scrollable list", () => {
-    expect(controllerSource).toContain('text: "Send to Pi"');
+    expect(controllerSource).toContain("text: STRINGS.annotations.send");
     expect(controllerSource).toContain("runAnnotationsPrompt(path)");
     expect(styles).toMatch(
       /\.pi-agent-annotations-list \{[\s\S]*?max-height:[\s\S]*?overflow: auto;/

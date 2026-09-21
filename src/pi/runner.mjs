@@ -8,6 +8,7 @@ import { createPiCliError, formatPiCliFailure } from "./diagnostics.mjs";
 import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
 import { handlePiJsonEventLine } from "./events.mjs";
 import { PiRpcClient } from "./rpc-client.mjs";
+import { PiRunCanceledError } from "./run-canceled.mjs";
 import { toRpcImages } from "../ui/prompt-payload.mjs";
 
 export function isPiCliCommandPrompt(prompt) {
@@ -38,7 +39,7 @@ export class PiRunner {
   }
 
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== undefined)
       return this.settings.dryRun
@@ -51,7 +52,7 @@ export class PiRunner {
       context,
       threadHistory
     );
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
 
     return this.settings.dryRun
       ? {
@@ -148,7 +149,7 @@ export class PiRunner {
 
   async runPiRpc(prompt, sessionId, callbacks, images = []) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
 
     this.cancelRequested = false;
     this.isRunning = true;
@@ -157,7 +158,7 @@ export class PiRunner {
     try {
       let session;
       ({ client, session } = await this.getOrCreateRpcClient(sessionId));
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
 
       const runtimeState = await client.request("get_state").catch(() => undefined);
       const events = [];
@@ -208,7 +209,7 @@ export class PiRunner {
       await promptRequest;
       callbacks?.onPromptAccepted?.();
       await completion;
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
       if (runState?.errorMessage) throw new Error(runState.errorMessage);
       return {
         finalResponse: this.getFinalResponse(finalResponse, runState?.fallbackText, events),
@@ -223,8 +224,7 @@ export class PiRunner {
     } catch (error) {
       const rpcError =
         /** @type {Error & { piRpcUncertain?: boolean, piRpcRequestType?: string }} */ (error);
-      if (this.cancelRequested || callbacks?.isCanceled?.())
-        throw new Error("Pi run canceled.", { cause: error });
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       if (rpcError?.piRpcUncertain) {
         await this.recoverUncertainRpcClient(client);
         throw new Error(
@@ -276,7 +276,7 @@ export class PiRunner {
 
   runPiCli(prompt, sessionId, callbacks) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
 
     const session = this.resolveOrCreateSession(sessionId);
     const args = this.buildPiArgs(session.path, "json");
@@ -359,7 +359,7 @@ export class PiRunner {
 
         if (this.cancelRequested) {
           this.cancelRequested = false;
-          failOnce(new Error("Pi run canceled."));
+          failOnce(new PiRunCanceledError());
           return;
         }
 
@@ -400,14 +400,14 @@ export class PiRunner {
 
   async runPiRpcCompact(sessionId, customInstructions = "", callbacks) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
 
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
 
       const events = [];
       unsubscribe = client.subscribe((event) => {
@@ -426,7 +426,7 @@ export class PiRunner {
         },
         { timeoutMs: 0 }
       );
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError();
       return {
         finalResponse: "Context compacted.",
         sessionId: session.reference,
@@ -438,8 +438,7 @@ export class PiRunner {
         compactionResult: result
       };
     } catch (error) {
-      if (this.cancelRequested || callbacks?.isCanceled?.())
-        throw new Error("Pi run canceled.", { cause: error });
+      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       throw error;
     } finally {
       this.cancelRequested = false;

@@ -1,4 +1,5 @@
 import { Modal, Setting } from "obsidian";
+import { STRINGS } from "../../shared/strings.mjs";
 
 export function showExtensionUiDialog(app, request) {
   return new Promise((resolve) => new ExtensionUiModal(app, request, resolve).open());
@@ -19,11 +20,13 @@ class ExtensionUiModal extends Modal {
       return;
     }
     this.request.signal?.addEventListener("abort", this.abortHandler, { once: true });
-    new Setting(this.contentEl).setName(this.request.title || "Pi extension").setHeading();
+    new Setting(this.contentEl)
+      .setName(this.request.title || STRINGS.modals.extensionFallback)
+      .setHeading();
 
     if (this.request.method === "confirm") {
       if (this.request.message) this.contentEl.createEl("p", { text: this.request.message });
-      this.renderActions(() => this.finish(true), "Confirm");
+      this.renderActions(() => this.finish(true), STRINGS.modals.confirm);
       return;
     }
 
@@ -31,7 +34,7 @@ class ExtensionUiModal extends Modal {
       const select = this.contentEl.createEl("select", { cls: "dropdown" });
       for (const option of this.request.options ?? [])
         select.createEl("option", { text: String(option), attr: { value: String(option) } });
-      this.renderActions(() => this.finish(select.value), "Select");
+      this.renderActions(() => this.finish(select.value), STRINGS.modals.select);
       select.focus();
       return;
     }
@@ -59,7 +62,9 @@ class ExtensionUiModal extends Modal {
 
   renderActions(onSubmit, submitText) {
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    actions.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.finish());
+    actions
+      .createEl("button", { text: STRINGS.common.cancel })
+      .addEventListener("click", () => this.finish());
     actions
       .createEl("button", { text: submitText, cls: "mod-cta" })
       .addEventListener("click", onSubmit);

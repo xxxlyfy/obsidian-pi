@@ -1,4 +1,5 @@
 import { MarkdownRenderChild, MarkdownView, Notice, setIcon } from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 import { captureAnchor } from "./annotation-anchors.mjs";
 import { ANNOTATION_LIMITS, positionToOffset } from "./annotation-model.mjs";
 import { AnnotationModal } from "./annotation-modal.mjs";
@@ -144,13 +145,13 @@ export class MarkdownAnnotationsController {
       this.handleHeaderAction(leaf)
     );
     actionEl.addClass("pi-agent-annotations-action");
-    actionEl.setAttr("aria-label", "Add or toggle annotation");
+    actionEl.setAttr("aria-label", STRINGS.annotations.action);
     actionEl.setAttr("aria-pressed", "false");
 
     const listEl = view.containerEl.createDiv({
       cls: "pi-agent-annotations-list",
       attr: {
-        "aria-label": "Annotations for this note",
+        "aria-label": STRINGS.annotations.listTitle,
         "aria-live": "polite",
         role: "region"
       }
@@ -192,7 +193,7 @@ export class MarkdownAnnotationsController {
     const activeLeaf = this.plugin.app.workspace.activeLeaf;
     const state = this.leaves.get(activeLeaf);
     if (!state || !state.view.file || state.view.file.extension !== "md") {
-      new Notice("Open an active Markdown note to use annotations.");
+      new Notice(STRINGS.annotations.openMarkdownFirst);
       return;
     }
     void this.handleHeaderAction(activeLeaf);
@@ -231,7 +232,7 @@ export class MarkdownAnnotationsController {
     const to = offset(toPosition);
     if (to > from) {
       if (to - from > ANNOTATION_LIMITS.quote) {
-        new Notice("The selected Markdown text is too large to annotate.");
+        new Notice(STRINGS.annotations.selectionTooLarge);
         return;
       }
       if (!this.activateEditorPick(state)) return;
@@ -251,7 +252,7 @@ export class MarkdownAnnotationsController {
     this.cancelPick();
     const editorView = this.editorViewForState(state);
     if (!editorView) {
-      new Notice("The Markdown editor is not ready yet.");
+      new Notice(STRINGS.annotations.sourceNotReady);
       return false;
     }
     this.pickState = {
@@ -264,10 +265,7 @@ export class MarkdownAnnotationsController {
     state.actionEl.addClass("is-active");
     state.actionEl.setAttr("aria-pressed", "true");
     editorView.dom.classList.add("pi-agent-annotation-pick-mode");
-    editorView.dom.setAttribute(
-      "aria-label",
-      "Annotation pick mode. Hover or focus a paragraph, then click or press enter."
-    );
+    editorView.dom.setAttribute("aria-label", STRINGS.annotations.pickModeHint);
     state.view.editor.focus();
     requestAnnotationRefresh(editorView);
     return true;
@@ -283,7 +281,7 @@ export class MarkdownAnnotationsController {
     this.cancelPick();
     const records = this.recordsForState(state);
     if (records.length === 0) {
-      new Notice("No source-backed Markdown blocks are available in this reading view.");
+      new Notice(STRINGS.annotations.noSourceBlocks);
       return false;
     }
     this.pickState = { kind: "rendered", leaf: state.leaf, state, focused: undefined };
@@ -348,7 +346,7 @@ export class MarkdownAnnotationsController {
     const now = Date.now();
     if (previous?.signature === signature && now - previous.at < 100) return true;
     if (selection.to - selection.from > ANNOTATION_LIMITS.quote) {
-      new Notice("The selected Markdown text is too large to annotate.");
+      new Notice(STRINGS.annotations.selectionTooLarge);
       return true;
     }
     this.selectionPicks.set(view, { signature, at: now });
@@ -367,11 +365,11 @@ export class MarkdownAnnotationsController {
     const text = view.state.doc.toString();
     const range = resolveMarkdownBlockRange(text, offset);
     if (range.to <= range.from) {
-      new Notice("Choose a non-empty Markdown line or paragraph.");
+      new Notice(STRINGS.annotations.pickNonEmptyLine);
       return;
     }
     if (range.to - range.from > ANNOTATION_LIMITS.quote) {
-      new Notice("This Markdown block is too large to annotate.");
+      new Notice(STRINGS.annotations.blockTooLarge);
       return;
     }
     const anchor = captureAnchor(text, range.from, range.to);
@@ -469,7 +467,7 @@ export class MarkdownAnnotationsController {
       record.savedAriaLabel = record.element.getAttribute("aria-label") ?? null;
     }
     record.element.setAttribute("tabindex", "0");
-    record.element.setAttribute("aria-label", "Annotate this Markdown block");
+    record.element.setAttribute("aria-label", STRINGS.annotations.annotateBlock);
     record.element.classList.add("pi-agent-annotation-rendered-target");
   }
 
@@ -530,12 +528,12 @@ export class MarkdownAnnotationsController {
     const startRecord = this.closestRenderedRecord(elementFromNode(range.startContainer), state);
     const endRecord = this.closestRenderedRecord(elementFromNode(range.endContainer), state);
     if (!startRecord || !endRecord) {
-      new Notice("Start and end the selection inside source-backed Markdown text.");
+      new Notice(STRINGS.annotations.selectionAcrossBlocks);
       return { invalid: true };
     }
     const text = selection.toString();
     if (!text) {
-      new Notice("Choose a non-empty rendered selection.");
+      new Notice(STRINGS.annotations.pickNonEmptyRendered);
       return { invalid: true };
     }
     return { state, startRecord, endRecord, range, text };
@@ -562,11 +560,11 @@ export class MarkdownAnnotationsController {
       !startRecord.element.isConnected ||
       !endRecord.element.isConnected
     ) {
-      new Notice("That rendered selection is no longer part of this Markdown view.");
+      new Notice(STRINGS.annotations.renderedSelectionGone);
       return;
     }
     if (text.length > ANNOTATION_LIMITS.quote) {
-      new Notice("The rendered selection is too large to annotate.");
+      new Notice(STRINGS.annotations.renderedSelectionTooLarge);
       return;
     }
     try {
@@ -607,11 +605,11 @@ export class MarkdownAnnotationsController {
       const from = resolved?.from;
       const to = resolved?.to;
       if (!Number.isInteger(from) || !Number.isInteger(to) || to <= from) {
-        new Notice("Could not map that rendered selection to exact source characters.");
+        new Notice(STRINGS.annotations.mapFailed);
         return;
       }
       if (to - from > ANNOTATION_LIMITS.quote) {
-        new Notice("The rendered selection is too large to annotate.");
+        new Notice(STRINGS.annotations.renderedSelectionTooLarge);
         return;
       }
       this.openCreateModal(
@@ -620,7 +618,7 @@ export class MarkdownAnnotationsController {
         "selection"
       );
     } catch {
-      new Notice("Could not read the current Markdown source.");
+      new Notice(STRINGS.annotations.readSourceFailed);
     }
   }
 
@@ -633,7 +631,7 @@ export class MarkdownAnnotationsController {
       !this.isReadingState(state) ||
       !record.element.isConnected
     ) {
-      new Notice("That rendered target is no longer part of this Markdown view.");
+      new Notice(STRINGS.annotations.renderedTargetGone);
       return;
     }
     try {
@@ -653,7 +651,7 @@ export class MarkdownAnnotationsController {
       };
       this.openCreateModal(record.sourcePath, anchor, resolved.targetKind);
     } catch {
-      new Notice("Could not read the current Markdown source.");
+      new Notice(STRINGS.annotations.readSourceFailed);
     }
   }
 
@@ -715,14 +713,14 @@ export class MarkdownAnnotationsController {
     if (annotations.length === 0) return;
 
     const heading = state.listEl.createDiv({ cls: "pi-agent-annotations-list-heading" });
-    heading.createSpan({ text: `Annotations (${annotations.length})` });
+    heading.createSpan({ text: STRINGS.annotations.listHeading(annotations.length) });
     const sendButton = heading.createEl("button", {
       cls: "mod-cta pi-agent-annotations-send",
-      attr: { "aria-label": "Send annotations to pi", type: "button" }
+      attr: { "aria-label": STRINGS.annotations.sendAria, type: "button" }
     });
     const sendIcon = sendButton.createSpan({ cls: "pi-agent-annotations-send-icon" });
     setIcon(sendIcon, "send");
-    sendButton.createSpan({ text: "Send to Pi" });
+    sendButton.createSpan({ text: STRINGS.annotations.send });
     sendButton.addEventListener("click", () => void this.plugin.runAnnotationsPrompt(path));
     for (const annotation of annotations) {
       const row = state.listEl.createDiv({
@@ -740,16 +738,17 @@ export class MarkdownAnnotationsController {
       const metadata = copy.createDiv({ cls: "pi-agent-annotation-meta" });
       metadata.createSpan({ text: annotation.intent === "change" ? "Change" : "Question" });
       metadata.createSpan({ text: annotation.status === "detached" ? "Detached" : "Attached" });
-      if (annotation.targetKind === "block") metadata.createSpan({ text: "Block anchor" });
+      if (annotation.targetKind === "block")
+        metadata.createSpan({ text: STRINGS.annotations.blockAnchor });
 
       const actions = row.createDiv({ cls: "pi-agent-annotation-item-actions" });
-      this.iconButton(actions, "locate-fixed", "Navigate to annotation", () =>
+      this.iconButton(actions, "locate-fixed", STRINGS.annotations.navigate, () =>
         this.navigateTo(state, annotation)
       );
-      this.iconButton(actions, "pencil", "Edit annotation", () =>
+      this.iconButton(actions, "pencil", STRINGS.annotations.edit, () =>
         this.openEditModal(state, annotation)
       );
-      this.iconButton(actions, "trash-2", "Delete annotation", () => {
+      this.iconButton(actions, "trash-2", STRINGS.annotations.delete, () => {
         this.plugin.annotationStore.delete(annotation.path, annotation.id);
         this.refresh();
       });
@@ -768,7 +767,7 @@ export class MarkdownAnnotationsController {
 
   navigateTo(state, annotation) {
     if (annotation.status !== "attached") {
-      new Notice("This annotation is detached from the current note text.");
+      new Notice(STRINGS.annotations.detached);
       return;
     }
     this.plugin.app.workspace.setActiveLeaf(state.leaf, { focus: true });
@@ -779,7 +778,7 @@ export class MarkdownAnnotationsController {
         return range && rangesOverlap(annotation.range, range);
       });
       if (!record) {
-        new Notice("The annotated source block is not currently rendered.");
+        new Notice(STRINGS.annotations.notRendered);
         return;
       }
       const window = record.element.ownerDocument?.defaultView ?? this.hostWindow;
@@ -1138,6 +1137,6 @@ function truncate(value, limit) {
   const text = String(value ?? "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!text) return "No context";
+  if (!text) return STRINGS.annotations.noContext;
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }

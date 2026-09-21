@@ -1,4 +1,5 @@
 import { CUSTOM_MODEL_VALUE } from "../../plugin/settings.mjs";
+import { STRINGS } from "../../shared/strings.mjs";
 
 export function getCurrentRunMetadata(settings, runtimeState) {
   return {
@@ -7,7 +8,7 @@ export function getCurrentRunMetadata(settings, runtimeState) {
       runtimeState?.thinkingLevel ||
       settings.reasoningEffort ||
       settings.effectiveReasoning ||
-      "Pi default",
+      STRINGS.picker.piDefault,
     toolMode: settings.sandboxMode,
     toolModeLabel: formatToolModeLabel(settings.sandboxMode)
   };
@@ -33,8 +34,8 @@ function getDisplayedModel(settings, runtimeState) {
     );
     return runtimeModel?.displayName || runtimeState.model.name || runtimeSlug;
   }
-  if (settings.model === CUSTOM_MODEL_VALUE) return settings.customModel || "Custom";
+  if (settings.model === CUSTOM_MODEL_VALUE) return settings.customModel || STRINGS.picker.custom;
 
   const model = settings.availableModels?.find((candidate) => candidate.slug === settings.model);
-  return model?.displayName || settings.model || "Pi default";
+  return model?.displayName || settings.model || STRINGS.picker.piDefault;
 }

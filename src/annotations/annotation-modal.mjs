@@ -1,4 +1,5 @@
 import { Modal } from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 import { ANNOTATION_LIMITS } from "./annotation-model.mjs";
 
 export class AnnotationModal extends Modal {
@@ -9,20 +10,25 @@ export class AnnotationModal extends Modal {
   }
 
   onOpen() {
-    this.titleEl.setText(this.options.annotation ? "Edit annotation" : "Add annotation");
+    this.titleEl.setText(
+      this.options.annotation ? STRINGS.annotations.editTitle : STRINGS.annotations.addTitle
+    );
     this.contentEl.empty();
     this.modalEl.addClass("pi-agent-annotation-modal");
 
     const controlId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const contextId = `pi-agent-annotation-context-${controlId}`;
-    this.contentEl.createEl("label", { text: "Request", attr: { for: contextId } });
+    this.contentEl.createEl("label", {
+      text: STRINGS.annotations.request,
+      attr: { for: contextId }
+    });
     this.contextEl = this.contentEl.createEl("textarea", {
       cls: "pi-agent-annotation-context",
       attr: {
         id: contextId,
         rows: "4",
         maxlength: String(ANNOTATION_LIMITS.context),
-        placeholder: "Describe the change or ask a question"
+        placeholder: STRINGS.annotations.placeholder
       }
     });
     this.contextEl.value = this.options.annotation?.context ?? "";
@@ -33,7 +39,7 @@ export class AnnotationModal extends Modal {
 
     const fieldset = this.contentEl.createEl("fieldset", {
       cls: "pi-agent-annotation-intents",
-      attr: { "aria-label": "Annotation intent" }
+      attr: { "aria-label": STRINGS.annotations.intent }
     });
     for (const intent of ["change", "question"]) {
       const option = fieldset.createEl("label", { cls: "pi-agent-annotation-intent" });
@@ -44,7 +50,9 @@ export class AnnotationModal extends Modal {
       input.addEventListener("change", () => {
         if (input.checked) this.intent = intent;
       });
-      option.createSpan({ text: intent === "change" ? "Change" : "Question" });
+      option.createSpan({
+        text: intent === "change" ? STRINGS.annotations.change : STRINGS.annotations.question
+      });
     }
 
     const errorId = `pi-agent-annotation-error-${controlId}`;
@@ -54,9 +62,11 @@ export class AnnotationModal extends Modal {
       attr: { id: errorId, role: "alert", "aria-live": "polite" }
     });
     const actions = this.contentEl.createDiv({ cls: "pi-agent-modal-actions" });
-    actions.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    actions
+      .createEl("button", { text: STRINGS.common.cancel })
+      .addEventListener("click", () => this.close());
     this.saveButton = actions.createEl("button", {
-      text: "Save",
+      text: STRINGS.common.save,
       cls: "mod-cta"
     });
     this.saveButton.addEventListener("click", () => this.submit());
@@ -73,7 +83,7 @@ export class AnnotationModal extends Modal {
     if (this.submitting) return;
     const context = this.contextEl?.value.trim() ?? "";
     if (!context) {
-      this.errorEl?.setText("Request is required.");
+      this.errorEl?.setText(STRINGS.annotations.requestRequired);
       this.contextEl?.setAttr("aria-invalid", "true");
       this.contextEl?.focus();
       return;
@@ -85,7 +95,9 @@ export class AnnotationModal extends Modal {
       await this.options.onSave({ context, intent: this.intent });
       this.close();
     } catch (error) {
-      this.errorEl?.setText(error instanceof Error ? error.message : "Could not save annotation.");
+      this.errorEl?.setText(
+        error instanceof Error ? error.message : STRINGS.annotations.saveFailed
+      );
       this.submitting = false;
       this.saveButton?.removeAttribute("disabled");
       this.contextEl?.focus();

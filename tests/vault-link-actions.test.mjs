@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { STRINGS } from "../src/shared/strings.mjs";
 
 const notices = [];
 vi.mock("obsidian", () => ({
@@ -141,7 +142,7 @@ describe("native vault link opening", () => {
 
     await expect(view.openVaultLink("Missing Note#Heading")).resolves.toBe(false);
 
-    expect(notices).toEqual(["Note not found: Missing Note#Heading"]);
+    expect(notices).toEqual([STRINGS.messages.noteNotFound("Missing Note#Heading")]);
     expect(consoleError).toHaveBeenCalledOnce();
   });
 
@@ -152,6 +153,6 @@ describe("native vault link opening", () => {
     await expect(view.openVaultLink("  ")).resolves.toBe(false);
 
     expect(workspace.openLinkText).not.toHaveBeenCalled();
-    expect(notices).toEqual(["Note not found:   "]);
+    expect(notices).toEqual([STRINGS.messages.noteNotFound("  ")]);
   });
 });

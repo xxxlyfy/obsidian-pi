@@ -1,4 +1,5 @@
 import { ANNOTATION_LIMITS, rangeFromOffsets } from "./annotation-model.mjs";
+import { STRINGS } from "../shared/strings.mjs";
 
 /**
  * Resolve a rendered Markdown target against the current source. A rendered
@@ -8,12 +9,12 @@ import { ANNOTATION_LIMITS, rangeFromOffsets } from "./annotation-model.mjs";
 export function resolveReadingModeCapture(source, sectionInfo, renderedSelection = "") {
   const text = String(source ?? "");
   const section = resolveSectionRange(text, sectionInfo);
-  if (!section) return { error: "This rendered block is no longer tied to the current note." };
-  if (section.to <= section.from) return { error: "Choose a non-empty rendered Markdown block." };
+  if (!section) return { error: STRINGS.annotations.renderedBlockGone };
+  if (section.to <= section.from) return { error: STRINGS.annotations.pickRenderedBlock };
 
   const selectedText = String(renderedSelection ?? "");
   if (selectedText.length > ANNOTATION_LIMITS.quote)
-    return { error: "The rendered selection is too large to annotate." };
+    return { error: STRINGS.annotations.renderedSelectionTooLarge };
 
   if (selectedText) {
     const sectionSource = text.slice(section.from, section.to);
@@ -32,16 +33,15 @@ export function resolveReadingModeCapture(source, sectionInfo, renderedSelection
   }
 
   if (section.to - section.from > ANNOTATION_LIMITS.quote)
-    return { error: "This rendered Markdown block is too large to annotate." };
+    return { error: STRINGS.annotations.renderedBlockTooLarge };
   if (!selectedText) return { range: section, targetKind: "block" };
 
   return {
     range: section,
     targetKind: "block",
     renderedText: selectedText,
-    anchorLabel: "Rendered selection (anchored to containing source block)",
-    notice:
-      "This rendered selection cannot be mapped exactly; it will use the containing source block as its anchor."
+    anchorLabel: STRINGS.annotations.renderedSelectionLabel,
+    notice: STRINGS.annotations.renderedSelectionNotMappable
   };
 }
 

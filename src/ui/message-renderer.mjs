@@ -1,4 +1,5 @@
 import * as f from "obsidian";
+import { STRINGS } from "../shared/strings.mjs";
 
 const STREAM_RENDER_INTERVAL_MS = 80;
 
@@ -67,7 +68,7 @@ export function renderMessage(message, index) {
       this.completedThinkingExpansion.get(key) === true,
       (expanded) => this.completedThinkingExpansion.set(key, expanded),
       false,
-      "Thinking",
+      STRINGS.activity.thinking,
       (container, content) => this.renderPlainMessageContent(container, content)
     );
     answer = response.createDiv({ cls: "pi-agent-message-answer" });
@@ -86,7 +87,7 @@ export function renderThinkingDisclosure(
   expanded,
   onToggle,
   live = false,
-  activityLabel = "Thinking",
+  activityLabel = STRINGS.activity.thinking,
   renderMarkdown,
   hasResponse = false
 ) {
@@ -101,9 +102,12 @@ export function renderThinkingDisclosure(
   (0, f.setIcon)(chevron, "chevron-right");
   const label = summary.createSpan({
     cls: "pi-agent-thinking-label",
-    text: String(activityLabel || "Thinking").toUpperCase(),
+    text: String(activityLabel || STRINGS.activity.thinking).toUpperCase(),
     attr: live
-      ? { role: "status", "aria-label": `${activityLabel || "Thinking"} in progress` }
+      ? {
+          role: "status",
+          "aria-label": STRINGS.activity.inProgress(activityLabel || STRINGS.activity.thinking)
+        }
       : undefined
   });
   const canRenderMarkdown = Boolean(thinking && renderMarkdown);
@@ -165,7 +169,7 @@ export function renderPlainMessageContent(container, content) {
     this.getLinkSourcePath(),
     component
   ).catch((err) => {
-    console.error("Pi Agent: Markdown render error", err);
+    console.error(STRINGS.view.markdownRenderError, err);
     container.setText(content || "");
   });
 }
@@ -194,7 +198,7 @@ export function renderStreamingAssistantMessage() {
     this.thinkingDisclosureExpanded,
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
-    this.activityText || "Responding",
+    this.activityText || STRINGS.messages.responding,
     (container, content) => this.renderPlainMessageContent(container, content),
     true
   );
@@ -271,7 +275,7 @@ export function renderActivityMessage() {
     this.streamingThinkingContent ? this.thinkingDisclosureExpanded : false,
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
-    this.activityText || "Thinking",
+    this.activityText || STRINGS.activity.thinking,
     (container, content) => this.renderPlainMessageContent(container, content)
   );
   this.activityDetailsEl = rendered.details;
@@ -290,15 +294,15 @@ export function renderRoleLabel(parent, role, message, index) {
     });
   if (role === "user") {
     (0, f.setIcon)(iconEl, "user");
-    titleEl.createSpan({ text: "You" });
+    titleEl.createSpan({ text: STRINGS.messages.roleYou });
   } else {
     this.renderPiIcon(iconEl);
-    titleEl.createSpan({ text: "Agent" });
+    titleEl.createSpan({ text: STRINGS.messages.roleAgent });
   }
   if (message && index !== undefined) {
     let actionsButton = roleEl.createEl("button", {
       cls: "clickable-icon pi-agent-message-actions",
-      attr: { "aria-label": "Message actions" }
+      attr: { "aria-label": STRINGS.messages.messageActions }
     });
     (0, f.setIcon)(actionsButton, "ellipsis");
     actionsButton.addEventListener("click", (event) => {
