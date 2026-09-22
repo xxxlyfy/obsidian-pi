@@ -405,6 +405,36 @@ describe("race: view close must not drain the queue", () => {
     expect(view.promptQueue.map((item) => item.id)).toEqual(["q1", "q2"]);
   });
 
+  it("does not start a run when the view closes while the payload is prepared", async () => {
+    let releaseDelivery;
+    let view;
+    const runner = createScriptedRunner(async ({ callbacks }) => {
+      callbacks.onTextDelta("started");
+      return result("started", runnerThreadId);
+    });
+    let runnerThreadId;
+    const plugin = createPluginDouble(runner);
+    runnerThreadId = plugin.threads.currentThreadId;
+    plugin.enrichPromptDelivery = vi.fn(
+      (delivery) =>
+        new Promise((resolve) => {
+          releaseDelivery = () => resolve({ ...delivery, promptContext: undefined });
+        })
+    );
+    view = createViewDouble(plugin);
+
+    const pending = view.runPrompt("prepared later", runnerThreadId);
+    await vi.waitFor(() => expect(typeof releaseDelivery).toBe("function"));
+
+    view.onClose();
+    releaseDelivery();
+    await pending;
+
+    expect(runner.calls).toHaveLength(0);
+    expect(view.runtime.listRuns()).toHaveLength(0);
+    expect(plugin.threads.getThread(runnerThreadId).messages).toEqual([]);
+  });
+
   it("still drains the queue normally while the view is open", async () => {
     const prompts = [];
     const runner = createScriptedRunner(async ({ callbacks, prompt }) => {

@@ -95,6 +95,8 @@ export function retrieveQueuedPrompt(id) {
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function steerQueuedPrompt(id) {
+  // A closed view must not push a steering prompt into an Agent run either.
+  if (this.closed) return;
   const taken = takeLocalPrompt(this.promptQueue, id);
   if (!taken.item) return;
   this.promptQueue = taken.queue;

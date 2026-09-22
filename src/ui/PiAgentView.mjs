@@ -947,6 +947,7 @@ export class PiAgentView extends f.ItemView {
     annotationSourcePath,
     includeActiveNote
   ) {
+    if (this.closed) return;
     const prepared = await this.preparePromptPayload({
       prompt,
       threadId,
@@ -957,7 +958,8 @@ export class PiAgentView extends f.ItemView {
       annotationSourcePath,
       includeActiveNote
     });
-    if (!prepared) return;
+    // The view can be closed while the payload was being prepared.
+    if (!prepared || this.closed) return;
     await this.executePromptRun(prepared);
   }
   /**

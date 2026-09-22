@@ -173,6 +173,11 @@ describe("runner lifecycle: reuse rules", () => {
   it("Test 5a — a late finalizer from a terminated run cannot clear the new run", async () => {
     const first = createFakeClient();
     const runner = createRunner({ client: first });
+    const registry = new ThreadRunnerRegistry(() => runner);
+    const runnerA = registry.create("t1");
+    const runnerB = registry.create("t1");
+    expect(runnerA).toBe(runnerB);
+    expect(runnerA).toBe(runner);
 
     const { pending: runA } = await startPendingRun(runner, first);
     // Attach the rejection handler before force termination so the settling run
@@ -184,7 +189,11 @@ describe("runner lifecycle: reuse rules", () => {
     // Run B starts on the same runner before A's continuation runs.
     const second = createFakeClient();
     runner.rpcClient = second;
-    const runB = runner.run("B", undefined, undefined, [], callbacks());
+    const bDeltas = [];
+    const runB = runner.run("B", undefined, undefined, [], {
+      isCanceled: () => false,
+      onTextDelta: (delta) => bDeltas.push(delta)
+    });
     await waitFor(() => runner.isRunning === true && second.listeners.size > 0);
 
     // A settles late: its finalizer must not mark the runner as idle.
@@ -198,7 +207,55 @@ describe("runner lifecycle: reuse rules", () => {
       "already has an active run"
     );
 
+    // Events from A's client must not reach B's callbacks: different clients,
+    // different listener sets.
+    first.emit({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "old" }
+    });
+    first.emit({ type: "agent_settled" });
+    expect(bDeltas).toEqual([]);
+
     second.settle();
+    await runB;
+    expect(runner.isRunning).toBe(false);
+  });
+
+  it("Test 5b — the compact path has the same execution ownership", async () => {
+    const first = createFakeClient();
+    // Keep the compact request pending until released.
+    const releases = [];
+    first.request = vi.fn(async (type) => {
+      if (type === "compact") await new Promise((resolve) => releases.push(resolve));
+      return {};
+    });
+    const runner = createRunner({ client: first });
+
+    const runA = runner.run("/compact", undefined, undefined, [], callbacks());
+    await waitFor(() => runner.isRunning === true && first.listeners.size > 0);
+    const runAOutcome = runA.catch(() => {});
+
+    runner.forceTerminate();
+    expect(runner.isRunning).toBe(false);
+
+    const second = createFakeClient();
+    second.request = vi.fn(async (type) => {
+      if (type === "compact") await new Promise((resolve) => releases.push(resolve));
+      return {};
+    });
+    runner.rpcClient = second;
+    const runB = runner.run("/compact", undefined, undefined, [], callbacks());
+    await waitFor(() => runner.isRunning === true && second.listeners.size > 0);
+
+    // A's late finalizer must not release B's ownership.
+    releases.shift()?.();
+    await runAOutcome;
+    expect(runner.isRunning).toBe(true);
+    await expect(runner.run("C", undefined, undefined, [], callbacks())).rejects.toThrow(
+      "already has an active run"
+    );
+
+    releases.shift()?.();
     await runB;
     expect(runner.isRunning).toBe(false);
   });

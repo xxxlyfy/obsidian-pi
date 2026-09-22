@@ -8286,6 +8286,7 @@ function retrieveQueuedPrompt(id) {
   this.inputEl?.focus();
 }
 async function steerQueuedPrompt(id) {
+  if (this.closed) return;
   const taken = takeLocalPrompt(this.promptQueue, id);
   if (!taken.item) return;
   this.promptQueue = taken.queue;
@@ -11434,6 +11435,7 @@ var PiAgentView = class extends f4.ItemView {
     annotationSourcePath,
     includeActiveNote
   ) {
+    if (this.closed) return;
     const prepared = await this.preparePromptPayload({
       prompt,
       threadId,
@@ -11444,7 +11446,7 @@ var PiAgentView = class extends f4.ItemView {
       annotationSourcePath,
       includeActiveNote
     });
-    if (!prepared) return;
+    if (!prepared || this.closed) return;
     await this.executePromptRun(prepared);
   }
   /**
