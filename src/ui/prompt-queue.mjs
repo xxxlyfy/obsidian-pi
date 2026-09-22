@@ -100,7 +100,7 @@ export async function steerQueuedPrompt(id) {
   this.plugin.replaceLocalPromptQueue(this.promptQueue);
   this.renderPromptQueue();
   try {
-    const run = this.activeRuns.get(taken.item.threadId);
+    const run = this.runtime.getRun(taken.item.threadId);
     if (!run) throw new Error(STRINGS.queue.settledNotice);
     const delivery = await this.plugin.enrichPromptDelivery(taken.item, {
       mode: "steer",
@@ -115,7 +115,7 @@ export async function steerQueuedPrompt(id) {
       : delivery.prompt;
     const steerPrompt = appendTextAttachmentContext(formattedPrompt, delivery.attachments);
     await run.runner.steer(steerPrompt, delivery.images);
-    if (this.activeRuns.get(taken.item.threadId) === run)
+    if (this.runtime.getRun(taken.item.threadId) === run)
       this.plugin.beginAnnotationProcessing(taken.item.threadId, taken.item.annotations);
     new f.Notice(STRINGS.queue.steeringSent);
   } catch (error) {

@@ -73,8 +73,7 @@ export class PiAgentView extends f.ItemView {
     this.completedThinkingExpansion = new Map();
     this.messageRenderComponents = [];
     this.messageRenderComponentByElement = new WeakMap();
-    /** @type {Map<string, any>} */
-    this.activeRuns = new Map();
+    this.runtime = this.plugin.createAgentRuntime();
     this.desktopNotificationRunIds = new Set();
     this.nextDesktopNotificationRunId = 1;
     this.stickToBottom = true;
@@ -573,15 +572,12 @@ export class PiAgentView extends f.ItemView {
   }
   cancelCurrentRun() {
     this.syncCurrentRunFlags();
-    let run = this.getCurrentThreadRun();
-    if (run && !run.canceling) {
-      run.canceling = true;
-      this.canceling = true;
-      this.setActivity(STRINGS.view.canceling, "finishing");
-      this.plugin.cancelPiRun(run.runner);
-      this.setRunningState(true);
-      this.renderThreadListIfVisible();
-    }
+    const run = this.getCurrentThreadRun();
+    if (!this.runtime.requestCancel(run)) return;
+    this.canceling = true;
+    this.setActivity(STRINGS.view.canceling, "finishing");
+    this.setRunningState(true);
+    this.renderThreadListIfVisible();
   }
   cleanupComposerBarObserver() {
     if (this.composerBarCleanup) {
@@ -786,11 +782,11 @@ export class PiAgentView extends f.ItemView {
     return this.getCurrentThreadId() === threadId;
   }
   isThreadRunning(threadId) {
-    return this.activeRuns.has(threadId);
+    return this.runtime.hasRun(threadId);
   }
   getCurrentThreadRun() {
     let threadId = this.getCurrentThreadId();
-    return threadId ? this.activeRuns.get(threadId) : undefined;
+    return threadId ? this.runtime.getRun(threadId) : undefined;
   }
   syncCurrentRunFlags() {
     let run = this.getCurrentThreadRun();
@@ -843,7 +839,7 @@ export class PiAgentView extends f.ItemView {
       seen.add(snapshot);
       callback(snapshot);
     }
-    for (const run of this.activeRuns.values()) {
+    for (const run of this.runtime.listRuns()) {
       const snapshot = run.annotationSnapshot;
       if (!snapshot || seen.has(snapshot)) continue;
       seen.add(snapshot);
@@ -902,8 +898,7 @@ export class PiAgentView extends f.ItemView {
     this.renderPromptQueue();
   }
   restoreActiveRunUiState() {
-    const threadId = this.getCurrentThreadId();
-    const run = threadId ? this.activeRuns.get(threadId) : undefined;
+    const run = this.getCurrentThreadRun();
     if (!run) return;
     this.streamingAssistantContent = run.assistantContent || "";
     this.streamingThinkingContent = run.thinking || "";
@@ -1076,9 +1071,11 @@ export class PiAgentView extends f.ItemView {
     const prompt = prepared.prompt;
     const images = prepared.images;
     const attachments = prepared.attachments;
-    let run = {
-      canceling: false,
-      runner: this.plugin.createPiRunner(threadId),
+    // Assigned by runtime.onStarted before any event can reach this view. It
+    // stays loosely typed until the run record is typed end to end (Phase 9).
+    /** @type {any} */
+    let run;
+    const presentation = {
       accepted: false,
       notificationRunId: `${threadId}:${this.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(prompt),
@@ -1113,41 +1110,23 @@ export class PiAgentView extends f.ItemView {
       this.plugin.replaceLocalPromptQueue(this.promptQueue);
       this.renderPromptQueue();
     };
-    this.activeRuns.set(threadId, run);
-    this.syncCurrentRunFlags();
-    this.running = this.isCurrentThread(threadId);
-    this.canceling = false;
-    this.activityText = STRINGS.view.preparingContext;
-    this.activityKind = "context";
-    this.activityDetail = STRINGS.view.collectingContext;
-    this.activityStickyUntil = 0;
-    this.pendingActivity = undefined;
-    this.clearPendingActivityTimer();
-    this.clearStreamingRenderTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = undefined;
-    this.streamingAssistantContent = "";
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.stickToBottom = true;
-    this.plugin.beginAnnotationProcessing(threadId, annotationSnapshot.annotations);
-    this.setRunningState(this.running);
-    if (!queuedId) addUserMessage();
-    this.renderThreadListIfVisible();
     try {
-      let result = await this.plugin.runPiPrompt(
-        prompt,
+      const { result } = await this.runtime.startPrompt(
+        { threadId, prompt, images, promptContext: delivery.promptContext },
         {
-          isCanceled: () => run.canceling,
+          onStarted: (startedRun) => {
+            Object.assign(startedRun, presentation);
+            run = startedRun;
+            this.applyRunStartUiState(threadId);
+            this.plugin.beginAnnotationProcessing(threadId, annotationSnapshot.annotations);
+            this.setRunningState(this.running);
+            if (!queuedId) addUserMessage();
+            this.renderThreadListIfVisible();
+          },
           onEvent: (event) => this.handleRunStreamEvent(run, threadId, event),
           onTextDelta: (delta) => this.handleRunStreamDelta(run, threadId, delta),
           onPromptAccepted: acknowledgeQueuedDelivery
-        },
-        threadId,
-        run.runner,
-        images,
-        delivery.promptContext
+        }
       );
       acknowledgeQueuedDelivery();
       const createdAt = Date.now();
@@ -1181,6 +1160,8 @@ export class PiAgentView extends f.ItemView {
       }
       this.notifyRunCompleted(run.notificationRunId, threadId);
     } catch (error) {
+      // Start-up failures (no runner, runtime busy) happen before a run record exists.
+      if (!run) throw error;
       let message = error instanceof Error ? error.message : String(error);
       if (queuedId && !run.accepted) {
         this.requeueQueuedPrompt(queuedId);
@@ -1210,34 +1191,59 @@ export class PiAgentView extends f.ItemView {
       new f.Notice(message);
       this.notifyRunCompleted(run.notificationRunId, threadId, STRINGS.view.notificationFailed);
     } finally {
-      this.activeRuns.delete(threadId);
-      this.syncCurrentRunFlags();
-      this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
-      this.canceling = this.getCurrentThreadRun()?.canceling === true;
-      this.streamingAssistantContent = "";
-      this.streamingThinkingContent = "";
-      this.thinkingDisclosureExpanded = false;
-      this.thinkingDisclosureUserSet = false;
-      this.activityStickyUntil = 0;
-      this.pendingActivity = undefined;
-      this.clearPendingActivityTimer();
-      this.clearStreamingRenderTimer();
-      this.activeToolCalls.clear();
-      this.activityText = "";
-      this.activityDetail = "";
-      this.currentRunContextUsage = undefined;
-      if (this.isCurrentThread(threadId)) this.nativePiQueue = undefined;
-      this.renderPromptQueue();
-      this.setRunningState(this.running);
-      if (this.isCurrentThread(threadId)) {
-        this.renderMessages();
-        this.renderToolBadges();
+      if (run) {
+        this.syncCurrentRunFlags();
+        this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
+        this.canceling = this.getCurrentThreadRun()?.canceling === true;
+        this.streamingAssistantContent = "";
+        this.streamingThinkingContent = "";
+        this.thinkingDisclosureExpanded = false;
+        this.thinkingDisclosureUserSet = false;
+        this.activityStickyUntil = 0;
+        this.pendingActivity = undefined;
+        this.clearPendingActivityTimer();
+        this.clearStreamingRenderTimer();
+        this.activeToolCalls.clear();
+        this.activityText = "";
+        this.activityDetail = "";
+        this.currentRunContextUsage = undefined;
+        if (this.isCurrentThread(threadId)) this.nativePiQueue = undefined;
+        this.renderPromptQueue();
+        this.setRunningState(this.running);
+        if (this.isCurrentThread(threadId)) {
+          this.renderMessages();
+          this.renderToolBadges();
+        }
+        this.renderThreadListIfVisible();
+        this.plugin.endAnnotationProcessingForThread(threadId);
+        this.plugin.rebuildServicesIfPending();
+        if (!skipQueueDrain) this.runNextQueuedPrompt();
       }
-      this.renderThreadListIfVisible();
-      this.plugin.endAnnotationProcessingForThread(threadId);
-      this.plugin.rebuildServicesIfPending();
-      if (!skipQueueDrain) this.runNextQueuedPrompt();
     }
+  }
+  /**
+   * Resets the transient per-run UI state before a run starts streaming.
+   *
+   * @param {string} threadId
+   */
+  applyRunStartUiState(threadId) {
+    this.syncCurrentRunFlags();
+    this.running = this.isCurrentThread(threadId);
+    this.canceling = false;
+    this.activityText = STRINGS.view.preparingContext;
+    this.activityKind = "context";
+    this.activityDetail = STRINGS.view.collectingContext;
+    this.activityStickyUntil = 0;
+    this.pendingActivity = undefined;
+    this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
+    this.activeToolCalls.clear();
+    this.currentRunContextUsage = undefined;
+    this.streamingAssistantContent = "";
+    this.streamingThinkingContent = "";
+    this.thinkingDisclosureExpanded = false;
+    this.thinkingDisclosureUserSet = false;
+    this.stickToBottom = true;
   }
   /**
    * @param {any} run

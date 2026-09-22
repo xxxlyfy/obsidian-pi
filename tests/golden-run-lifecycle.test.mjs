@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { AgentRuntime } from "../src/agent/agent-runtime.mjs";
 import { STRINGS } from "../src/shared/strings.mjs";
 
 const notices = vi.hoisted(() => ({ messages: [] }));
@@ -52,7 +53,7 @@ function createScriptedRunner(script) {
 
 function createPluginDouble(runner) {
   const store = new ThreadStore();
-  return {
+  const plugin = {
     settings: { ...DEFAULT_SETTINGS, desktopNotifications: false },
     threadHistory: store,
     savedMessages: [],
@@ -86,12 +87,30 @@ function createPluginDouble(runner) {
     cancelPiRun: vi.fn((activeRunner) => activeRunner?.cancelCurrentRun()),
     app: { vault: { getAbstractFileByPath: () => undefined } }
   };
+  // The runtime owns run records exactly like the real plugin composition root.
+  plugin.createAgentRuntime = () =>
+    new AgentRuntime({
+      runPrompt: (request, callbacks) =>
+        plugin.runPiPrompt(
+          request.prompt,
+          callbacks,
+          request.threadId,
+          request.runner,
+          request.images,
+          request.promptContext
+        ),
+      createRunner: (threadId) => plugin.createPiRunner(threadId),
+      cancelRunner: (activeRunner) => plugin.cancelPiRun(activeRunner),
+      now: () => 1_000
+    });
+  return plugin;
 }
 
 function createViewDouble(plugin) {
   const view = Object.create(PiAgentView.prototype);
   Object.assign(view, {
     plugin,
+    runtime: plugin.createAgentRuntime(),
     running: false,
     canceling: false,
     activityText: "",
@@ -115,7 +134,6 @@ function createViewDouble(plugin) {
     thinkingDisclosureExpanded: false,
     thinkingDisclosureUserSet: false,
     completedThinkingExpansion: new Map(),
-    activeRuns: new Map(),
     desktopNotificationRunIds: new Set(),
     nextDesktopNotificationRunId: 1,
     stickToBottom: true,
@@ -176,14 +194,14 @@ describe("golden path 1: prompt -> streaming -> tool -> completion", () => {
       });
       observations.push({
         stage: "during tool",
-        runTools: view.activeRuns.get(threadId).activeToolCalls.size,
+        runTools: view.runtime.getRun(threadId).activeToolCalls.size,
         viewTools: view.activeToolCalls.size,
         kind: view.activityKind
       });
       callbacks.onEvent({ type: "tool_end", toolCallId: "call-1", toolName: "read" });
       observations.push({
         stage: "after tool",
-        runTools: view.activeRuns.get(threadId).activeToolCalls.size
+        runTools: view.runtime.getRun(threadId).activeToolCalls.size
       });
       callbacks.onTextDelta(" world");
       callbacks.onPromptAccepted();
@@ -209,7 +227,7 @@ describe("golden path 1: prompt -> streaming -> tool -> completion", () => {
       { stage: "during tool", runTools: 1, viewTools: 1, kind: "read" },
       { stage: "after tool", runTools: 0 }
     ]);
-    expect(view.activeRuns.size).toBe(0);
+    expect(view.runtime.listRuns().length).toBe(0);
     expect(view.running).toBe(false);
     expect(view.canceling).toBe(false);
     expect(view.streamingAssistantContent).toBe("");
@@ -276,14 +294,13 @@ describe("golden path 2: prompt -> cancel", () => {
     });
     expect(plugin.savedMessages.map((message) => message.role)).toEqual(["user"]);
     expect(notices.messages).toEqual([STRINGS.view.runCanceled]);
-    expect(view.activeRuns.size).toBe(0);
+    expect(view.runtime.listRuns().length).toBe(0);
     expect(view.running).toBe(false);
     expect(view.canceling).toBe(false);
     expect(view.streamingAssistantContent).toBe("");
 
-    // Characterization of the pre-refactor leak: the view still accepts events
-    // from a settled run because callbacks are not generation-guarded yet.
-    // Phase 1 replaces this with AgentRuntime stale-event dropping.
+    // Phase 1: the runtime drops events from a settled run, so the live view
+    // state and the thread history stay clean.
     lateCallbacks.onTextDelta(" late");
     lateCallbacks.onEvent({
       type: "tool_start",
@@ -292,8 +309,10 @@ describe("golden path 2: prompt -> cancel", () => {
       toolArgs: { path: "A.md" }
     });
 
-    expect(view.streamingAssistantContent).toBe(" late");
-    expect(view.activityText.length).toBeGreaterThan(0);
+    expect(lateCallbacks.isCanceled()).toBe(true);
+    expect(view.streamingAssistantContent).toBe("");
+    expect(view.activityText).toBe("");
+    expect(view.activeToolCalls.size).toBe(0);
     expect(plugin.savedMessages.map((message) => message.role)).toEqual(["user"]);
   });
 });
@@ -317,7 +336,7 @@ describe("golden path 3: prompt -> failure -> retry", () => {
       ["assistant", `${STRINGS.view.runFailed}：${timeoutError.message}`]
     ]);
     expect(notices.messages).toEqual([timeoutError.message]);
-    expect(view.activeRuns.size).toBe(0);
+    expect(view.runtime.listRuns().length).toBe(0);
     expect(view.running).toBe(false);
 
     notices.messages.length = 0;

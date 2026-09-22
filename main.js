@@ -390,6 +390,362 @@ ${messages} 条消息 · ${entries} 个树节点 · ${tokens} tokens · $${cost}
 // src/plugin/PiAgentPlugin.mjs
 var P = __toESM(require("obsidian"), 1);
 
+// src/pi/run-canceled.mjs
+var RUN_CANCELED_NAME = "PiRunCanceledError";
+var PiRunCanceledError = class extends Error {
+  /** @param {unknown} [cause] */
+  constructor(cause = void 0) {
+    super("Pi run canceled.", cause === void 0 ? void 0 : { cause });
+    this.name = RUN_CANCELED_NAME;
+  }
+};
+function isPiRunCanceled(error) {
+  let current = error;
+  for (let depth = 0; current instanceof Error && depth < 10; depth++) {
+    if (current instanceof PiRunCanceledError || current.name === RUN_CANCELED_NAME) return true;
+    current = current.cause;
+  }
+  return false;
+}
+
+// src/agent/run-state.mjs
+var RUN_STATUS = Object.freeze({
+  idle: "idle",
+  starting: "starting",
+  running: "running",
+  waiting: "waiting",
+  cancelling: "cancelling",
+  error: "error",
+  completed: "completed"
+});
+var TERMINAL_STATUSES =
+  /** @type {Set<RunStatus>} */
+  /* @__PURE__ */ new Set([RUN_STATUS.completed, RUN_STATUS.error]);
+function isTerminalStatus(status) {
+  return TERMINAL_STATUSES.has(status);
+}
+var RunStateStore = class {
+  /**
+   * @param {{ now?: () => number }} [options]
+   */
+  constructor(options = {}) {
+    this.now = options.now ?? (() => Date.now());
+    this.runs = /* @__PURE__ */ new Map();
+    this.listeners = /* @__PURE__ */ new Set();
+    this.sequence = 0;
+  }
+  /** @returns {RunRecord[]} */
+  list() {
+    return [...this.runs.values()];
+  }
+  /** @param {string} threadId */
+  get(threadId) {
+    return this.runs.get(threadId);
+  }
+  /** @param {string} threadId */
+  getSnapshot(threadId) {
+    const run = this.runs.get(threadId);
+    return run ? { ...run } : void 0;
+  }
+  /** @param {string} threadId */
+  has(threadId) {
+    return this.runs.has(threadId);
+  }
+  get size() {
+    return this.runs.size;
+  }
+  /**
+   * Starts a new run for a thread, replacing any finished or in-flight record.
+   * The returned record is the mutable object owned by this store.
+   *
+   * @param {string} threadId
+   * @returns {RunRecord}
+   */
+  begin(threadId) {
+    this.sequence += 1;
+    const generation = this.sequence;
+    const run = {
+      runId: `${threadId}:${generation}`,
+      generation,
+      threadId,
+      status: RUN_STATUS.starting,
+      revision: 1,
+      startedAt: this.now(),
+      completedAt: void 0,
+      error: void 0
+    };
+    this.runs.set(threadId, run);
+    this.publish({ type: "run-started", run });
+    return run;
+  }
+  /**
+   * @param {string} threadId
+   * @param {RunStatus} status
+   * @param {Partial<RunState>} [patch]
+   */
+  transition(threadId, status, patch = void 0) {
+    const run = this.runs.get(threadId);
+    if (!run) return void 0;
+    run.status = status;
+    run.revision += 1;
+    if (patch) Object.assign(run, patch);
+    if (isTerminalStatus(status)) run.completedAt = this.now();
+    this.publish({ type: "run-state", run });
+    return run;
+  }
+  /**
+   * Drops the record for a finished run.
+   *
+   * @param {string} threadId
+   * @param {string} [expectedRunId] Only end the record if it is still this run.
+   * @returns {boolean} true when a record was removed.
+   */
+  end(threadId, expectedRunId = void 0) {
+    const run = this.runs.get(threadId);
+    if (!run || (expectedRunId !== void 0 && run.runId !== expectedRunId)) return false;
+    this.runs.delete(threadId);
+    this.publish({ type: "run-ended", run });
+    return true;
+  }
+  /**
+   * True while the given identity still describes the thread's active run.
+   * Stale events must be dropped before they reach shared state.
+   *
+   * @param {string} threadId
+   * @param {string | undefined} runId
+   * @param {number | undefined} generation
+   */
+  isCurrent(threadId, runId, generation) {
+    const run = this.runs.get(threadId);
+    return !!run && run.runId === runId && run.generation === generation;
+  }
+  /**
+   * @param {(event: { type: string, run: RunState }) => void} listener
+   * @returns {() => void} unsubscribe
+   */
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  /** @param {{ type: string, run: RunState }} event */
+  publish(event) {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.warn("Pi Agent: run state listener failed", error);
+      }
+    }
+  }
+  dispose() {
+    this.runs.clear();
+    this.listeners.clear();
+  }
+};
+
+// src/agent/agent-runtime.mjs
+var AgentRuntime = class {
+  /** @param {AgentRuntimePorts} ports */
+  constructor(
+    /** @type {any} */
+    ports = {}
+  ) {
+    this.ports = ports;
+    this.runStates = new RunStateStore({ now: ports.now });
+    this.lastRequests = /* @__PURE__ */ new Map();
+    this.disposed = false;
+  }
+  /**
+   * @param {(event: { type: string, run: any }) => void} listener
+   * @returns {() => void} unsubscribe
+   */
+  subscribe(listener) {
+    return this.runStates.subscribe(listener);
+  }
+  /** @param {string} threadId */
+  getRun(threadId) {
+    return this.runStates.get(threadId);
+  }
+  /** @param {string} threadId */
+  getRunSnapshot(threadId) {
+    return this.runStates.getSnapshot(threadId);
+  }
+  /** @returns {any[]} */
+  listRuns() {
+    return this.runStates.list();
+  }
+  /** @returns {string[]} Thread ids with a run that is still in flight. */
+  activeThreadIds() {
+    return this.runStates.list().map((run) => run.threadId);
+  }
+  /** @param {string} threadId */
+  hasRun(threadId) {
+    return this.runStates.has(threadId);
+  }
+  /**
+   * True while `run` still describes its thread's active run.
+   *
+   * @param {any} run
+   */
+  isCurrent(run) {
+    if (this.disposed || !run) return false;
+    return this.runStates.isCurrent(run.threadId, run.runId, run.generation);
+  }
+  /** @param {string} threadId */
+  createRunner(threadId) {
+    if (!this.ports.createRunner)
+      throw new Error("Pi Agent: AgentRuntime.createRunner is not configured");
+    return this.ports.createRunner(threadId);
+  }
+  /**
+   * Creates the run record and stores the request so `retryRun` can replay it.
+   *
+   * @param {PromptRunRequest} request
+   * @param {any} [presentation] Extra view-owned fields kept on the record.
+   * @returns {import("./run-state.mjs").RunRecord}
+   */
+  beginRun(request, presentation = void 0) {
+    const run = this.runStates.begin(request.threadId);
+    if (presentation) Object.assign(run, presentation);
+    return run;
+  }
+  /** @param {any} run */
+  finishRun(run) {
+    if (!run) return false;
+    return this.runStates.end(run.threadId, run.runId);
+  }
+  /**
+   * @param {any} run
+   * @param {any} [hooks]
+   */
+  guardedCallbacks(run, hooks = {}) {
+    const alive = () => this.isCurrent(run);
+    return {
+      isCanceled: () => run.canceling === true || !alive(),
+      onEvent: (event) => {
+        if (!alive()) return;
+        hooks.onEvent?.(event);
+      },
+      onTextDelta: (delta) => {
+        if (!alive()) return;
+        hooks.onTextDelta?.(delta);
+      },
+      onPromptAccepted: () => {
+        if (!alive()) return;
+        hooks.onPromptAccepted?.();
+      }
+    };
+  }
+  /**
+   * Runs one prompt and settles the run record when it returns. The record is
+   * removed from the active set before this resolves, so any event that arrives
+   * afterwards is stale by definition.
+   *
+   * @param {PromptRunRequest} request
+   * @param {any} [hooks] `{ onStarted, onEvent, onTextDelta, onPromptAccepted }`
+   */
+  async startPrompt(request, hooks = {}) {
+    const threadId = request?.threadId;
+    if (!threadId) throw new Error("Pi Agent: AgentRuntime.startPrompt requires a threadId");
+    if (this.disposed) throw new Error("Pi Agent: this agent runtime is disposed");
+    if (this.hasRun(threadId))
+      throw new Error(`Pi Agent: thread ${threadId} already has an active run`);
+    const activeRequest = {
+      ...request,
+      runner: request.runner ?? this.createRunner(threadId)
+    };
+    const run = this.beginRun(activeRequest);
+    run.runner = activeRequest.runner;
+    this.lastRequests.set(threadId, activeRequest);
+    try {
+      hooks.onStarted?.(run);
+      const result = await this.execute(run, activeRequest, hooks);
+      return { run, result };
+    } finally {
+      this.finishRun(run);
+    }
+  }
+  /**
+   * @param {any} run
+   * @param {PromptRunRequest} request
+   * @param {any} [hooks]
+   */
+  async execute(run, request, hooks = {}) {
+    if (!this.ports.runPrompt)
+      throw new Error("Pi Agent: AgentRuntime.execute is not configured with a runPrompt port");
+    this.runStates.transition(run.threadId, RUN_STATUS.running);
+    try {
+      const result = await this.ports.runPrompt(request, this.guardedCallbacks(run, hooks));
+      this.runStates.transition(run.threadId, RUN_STATUS.completed);
+      return result;
+    } catch (error) {
+      const canceled = run.canceling === true || isPiRunCanceled(error);
+      this.runStates.transition(run.threadId, canceled ? RUN_STATUS.cancelling : RUN_STATUS.error, {
+        error: canceled ? void 0 : error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  }
+  /**
+   * Replays the last request of a thread on a fresh runner.
+   *
+   * @param {string} threadId
+   * @param {any} [hooks]
+   */
+  async retryRun(threadId, hooks = {}) {
+    const previous = this.lastRequests.get(threadId);
+    if (!previous) throw new Error(`Pi Agent: no previous prompt for thread ${threadId}`);
+    return this.startPrompt({ ...previous, runner: void 0 }, hooks);
+  }
+  /**
+   * @param {any} run
+   * @param {any} [runner]
+   */
+  requestCancel(run, runner = run?.runner) {
+    if (!this.isCurrent(run) || run.canceling) return false;
+    run.canceling = true;
+    this.runStates.transition(run.threadId, RUN_STATUS.cancelling);
+    if (this.ports.cancelRunner) this.ports.cancelRunner(runner);
+    else runner?.cancelCurrentRun?.();
+    return true;
+  }
+  /**
+   * Sends a one-shot steering prompt into the run that is still streaming.
+   *
+   * @param {any} run
+   * @param {string} prompt
+   * @param {any[]} [images]
+   */
+  async steerRun(run, prompt, images = []) {
+    const runner = run?.runner;
+    if (!this.isCurrent(run) || !runner?.steer) return false;
+    await runner.steer(prompt, images);
+    if (this.isCurrent(run)) this.runStates.transition(run.threadId, RUN_STATUS.running);
+    return true;
+  }
+  /** @param {string} [instructions] */
+  createCompactPrompt(instructions = "") {
+    const trimmed = String(instructions ?? "").trim();
+    return trimmed ? `/compact ${trimmed}` : "/compact";
+  }
+  /**
+   * @param {string} threadId
+   * @param {string} [instructions]
+   * @param {any} [hooks]
+   */
+  async compactRun(threadId, instructions = "", hooks = {}) {
+    return this.startPrompt(
+      { threadId, prompt: this.createCompactPrompt(instructions), images: [] },
+      hooks
+    );
+  }
+  dispose() {
+    this.disposed = true;
+    this.runStates.dispose();
+    this.lastRequests.clear();
+  }
+};
+
 // src/annotations/annotation-model.mjs
 var ANNOTATION_SCHEMA_VERSION = 1;
 var ANNOTATION_LIMITS = Object.freeze({
@@ -3564,24 +3920,6 @@ function compareVersions(left, right) {
     return leftPart < rightPart ? -1 : 1;
   }
   return 0;
-}
-
-// src/pi/run-canceled.mjs
-var RUN_CANCELED_NAME = "PiRunCanceledError";
-var PiRunCanceledError = class extends Error {
-  /** @param {unknown} [cause] */
-  constructor(cause = void 0) {
-    super("Pi run canceled.", cause === void 0 ? void 0 : { cause });
-    this.name = RUN_CANCELED_NAME;
-  }
-};
-function isPiRunCanceled(error) {
-  let current = error;
-  for (let depth = 0; current instanceof Error && depth < 10; depth++) {
-    if (current instanceof PiRunCanceledError || current.name === RUN_CANCELED_NAME) return true;
-    current = current.cause;
-  }
-  return false;
 }
 
 // src/pi/rpc-client.mjs
@@ -6793,7 +7131,7 @@ async function steerQueuedPrompt(id) {
   this.plugin.replaceLocalPromptQueue(this.promptQueue);
   this.renderPromptQueue();
   try {
-    const run = this.activeRuns.get(taken.item.threadId);
+    const run = this.runtime.getRun(taken.item.threadId);
     if (!run) throw new Error(STRINGS.queue.settledNotice);
     const delivery = await this.plugin.enrichPromptDelivery(taken.item, {
       mode: "steer",
@@ -6808,7 +7146,7 @@ async function steerQueuedPrompt(id) {
       : delivery.prompt;
     const steerPrompt = appendTextAttachmentContext(formattedPrompt, delivery.attachments);
     await run.runner.steer(steerPrompt, delivery.images);
-    if (this.activeRuns.get(taken.item.threadId) === run)
+    if (this.runtime.getRun(taken.item.threadId) === run)
       this.plugin.beginAnnotationProcessing(taken.item.threadId, taken.item.annotations);
     new f.Notice(STRINGS.queue.steeringSent);
   } catch (error) {
@@ -7236,7 +7574,7 @@ function renderThreadListRow(listEl, thread, isCurrent) {
 }
 async function deleteChats() {
   const threads = this.plugin.listThreads({ includeArchived: true });
-  const plan = planBulkThreadDeletion(threads, [...this.activeRuns.keys()]);
+  const plan = planBulkThreadDeletion(threads, this.runtime.activeThreadIds());
   if (plan.all.deleteCount === 0) {
     new f2.Notice(
       plan.all.skippedCount > 0
@@ -8024,7 +8362,7 @@ function applyActivity(text, kind, detail = "", stickyUntil = 0) {
   if (!isUnchanged && !this.updateActivityDom()) this.renderMessages();
 }
 function syncRunActivity(threadId) {
-  const run = threadId ? this.activeRuns.get(threadId) : void 0;
+  const run = threadId ? this.runtime.getRun(threadId) : void 0;
   if (run)
     run.activity = {
       text: this.activityText,
@@ -8034,7 +8372,7 @@ function syncRunActivity(threadId) {
     };
 }
 function syncRunContextUsage(threadId) {
-  const run = threadId ? this.activeRuns.get(threadId) : void 0;
+  const run = threadId ? this.runtime.getRun(threadId) : void 0;
   if (run) run.contextUsage = this.currentRunContextUsage;
 }
 function queuePendingActivity(text, kind, detail = "") {
@@ -8869,7 +9207,7 @@ var PiAgentView = class extends f4.ItemView {
     this.completedThinkingExpansion = /* @__PURE__ */ new Map();
     this.messageRenderComponents = [];
     this.messageRenderComponentByElement = /* @__PURE__ */ new WeakMap();
-    this.activeRuns = /* @__PURE__ */ new Map();
+    this.runtime = this.plugin.createAgentRuntime();
     this.desktopNotificationRunIds = /* @__PURE__ */ new Set();
     this.nextDesktopNotificationRunId = 1;
     this.stickToBottom = true;
@@ -9368,15 +9706,12 @@ var PiAgentView = class extends f4.ItemView {
   }
   cancelCurrentRun() {
     this.syncCurrentRunFlags();
-    let run = this.getCurrentThreadRun();
-    if (run && !run.canceling) {
-      run.canceling = true;
-      this.canceling = true;
-      this.setActivity(STRINGS.view.canceling, "finishing");
-      this.plugin.cancelPiRun(run.runner);
-      this.setRunningState(true);
-      this.renderThreadListIfVisible();
-    }
+    const run = this.getCurrentThreadRun();
+    if (!this.runtime.requestCancel(run)) return;
+    this.canceling = true;
+    this.setActivity(STRINGS.view.canceling, "finishing");
+    this.setRunningState(true);
+    this.renderThreadListIfVisible();
   }
   cleanupComposerBarObserver() {
     if (this.composerBarCleanup) {
@@ -9581,11 +9916,11 @@ var PiAgentView = class extends f4.ItemView {
     return this.getCurrentThreadId() === threadId;
   }
   isThreadRunning(threadId) {
-    return this.activeRuns.has(threadId);
+    return this.runtime.hasRun(threadId);
   }
   getCurrentThreadRun() {
     let threadId = this.getCurrentThreadId();
-    return threadId ? this.activeRuns.get(threadId) : void 0;
+    return threadId ? this.runtime.getRun(threadId) : void 0;
   }
   syncCurrentRunFlags() {
     let run = this.getCurrentThreadRun();
@@ -9638,7 +9973,7 @@ var PiAgentView = class extends f4.ItemView {
       seen.add(snapshot);
       callback(snapshot);
     }
-    for (const run of this.activeRuns.values()) {
+    for (const run of this.runtime.listRuns()) {
       const snapshot = run.annotationSnapshot;
       if (!snapshot || seen.has(snapshot)) continue;
       seen.add(snapshot);
@@ -9699,8 +10034,7 @@ var PiAgentView = class extends f4.ItemView {
     this.renderPromptQueue();
   }
   restoreActiveRunUiState() {
-    const threadId = this.getCurrentThreadId();
-    const run = threadId ? this.activeRuns.get(threadId) : void 0;
+    const run = this.getCurrentThreadRun();
     if (!run) return;
     this.streamingAssistantContent = run.assistantContent || "";
     this.streamingThinkingContent = run.thinking || "";
@@ -9873,9 +10207,8 @@ var PiAgentView = class extends f4.ItemView {
     const prompt = prepared.prompt;
     const images = prepared.images;
     const attachments = prepared.attachments;
-    let run = {
-      canceling: false,
-      runner: this.plugin.createPiRunner(threadId),
+    let run;
+    const presentation = {
       accepted: false,
       notificationRunId: `${threadId}:${this.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(prompt),
@@ -9912,41 +10245,23 @@ var PiAgentView = class extends f4.ItemView {
       this.plugin.replaceLocalPromptQueue(this.promptQueue);
       this.renderPromptQueue();
     };
-    this.activeRuns.set(threadId, run);
-    this.syncCurrentRunFlags();
-    this.running = this.isCurrentThread(threadId);
-    this.canceling = false;
-    this.activityText = STRINGS.view.preparingContext;
-    this.activityKind = "context";
-    this.activityDetail = STRINGS.view.collectingContext;
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
-    this.clearPendingActivityTimer();
-    this.clearStreamingRenderTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
-    this.streamingAssistantContent = "";
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.stickToBottom = true;
-    this.plugin.beginAnnotationProcessing(threadId, annotationSnapshot.annotations);
-    this.setRunningState(this.running);
-    if (!queuedId) addUserMessage();
-    this.renderThreadListIfVisible();
     try {
-      let result = await this.plugin.runPiPrompt(
-        prompt,
+      const { result } = await this.runtime.startPrompt(
+        { threadId, prompt, images, promptContext: delivery.promptContext },
         {
-          isCanceled: () => run.canceling,
+          onStarted: (startedRun) => {
+            Object.assign(startedRun, presentation);
+            run = startedRun;
+            this.applyRunStartUiState(threadId);
+            this.plugin.beginAnnotationProcessing(threadId, annotationSnapshot.annotations);
+            this.setRunningState(this.running);
+            if (!queuedId) addUserMessage();
+            this.renderThreadListIfVisible();
+          },
           onEvent: (event) => this.handleRunStreamEvent(run, threadId, event),
           onTextDelta: (delta) => this.handleRunStreamDelta(run, threadId, delta),
           onPromptAccepted: acknowledgeQueuedDelivery
-        },
-        threadId,
-        run.runner,
-        images,
-        delivery.promptContext
+        }
       );
       acknowledgeQueuedDelivery();
       const createdAt = Date.now();
@@ -9980,6 +10295,7 @@ var PiAgentView = class extends f4.ItemView {
       }
       this.notifyRunCompleted(run.notificationRunId, threadId);
     } catch (error) {
+      if (!run) throw error;
       let message = error instanceof Error ? error.message : String(error);
       if (queuedId && !run.accepted) {
         this.requeueQueuedPrompt(queuedId);
@@ -10009,34 +10325,59 @@ var PiAgentView = class extends f4.ItemView {
       new f4.Notice(message);
       this.notifyRunCompleted(run.notificationRunId, threadId, STRINGS.view.notificationFailed);
     } finally {
-      this.activeRuns.delete(threadId);
-      this.syncCurrentRunFlags();
-      this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
-      this.canceling = this.getCurrentThreadRun()?.canceling === true;
-      this.streamingAssistantContent = "";
-      this.streamingThinkingContent = "";
-      this.thinkingDisclosureExpanded = false;
-      this.thinkingDisclosureUserSet = false;
-      this.activityStickyUntil = 0;
-      this.pendingActivity = void 0;
-      this.clearPendingActivityTimer();
-      this.clearStreamingRenderTimer();
-      this.activeToolCalls.clear();
-      this.activityText = "";
-      this.activityDetail = "";
-      this.currentRunContextUsage = void 0;
-      if (this.isCurrentThread(threadId)) this.nativePiQueue = void 0;
-      this.renderPromptQueue();
-      this.setRunningState(this.running);
-      if (this.isCurrentThread(threadId)) {
-        this.renderMessages();
-        this.renderToolBadges();
+      if (run) {
+        this.syncCurrentRunFlags();
+        this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
+        this.canceling = this.getCurrentThreadRun()?.canceling === true;
+        this.streamingAssistantContent = "";
+        this.streamingThinkingContent = "";
+        this.thinkingDisclosureExpanded = false;
+        this.thinkingDisclosureUserSet = false;
+        this.activityStickyUntil = 0;
+        this.pendingActivity = void 0;
+        this.clearPendingActivityTimer();
+        this.clearStreamingRenderTimer();
+        this.activeToolCalls.clear();
+        this.activityText = "";
+        this.activityDetail = "";
+        this.currentRunContextUsage = void 0;
+        if (this.isCurrentThread(threadId)) this.nativePiQueue = void 0;
+        this.renderPromptQueue();
+        this.setRunningState(this.running);
+        if (this.isCurrentThread(threadId)) {
+          this.renderMessages();
+          this.renderToolBadges();
+        }
+        this.renderThreadListIfVisible();
+        this.plugin.endAnnotationProcessingForThread(threadId);
+        this.plugin.rebuildServicesIfPending();
+        if (!skipQueueDrain) this.runNextQueuedPrompt();
       }
-      this.renderThreadListIfVisible();
-      this.plugin.endAnnotationProcessingForThread(threadId);
-      this.plugin.rebuildServicesIfPending();
-      if (!skipQueueDrain) this.runNextQueuedPrompt();
     }
+  }
+  /**
+   * Resets the transient per-run UI state before a run starts streaming.
+   *
+   * @param {string} threadId
+   */
+  applyRunStartUiState(threadId) {
+    this.syncCurrentRunFlags();
+    this.running = this.isCurrentThread(threadId);
+    this.canceling = false;
+    this.activityText = STRINGS.view.preparingContext;
+    this.activityKind = "context";
+    this.activityDetail = STRINGS.view.collectingContext;
+    this.activityStickyUntil = 0;
+    this.pendingActivity = void 0;
+    this.clearPendingActivityTimer();
+    this.clearStreamingRenderTimer();
+    this.activeToolCalls.clear();
+    this.currentRunContextUsage = void 0;
+    this.streamingAssistantContent = "";
+    this.streamingThinkingContent = "";
+    this.thinkingDisclosureExpanded = false;
+    this.thinkingDisclosureUserSet = false;
+    this.stickToBottom = true;
   }
   /**
    * @param {any} run
@@ -11924,6 +12265,28 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   cancelPiRun(runner) {
     (runner ?? this.pi)?.cancelCurrentRun();
+  }
+  /**
+   * Creates the run lifecycle owner for one view. Every view gets its own
+   * runtime so in-flight run records are never shared between views.
+   *
+   * @returns {AgentRuntime}
+   */
+  createAgentRuntime() {
+    return new AgentRuntime({
+      runPrompt: (request, callbacks) =>
+        this.runPiPrompt(
+          request.prompt,
+          callbacks,
+          request.threadId,
+          request.runner,
+          request.images ?? [],
+          request.promptContext
+        ),
+      createRunner: (threadId) => this.createPiRunner(threadId),
+      cancelRunner: (runner) => this.cancelPiRun(runner),
+      now: () => Date.now()
+    });
   }
   createPiRunner(threadId = this.getCurrentThread().id) {
     return this.threadRunners.create(threadId);

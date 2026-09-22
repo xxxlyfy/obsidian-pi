@@ -25,7 +25,15 @@ const { syncRunActivity, syncRunContextUsage, trackActiveTool, untrackActiveTool
 
 function createView(run) {
   return {
-    activeRuns: new Map(run ? [["t1", run]] : []),
+    runtime: {
+      getRun: (threadId) => (threadId === "t1" ? run : undefined),
+      listRuns: () => (run ? [run] : []),
+      activeThreadIds: () => (run ? ["t1"] : [])
+    },
+    getCurrentThreadRun() {
+      const threadId = this.getCurrentThreadId();
+      return threadId ? this.runtime.getRun(threadId) : undefined;
+    },
     getCurrentThreadId: () => "t1",
     streamingAssistantContent: "",
     streamingThinkingContent: "",
@@ -105,10 +113,11 @@ describe("per-thread live run UI state", () => {
     const runA = {};
     const runB = {};
     const view = createView(runA);
-    view.activeRuns = new Map([
-      ["t1", runA],
-      ["t2", runB]
-    ]);
+    view.runtime = {
+      getRun: (threadId) => (threadId === "t1" ? runA : threadId === "t2" ? runB : undefined),
+      listRuns: () => [runA, runB],
+      activeThreadIds: () => ["t1", "t2"]
+    };
     view.activityText = "Responding";
     view.activityKind = "answer";
     view.activityDetail = "";
@@ -150,10 +159,11 @@ describe("per-thread live run UI state", () => {
     const snapshotB = { annotations: [{ id: "b1", path: "B.md" }], sourcePath: "B.md" };
     const view = Object.create(PiAgentView.prototype);
     view.pendingAnnotationSnapshots = new Set();
-    view.activeRuns = new Map([
-      ["t1", { annotationSnapshot: snapshotA }],
-      ["t2", { annotationSnapshot: snapshotB }]
-    ]);
+    view.runtime = {
+      getRun: () => undefined,
+      listRuns: () => [{ annotationSnapshot: snapshotA }, { annotationSnapshot: snapshotB }],
+      activeThreadIds: () => ["t1", "t2"]
+    };
 
     view.migrateInFlightAnnotationPaths("A.md", "C.md");
 
@@ -173,7 +183,11 @@ describe("per-thread live run UI state", () => {
     };
     const view = Object.create(PiAgentView.prototype);
     view.pendingAnnotationSnapshots = new Set();
-    view.activeRuns = new Map([["t1", { annotationSnapshot: snapshot }]]);
+    view.runtime = {
+      getRun: () => undefined,
+      listRuns: () => [{ annotationSnapshot: snapshot }],
+      activeThreadIds: () => ["t1"]
+    };
 
     view.invalidateInFlightAnnotationPaths("A.md");
 

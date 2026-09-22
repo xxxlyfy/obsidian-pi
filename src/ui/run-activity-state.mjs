@@ -47,7 +47,7 @@ export function applyActivity(text, kind, detail = "", stickyUntil = 0) {
  * @param {string | undefined} threadId
  */
 export function syncRunActivity(threadId) {
-  const run = threadId ? this.activeRuns.get(threadId) : undefined;
+  const run = threadId ? this.runtime.getRun(threadId) : undefined;
   if (run)
     run.activity = {
       text: this.activityText,
@@ -62,7 +62,7 @@ export function syncRunActivity(threadId) {
  * @param {string | undefined} threadId
  */
 export function syncRunContextUsage(threadId) {
-  const run = threadId ? this.activeRuns.get(threadId) : undefined;
+  const run = threadId ? this.runtime.getRun(threadId) : undefined;
   if (run) run.contextUsage = this.currentRunContextUsage;
 }
 

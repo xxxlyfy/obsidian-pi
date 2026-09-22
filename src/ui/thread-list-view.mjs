@@ -133,7 +133,7 @@ export function renderThreadListRow(listEl, thread, isCurrent) {
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function deleteChats() {
   const threads = this.plugin.listThreads({ includeArchived: true });
-  const plan = planBulkThreadDeletion(threads, [...this.activeRuns.keys()]);
+  const plan = planBulkThreadDeletion(threads, this.runtime.activeThreadIds());
   if (plan.all.deleteCount === 0) {
     new f.Notice(
       plan.all.skippedCount > 0

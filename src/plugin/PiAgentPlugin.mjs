@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { STRINGS } from "../shared/strings.mjs";
 import * as P from "obsidian";
+import { AgentRuntime } from "../agent/agent-runtime.mjs";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
 import { ContextBuilder } from "../context/context-builder.mjs";
@@ -1015,6 +1016,28 @@ export class PiAgentPlugin extends P.Plugin {
   }
   cancelPiRun(runner) {
     (runner ?? this.pi)?.cancelCurrentRun();
+  }
+  /**
+   * Creates the run lifecycle owner for one view. Every view gets its own
+   * runtime so in-flight run records are never shared between views.
+   *
+   * @returns {AgentRuntime}
+   */
+  createAgentRuntime() {
+    return new AgentRuntime({
+      runPrompt: (request, callbacks) =>
+        this.runPiPrompt(
+          request.prompt,
+          callbacks,
+          request.threadId,
+          request.runner,
+          request.images ?? [],
+          request.promptContext
+        ),
+      createRunner: (threadId) => this.createPiRunner(threadId),
+      cancelRunner: (runner) => this.cancelPiRun(runner),
+      now: () => Date.now()
+    });
   }
   createPiRunner(threadId = this.getCurrentThread().id) {
     return this.threadRunners.create(threadId);

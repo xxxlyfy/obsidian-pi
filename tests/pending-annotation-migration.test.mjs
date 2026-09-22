@@ -24,7 +24,11 @@ const { PiAgentView } = await import("../src/ui/PiAgentView.mjs");
 function createView(overrides = {}) {
   const view = Object.create(PiAgentView.prototype);
   view.pendingAnnotationSnapshots = new Set();
-  view.activeRuns = new Map();
+  view.runtime = {
+    getRun: () => undefined,
+    listRuns: () => [],
+    activeThreadIds: () => []
+  };
   Object.assign(view, overrides);
   return view;
 }
@@ -52,7 +56,13 @@ describe("annotation snapshot migration during prompt delivery", () => {
 
   it("still migrates snapshots that belong to a running chat", () => {
     const snapshot = { annotations: [], sourcePath: "Notes/Old.md" };
-    const view = createView({ activeRuns: new Map([["t1", { annotationSnapshot: snapshot }]]) });
+    const view = createView({
+      runtime: {
+        getRun: () => undefined,
+        listRuns: () => [{ annotationSnapshot: snapshot }],
+        activeThreadIds: () => ["t1"]
+      }
+    });
 
     view.migrateInFlightAnnotationPaths("Notes/Old.md", "Notes/New.md");
 
@@ -63,7 +73,11 @@ describe("annotation snapshot migration during prompt delivery", () => {
     const snapshot = { annotations: [], sourcePath: "Notes/Old.md" };
     const view = createView({
       pendingAnnotationSnapshots: new Set([snapshot]),
-      activeRuns: new Map([["t1", { annotationSnapshot: snapshot }]])
+      runtime: {
+        getRun: () => undefined,
+        listRuns: () => [{ annotationSnapshot: snapshot }],
+        activeThreadIds: () => ["t1"]
+      }
     });
 
     view.migrateInFlightAnnotationPaths("Notes/Old.md", "Notes/New.md");
