@@ -8,11 +8,14 @@ import { RuntimeModelService } from "../pi/runtime-models.mjs";
 import { ViewRegistry } from "./view-registry.mjs";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
-import { ContextBuilder } from "../context/context-builder.mjs";
+import { ContextService } from "../context/context-service.mjs";
 import { formatContextShowResponse, isContextShowPrompt } from "../context/context-show.mjs";
 import { normalizeSkillFolderList } from "../context/skills.mjs";
 import { VaultGraph } from "../context/vault-graph.mjs";
 import { VaultIndex } from "../context/vault-index.mjs";
+import { VaultAdapter } from "../obsidian/vault-adapter.mjs";
+import { WorkspaceAdapter } from "../obsidian/workspace-adapter.mjs";
+import { EditorAdapter } from "../obsidian/editor-adapter.mjs";
 import { checkPiInstallation, warmupPiCli } from "../pi/health.mjs";
 import { PiRunCanceledError } from "../pi/run-canceled.mjs";
 import { PiCommandCatalog } from "../pi/command-catalog.mjs";
@@ -139,6 +142,9 @@ export class PiAgentPlugin extends P.Plugin {
     this.extensionStatuses = new Map();
     this.extensionWidgets = new Map();
     this.extensionTitle = "";
+    this.vault = new VaultAdapter(app);
+    this.workspace = new WorkspaceAdapter(app);
+    this.editor = new EditorAdapter(app);
     this.views = new ViewRegistry({
       app: this.app,
       viewType: PI_AGENT_VIEW_TYPE,
@@ -161,7 +167,7 @@ export class PiAgentPlugin extends P.Plugin {
 
     (0, P.addIcon)(PI_AGENT_ICON_ID, PI_AGENT_ICON_SVG);
     this.extensionStatusEl = this.addStatusBarItem();
-    this.vaultIndex = new VaultIndex({ app: this.app });
+    this.vaultIndex = new VaultIndex({ vault: this.vault });
     this.vaultIndex.start((eventRef) => this.registerEvent(eventRef));
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
@@ -173,16 +179,16 @@ export class PiAgentPlugin extends P.Plugin {
 
     // Runtime catalogs are loaded on demand by their pickers. Agent runs use
     // Pi directly and must not depend on background discovery processes.
-    this.refreshCurrentContextFile();
+    this.refreshCurrentContextPath();
 
     this.registerEvent(
-      this.app.workspace.on("file-open", (file) => {
-        this.setCurrentContextFile(file);
+      this.workspace.on("file-open", (file) => {
+        this.setCurrentContextPath(file?.path);
       })
     );
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => {
-        this.refreshCurrentContextFile();
+      this.workspace.on("active-leaf-change", () => {
+        this.refreshCurrentContextPath();
       })
     );
     this.registerEvent(
@@ -511,7 +517,7 @@ export class PiAgentPlugin extends P.Plugin {
     const context =
       getCompactInstructions(prompt) === undefined
         ? (promptContext ??
-          (await /** @type {ContextBuilder} */ (this.contextBuilder).build(prompt, selection)))
+          (await /** @type {ContextService} */ (this.contextBuilder).build(prompt, selection)))
         : undefined;
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     if (isContextShowPrompt(prompt)) {
@@ -557,7 +563,7 @@ export class PiAgentPlugin extends P.Plugin {
   async enrichPromptDelivery(delivery, context) {
     const enriched = await applyPromptEnricher(delivery, this.promptEnricher, context);
     const hasAnnotationSnapshot = Object.prototype.hasOwnProperty.call(enriched, "annotations");
-    const promptContext = await /** @type {ContextBuilder} */ (this.contextBuilder).build(
+    const promptContext = await /** @type {ContextService} */ (this.contextBuilder).build(
       enriched.prompt,
       this.getEditorSelection(),
       {
@@ -592,8 +598,8 @@ export class PiAgentPlugin extends P.Plugin {
       throw new Error(STRINGS.plugin.contextBuilderUnavailable);
     return this.contextBuilder.inspectContext(prompt, this.getEditorSelection());
   }
-  getCurrentContextFile() {
-    return (this.refreshCurrentContextFile(), this.currentContextFile);
+  getCurrentContextPath() {
+    return (this.refreshCurrentContextPath(), this.currentContextPath);
   }
   cancelPiRun(runner) {
     (runner ?? this.pi)?.cancelCurrentRun();
@@ -643,13 +649,14 @@ export class PiAgentPlugin extends P.Plugin {
     this.threadRunners.disposeAll();
     this.piCommands = [];
     this.commandCatalogLoaded = false;
-    this.graph = new VaultGraph(
-      this.app,
-      this.settings,
-      () => this.getCurrentContextFile(),
-      this.vaultIndex
-    );
-    this.contextBuilder = new ContextBuilder(
+    this.graph = new VaultGraph({
+      vault: this.vault,
+      workspace: this.workspace,
+      settings: this.settings,
+      getActiveNotePath: () => this.getCurrentContextPath(),
+      index: this.vaultIndex
+    });
+    this.contextBuilder = new ContextService(
       this.graph,
       this.settings,
       be,
@@ -684,10 +691,10 @@ export class PiAgentPlugin extends P.Plugin {
       if (annotations.length > 0) this.annotationStore.deletePath(explicitFile.path);
       return annotations;
     }
-    const file = this.getCurrentContextFile();
-    if (!file) return [];
-    const annotations = await this.getAnnotationsForContext(file.path);
-    if (annotations.length > 0) this.annotationStore.deletePath(file.path);
+    const path = this.getCurrentContextPath();
+    if (!path) return [];
+    const annotations = await this.getAnnotationsForContext(path);
+    if (annotations.length > 0) this.annotationStore.deletePath(path);
     return annotations;
   }
   beginAnnotationProcessing(threadId, annotations) {
@@ -727,23 +734,10 @@ export class PiAgentPlugin extends P.Plugin {
   async getAnnotationsForContext(path) {
     const annotations = this.annotationStore.list(path);
     if (annotations.length === 0) return annotations;
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof P.TFile) || file.extension !== "md") return annotations;
+    if (!this.vault.note(path)) return annotations;
     // Resolve against the exact current file at prompt time. Prefer an open
     // editor because vault reads can lag behind an unsaved CodeMirror change.
-    const activeEditor = this.app.workspace.activeEditor;
-    let content =
-      activeEditor && activeEditor.file?.path === path
-        ? activeEditor.editor?.getValue?.()
-        : undefined;
-    if (typeof content !== "string") {
-      const openLeaf = this.app.workspace.getLeavesOfType("markdown").find((leaf) => {
-        const view = /** @type {any} */ (leaf.view);
-        return view?.file?.path === path && view?.editor?.getValue;
-      });
-      content = /** @type {any} */ (openLeaf?.view)?.editor?.getValue?.();
-    }
-    if (typeof content !== "string") content = await this.app.vault.read(file);
+    const content = this.editor.valueForOpenNote(path) ?? (await this.vault.readFresh(path));
     return this.annotationStore.reanchorPath(path, content);
   }
   buildThreadService() {
@@ -804,11 +798,11 @@ export class PiAgentPlugin extends P.Plugin {
   savePluginData() {
     return this.store.saveNow();
   }
-  refreshCurrentContextFile() {
-    this.setCurrentContextFile(this.app.workspace.getActiveFile());
+  refreshCurrentContextPath() {
+    this.setCurrentContextPath(this.workspace.activeNotePath());
   }
-  setCurrentContextFile(file) {
-    this.currentContextFile = file && file.extension === "md" ? file : undefined;
+  setCurrentContextPath(path) {
+    this.currentContextPath = typeof path === "string" && path ? path : undefined;
   }
   runWithActiveMarkdownNote(checking, action) {
     const activeFile = this.app.workspace.getActiveFile();
@@ -853,22 +847,22 @@ export class PiAgentPlugin extends P.Plugin {
   }
   async suggestFrontmatterForCurrentNote() {
     this.graph || this.rebuildServices();
-    const file = this.graph?.getActiveFile();
-    if (!file) {
+    const path = this.graph?.getActivePath();
+    if (!path) {
       new P.Notice(STRINGS.plugin.openMarkdownFirst);
       return;
     }
-    const content = await this.app.vault.cachedRead(file);
+    const content = await this.vault.read(path);
     const today = new Date().toISOString().slice(0, 10);
     const after = previewSuggestedFrontmatter(content, {
       type: "note",
       status: "draft",
       updated: today,
-      tags: this.inferTags(file, content)
+      tags: this.inferTags(path, content)
     });
     const patch = {
-      id: `${Date.now()}-${file.path}`,
-      path: file.path,
+      id: `${Date.now()}-${path}`,
+      path,
       before: content,
       after,
       reason: "Add baseline Pi-suggested frontmatter",
@@ -876,15 +870,15 @@ export class PiAgentPlugin extends P.Plugin {
         type: "note",
         status: "draft",
         updated: today,
-        tags: this.inferTags(file, content)
+        tags: this.inferTags(path, content)
       }
     };
     new ApprovalModal(this, patch, () => {}).open();
   }
-  inferTags(file, content) {
+  inferTags(path, content) {
     const tags = new Set();
-    const folderPath = file.parent?.path;
-    if (folderPath && folderPath !== "/") {
+    const folderPath = String(path).split("/").slice(0, -1).join("/");
+    if (folderPath) {
       const folderName = folderPath.split("/").pop();
       if (folderName) tags.add(folderName.toLowerCase().replace(/\s+/g, "-"));
     }
@@ -896,7 +890,7 @@ export class PiAgentPlugin extends P.Plugin {
     return activeEditor?.editor?.getSelection() ?? "";
   }
   getVaultBasePath() {
-    return /** @type {any} */ (this.app.vault.adapter).getBasePath?.();
+    return this.vault.getBasePath();
   }
   getPluginDirectory() {
     const basePath = this.getVaultBasePath();

@@ -27,13 +27,13 @@ const { createQueuedPrompt } = await import("../src/ui/prompt-payload.mjs");
 const { normalizeLocalPromptQueue } = await import("../src/ui/local-prompt-queue.mjs");
 
 const viewSource = fs.readFileSync("src/ui/PiAgentView.mjs", "utf8");
-const contextSource = fs.readFileSync("src/context/context-builder.mjs", "utf8");
+const contextSource = fs.readFileSync("src/context/context-service.mjs", "utf8");
 const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
 
-function createView({ currentFile = { path: "Notes/A.md", name: "A.md" }, ...overrides } = {}) {
+function createView({ currentFile = "Notes/A.md", ...overrides } = {}) {
   const view = {
     excludedContextPath: undefined,
-    plugin: { getCurrentContextFile: () => currentFile, getSelectedModelInfo: () => undefined },
+    plugin: { getCurrentContextPath: () => currentFile },
     ...overrides
   };
   view.resolveActiveNoteInclusion = (contextFile) =>
@@ -60,27 +60,21 @@ describe("composer current-note exclusion", () => {
   it("keeps the exclusion while the same note stays open", () => {
     const view = createView({ excludedContextPath: "Notes/A.md" });
 
-    expect(
-      PiAgentView.prototype.resolveActiveNoteInclusion.call(view, { path: "Notes/A.md" })
-    ).toBe(false);
+    expect(PiAgentView.prototype.resolveActiveNoteInclusion.call(view, "Notes/A.md")).toBe(false);
     expect(view.excludedContextPath).toBe("Notes/A.md");
   });
 
   it("clears the exclusion as soon as another note becomes active", () => {
     const view = createView({ excludedContextPath: "Notes/A.md" });
 
-    expect(
-      PiAgentView.prototype.resolveActiveNoteInclusion.call(view, { path: "Notes/B.md" })
-    ).toBe(true);
+    expect(PiAgentView.prototype.resolveActiveNoteInclusion.call(view, "Notes/B.md")).toBe(true);
     expect(view.excludedContextPath).toBeUndefined();
   });
 
   it("includes the note by default and skips the badge when no note is open", () => {
     const view = createView();
 
-    expect(
-      PiAgentView.prototype.resolveActiveNoteInclusion.call(view, { path: "Notes/A.md" })
-    ).toBe(true);
+    expect(PiAgentView.prototype.resolveActiveNoteInclusion.call(view, "Notes/A.md")).toBe(true);
     expect(PiAgentView.prototype.resolveActiveNoteInclusion.call(view, undefined)).toBe(false);
   });
 
@@ -175,12 +169,14 @@ describe("composer current-note exclusion", () => {
 
   it("wires the removable note badge into the prompt plumbing", () => {
     expect(viewSource).toContain(
-      "const includeActiveNote = this.resolveActiveNoteInclusion(contextFile);"
+      "const includeActiveNote = this.resolveActiveNoteInclusion(contextFilePath);"
     );
     expect(viewSource).toContain(
       "if (includeActiveNote === undefined) includeActiveNote = this.shouldIncludeActiveNote();"
     );
-    expect(viewSource).toContain("removeLabel: STRINGS.view.removeNote(contextFile.name)");
+    expect(viewSource).toContain(
+      "removeLabel: STRINGS.view.removeNote(noteTitleFromPath(contextFilePath))"
+    );
     expect(pluginSource).toContain("includeActiveNote: enriched.includeActiveNote !== false");
     expect(contextSource).toContain("if (options?.includeActiveNote === false) return undefined;");
   });

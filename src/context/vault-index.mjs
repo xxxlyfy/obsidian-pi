@@ -16,10 +16,10 @@ export const SEARCH_CANDIDATE_LIMIT = 128;
 export class VaultIndex {
   /**
    * @param {object} options
-   * @param {any} options.app Obsidian app (vault + metadataCache).
+   * @param {import("../obsidian/vault-adapter.mjs").VaultAdapter} options.vault
    */
-  constructor({ app }) {
-    this.app = app;
+  constructor({ vault }) {
+    this.vault = vault;
     /** @type {Map<string, { path: string, title: string, aliases: string[], tags: string[], headings: string[], mtime: number }>} */
     this.metadata = new Map();
     /** @type {Map<string, Map<string, number>>} */
@@ -43,17 +43,15 @@ export class VaultIndex {
    */
   start(register = () => {}) {
     this.ensureBuilt();
-    const cache = this.app.metadataCache;
-    register(cache.on("changed", (file) => this.updateFile(file)));
-    register(cache.on("resolved", () => this.rebuild()));
-    const vault = this.app.vault;
-    register(vault.on("create", (file) => this.updateFile(file)));
-    register(vault.on("modify", (file) => this.updateFile(file)));
-    register(vault.on("delete", (file) => this.removePath(file?.path)));
+    register(this.vault.onMetadataChanged((file) => this.updatePath(file?.path)));
+    register(this.vault.onMetadataResolved(() => this.rebuild()));
+    register(this.vault.on("create", (file) => this.updatePath(file?.path)));
+    register(this.vault.on("modify", (file) => this.updatePath(file?.path)));
+    register(this.vault.on("delete", (file) => this.removePath(file?.path)));
     register(
-      vault.on("rename", (file, oldPath) => {
+      this.vault.on("rename", (file, oldPath) => {
         this.renamePath(oldPath, file?.path);
-        this.updateFile(file);
+        this.updatePath(file?.path);
       })
     );
   }
@@ -69,14 +67,14 @@ export class VaultIndex {
     this.backlinks.clear();
     this.unresolved.clear();
 
-    for (const file of this.app.vault.getMarkdownFiles()) this.indexFileMetadata(file);
+    for (const note of this.vault.listNotes()) this.indexNoteMetadata(note);
 
-    const resolvedLinks = this.app.metadataCache.resolvedLinks ?? {};
+    const resolvedLinks = this.vault.resolvedLinks();
     for (const [source, links] of Object.entries(resolvedLinks)) {
       const counts = toCountMap(links);
       if (counts.size > 0) this.setOutgoing(source, counts);
     }
-    const unresolvedLinks = this.app.metadataCache.unresolvedLinks ?? {};
+    const unresolvedLinks = this.vault.unresolvedLinks();
     for (const [source, links] of Object.entries(unresolvedLinks)) {
       const counts = toCountMap(links);
       if (counts.size > 0) this.unresolved.set(source, counts);
@@ -85,21 +83,20 @@ export class VaultIndex {
     this.built = true;
   }
 
-  /** @param {any} file */
-  updateFile(file) {
-    if (!file?.path) return;
+  /** @param {string | undefined} path */
+  updatePath(path) {
+    if (!path) return;
     this.ensureBuilt();
-    this.indexFileMetadata(file);
-    const links = /** @type {Record<string, number>} */ (
-      this.app.metadataCache.resolvedLinks?.[file.path] ?? {}
-    );
-    this.setOutgoing(file.path, toCountMap(links));
-    const unresolved = /** @type {Record<string, number>} */ (
-      this.app.metadataCache.unresolvedLinks?.[file.path] ?? {}
-    );
-    if (unresolved && Object.keys(unresolved).length > 0)
-      this.unresolved.set(file.path, toCountMap(unresolved));
-    else this.unresolved.delete(file.path);
+    const note = this.vault.note(path);
+    if (!note) {
+      this.removePath(path);
+      return;
+    }
+    this.indexNoteMetadata(note);
+    this.setOutgoing(path, toCountMap(this.vault.resolvedLinks()[path] ?? {}));
+    const unresolved = this.vault.unresolvedLinks()[path] ?? {};
+    if (Object.keys(unresolved).length > 0) this.unresolved.set(path, toCountMap(unresolved));
+    else this.unresolved.delete(path);
   }
 
   /** @param {string} path */
@@ -121,16 +118,16 @@ export class VaultIndex {
     if (entry) this.metadata.set(newPath, { ...entry, path: newPath });
   }
 
-  /** @param {any} file */
-  indexFileMetadata(file) {
-    const cache = this.app.metadataCache.getFileCache(file);
+  /** @param {{ path: string, title: string, mtime: number }} note */
+  indexNoteMetadata(note) {
+    const metadata = this.vault.getMetadata(note.path);
     const entry = {
-      path: file.path,
-      title: String(file.basename ?? ""),
-      aliases: readAliases(cache),
-      tags: readTags(cache),
-      headings: readHeadings(cache),
-      mtime: Number(file.stat?.mtime ?? 0)
+      path: note.path,
+      title: String(note.title ?? ""),
+      aliases: metadata.aliases,
+      tags: metadata.tags,
+      headings: metadata.headings,
+      mtime: Number(note.mtime ?? 0)
     };
     if (entry.path) this.metadata.set(entry.path, entry);
     return entry;
@@ -325,26 +322,4 @@ function toCountMap(links) {
     counts.set(path, Number(count) || 1);
   }
   return counts;
-}
-
-function readAliases(cache) {
-  const aliases = cache?.frontmatter?.aliases;
-  if (Array.isArray(aliases)) return aliases.map(String);
-  return typeof aliases === "string" ? [aliases] : [];
-}
-
-function readTags(cache) {
-  const tags = new Set();
-  for (const tag of cache?.tags ?? []) if (tag?.tag) tags.add(String(tag.tag));
-  const frontmatterTags = cache?.frontmatter?.tags;
-  if (Array.isArray(frontmatterTags)) for (const tag of frontmatterTags) tags.add(String(tag));
-  else if (typeof frontmatterTags === "string") tags.add(frontmatterTags);
-  return [...tags];
-}
-
-function readHeadings(cache) {
-  return (cache?.headings ?? [])
-    .map((heading) => heading?.heading)
-    .filter(Boolean)
-    .map(String);
 }

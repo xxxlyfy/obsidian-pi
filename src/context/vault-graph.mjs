@@ -1,4 +1,3 @@
-import { TFile } from "obsidian";
 import {
   createExcerpt,
   rankSearchResults,
@@ -12,27 +11,36 @@ import { SEARCH_CANDIDATE_LIMIT, VaultIndex } from "./vault-index.mjs";
 export const CONTEXT_RESULT_LIMIT = 8;
 export const NOTE_CONTEXT_CHAR_LIMIT = 12_000;
 
+/**
+ * Turns vault content into prompt context. It speaks in paths and descriptors
+ * only: all Obsidian access goes through the vault/workspace adapters, so this
+ * module has no Obsidian dependency and can be tested with a fake vault.
+ */
 export class VaultGraph {
   /**
-   * @param {any} app
-   * @param {any} settings
-   * @param {() => any} getCurrentContextFile
-   * @param {VaultIndex} [index] Shared metadata/link index. Created lazily when omitted.
+   * @param {object} options
+   * @param {import("../obsidian/vault-adapter.mjs").VaultAdapter} options.vault
+   * @param {import("../obsidian/workspace-adapter.mjs").WorkspaceAdapter} options.workspace
+   * @param {any} options.settings
+   * @param {() => string | undefined} [options.getActiveNotePath]
+   * @param {VaultIndex} [options.index] Shared index. Created lazily when omitted.
    */
-  constructor(app, settings, getCurrentContextFile, index = undefined) {
-    this.app = app;
+  constructor({ vault, workspace, settings, getActiveNotePath, index }) {
+    this.vault = vault;
+    this.workspace = workspace;
     this.settings = settings;
-    this.getCurrentContextFile = getCurrentContextFile;
+    this.getActiveNotePath = getActiveNotePath;
     this.index = index;
   }
 
   getIndex() {
-    if (!this.index) this.index = new VaultIndex({ app: this.app }).ensureBuilt();
+    if (!this.index) this.index = new VaultIndex({ vault: this.vault }).ensureBuilt();
     return this.index;
   }
 
-  getMarkdownFiles() {
-    return this.app.vault.getMarkdownFiles().filter((file) => this.isPathAllowed(file.path));
+  /** @returns {Array<{ path: string, title: string, mtime: number }>} */
+  getNotes() {
+    return this.vault.listNotes().filter((note) => this.isPathAllowed(note.path));
   }
 
   async searchNotes(query, options = {}) {
@@ -51,75 +59,77 @@ export class VaultGraph {
     const results = [];
 
     for (const candidate of candidates) {
-      const file = this.app.vault.getAbstractFileByPath(candidate.path);
-      if (!(file instanceof TFile)) continue;
-      const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
-      const cache = this.app.metadataCache.getFileCache(file);
+      const note = this.vault.note(candidate.path);
+      if (!note) continue;
+      const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
-        path: file.path,
-        title: file.basename,
-        score: scoreSearchResult(file.path, content, terms),
+        path: note.path,
+        title: note.title,
+        score: scoreSearchResult(note.path, content, terms),
         excerpt: createExcerpt(content, terms),
-        tags: this.getTags(cache)
+        tags: this.vault.getMetadata(note.path).tags.sort()
       });
     }
 
     return rankSearchResults(results, limit);
   }
 
+  /**
+   * @param {string} [selection]
+   */
   async getActiveNoteContext(selection = "") {
-    const file = this.getActiveFile();
-    if (!file) return undefined;
+    const path = this.getActivePath();
+    if (!path) return undefined;
 
-    const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
-    return { ...(await this.getNoteContext(file)), content, selection };
+    const content = await this.readFile(path, NOTE_CONTEXT_CHAR_LIMIT);
+    return { ...(await this.getNoteContext(path)), content, selection };
   }
 
-  async getNoteContext(fileOrPath) {
-    const file =
-      typeof fileOrPath === "string"
-        ? this.app.vault.getAbstractFileByPath(fileOrPath)
-        : fileOrPath;
-    if (!(file instanceof TFile)) throw new Error(`Note not found: ${String(fileOrPath)}`);
+  /** @param {string} path */
+  async getNoteContext(path) {
+    const note = this.vault.note(path);
+    if (!note) throw new Error(`Note not found: ${String(path)}`);
 
-    const cache = this.app.metadataCache.getFileCache(file);
-    const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+    const metadata = this.vault.getMetadata(note.path);
+    const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
 
     return {
-      path: file.path,
-      title: file.basename,
-      frontmatter: cache?.frontmatter ?? {},
-      tags: this.getTags(cache),
-      aliases: this.getAliases(cache),
-      headings: this.getHeadings(cache),
-      backlinks: await this.getBacklinks(file.path),
-      outgoingLinks: this.getOutgoingLinks(file.path),
-      unresolvedLinks: this.getUnresolvedLinks(file.path),
-      excerpt: createExcerpt(content, tokenizeQuery(file.basename), 320)
+      path: note.path,
+      title: note.title,
+      frontmatter: metadata.frontmatter,
+      tags: metadata.tags.sort(),
+      aliases: metadata.aliases,
+      headings: metadata.headings,
+      backlinks: await this.getBacklinks(note.path),
+      outgoingLinks: this.getOutgoingLinks(note.path),
+      unresolvedLinks: this.getUnresolvedLinks(note.path),
+      excerpt: createExcerpt(content, tokenizeQuery(note.title), 320)
     };
   }
 
+  /** @param {string} folderPath */
   async getFolderSummary(folderPath) {
     const normalizedFolderPath = folderPath.replace(/^\/+|\/+$/g, "");
-    const files = this.getMarkdownFiles()
-      .filter((file) => file.path.startsWith(`${normalizedFolderPath}/`))
+    const notes = this.getNotes()
+      .filter((note) => note.path.startsWith(`${normalizedFolderPath}/`))
       .slice(0, CONTEXT_RESULT_LIMIT);
     const results = [];
 
-    for (const file of files) {
-      const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+    for (const note of notes) {
+      const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
-        path: file.path,
-        title: file.basename,
+        path: note.path,
+        title: note.title,
         score: 1,
-        excerpt: createExcerpt(content, tokenizeQuery(file.basename), 260),
-        tags: this.getTags(this.app.metadataCache.getFileCache(file))
+        excerpt: createExcerpt(content, tokenizeQuery(note.title), 260),
+        tags: this.vault.getMetadata(note.path).tags.sort()
       });
     }
 
     return results;
   }
 
+  /** @param {string} tag */
   async getNotesByTag(tag) {
     const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
     const paths = this.getIndex()
@@ -129,22 +139,28 @@ export class VaultGraph {
     const results = [];
 
     for (const path of paths) {
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (!(file instanceof TFile)) continue;
-      const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+      const note = this.vault.note(path);
+      if (!note) continue;
+      const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
-        path: file.path,
-        title: file.basename,
+        path: note.path,
+        title: note.title,
         score: 1,
         excerpt: createExcerpt(content, tokenizeQuery(normalizedTag), 260),
-        tags: this.getTags(this.app.metadataCache.getFileCache(file))
+        tags: this.vault.getMetadata(note.path).tags.sort()
       });
     }
 
     return results;
   }
 
-  resolveNoteFile(notePath) {
+  /**
+   * Resolves a wikilink-style reference to a vault path.
+   *
+   * @param {string} notePath
+   * @returns {string | undefined}
+   */
+  resolveNotePath(notePath) {
     const normalizedPath = notePath.replace(/^\/+/, "").replace(/#.*$/, "");
     const candidates = [
       normalizedPath,
@@ -153,19 +169,17 @@ export class VaultGraph {
     ];
 
     for (const candidate of candidates) {
-      const directFile = this.app.vault.getAbstractFileByPath(candidate);
-      if (directFile instanceof TFile && this.isPathAllowed(directFile.path)) return directFile;
+      const note = this.vault.note(candidate);
+      if (note && this.isPathAllowed(note.path)) return note.path;
 
-      const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
-        candidate.replace(/\.md$/i, ""),
-        ""
-      );
-      if (linkedFile && this.isPathAllowed(linkedFile.path)) return linkedFile;
+      const linkedPath = this.vault.resolveLinkPath(candidate.replace(/\.md$/i, ""), "");
+      if (linkedPath && this.isPathAllowed(linkedPath)) return linkedPath;
     }
 
     return undefined;
   }
 
+  /** @param {string} filePath */
   async getBacklinks(filePath) {
     const backlinkEntries = this.getIndex()
       .getBacklinkCounts(filePath)
@@ -174,10 +188,10 @@ export class VaultGraph {
     const backlinks = [];
 
     for (const backlink of backlinkEntries) {
-      const file = this.app.vault.getAbstractFileByPath(backlink.path);
+      const note = this.vault.note(backlink.path);
       let excerpt = "";
-      if (file instanceof TFile) {
-        const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+      if (note) {
+        const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
         excerpt = createExcerpt(content, tokenizeQuery(filePath.replace(/\.md$/i, "")), 220);
       }
 
@@ -192,6 +206,7 @@ export class VaultGraph {
     return backlinks;
   }
 
+  /** @param {string} filePath */
   getOutgoingLinks(filePath) {
     return this.getIndex()
       .getOutgoingCounts(filePath)
@@ -203,12 +218,17 @@ export class VaultGraph {
       }));
   }
 
+  /** @param {string} filePath */
   getUnresolvedLinks(filePath) {
     return this.getIndex()
       .getUnresolvedCounts(filePath)
       .map((link) => ({ path: link.path, display: link.path, count: link.count }));
   }
 
+  /**
+   * @param {string} filePath
+   * @param {number} [depth]
+   */
   async getLinkedNeighborhood(filePath, depth = 1) {
     const index = this.getIndex();
     const seen = new Set([filePath]);
@@ -243,26 +263,30 @@ export class VaultGraph {
     return notes.slice(0, CONTEXT_RESULT_LIMIT);
   }
 
-  getActiveFile() {
-    const file = this.getCurrentContextFile?.() ?? this.app.workspace.getActiveFile();
-    return file && file.extension === "md" && this.isPathAllowed(file.path) ? file : undefined;
+  /** @returns {string | undefined} */
+  getActivePath() {
+    return this.getActiveNotePath?.() ?? this.workspace.activeNotePath();
   }
 
+  /** @param {string} filePath */
   async readVaultFile(filePath) {
-    const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!(file instanceof TFile)) throw new Error(`File not found: ${filePath}`);
-    if (!this.isPathAllowed(file.path)) throw new Error(`Path is not allowed: ${filePath}`);
+    if (!this.vault.note(filePath)) throw new Error(`File not found: ${filePath}`);
+    if (!this.isPathAllowed(filePath)) throw new Error(`Path is not allowed: ${filePath}`);
 
-    return this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+    return this.readFile(filePath, NOTE_CONTEXT_CHAR_LIMIT);
   }
 
-  async readFile(file, maxChars = NOTE_CONTEXT_CHAR_LIMIT) {
-    const content = await this.app.vault.cachedRead(file);
-    return content.length > maxChars ? `${content.slice(0, maxChars)}\n...[truncated]` : content;
+  /**
+   * @param {string} path
+   * @param {number} [maxChars]
+   */
+  async readFile(path, maxChars = NOTE_CONTEXT_CHAR_LIMIT) {
+    return this.vault.read(path, maxChars);
   }
 
+  /** @param {string} filePath */
   isPathAllowed(filePath) {
-    const normalizedPath = filePath.replace(/\\/g, "/");
+    const normalizedPath = String(filePath).replace(/\\/g, "/");
 
     return !this.settings.ignoredFolders.some((ignoredFolder) => {
       const normalizedIgnoredFolder = ignoredFolder.replace(/\/+$/, "");
@@ -271,35 +295,5 @@ export class VaultGraph {
         normalizedPath.startsWith(`${normalizedIgnoredFolder}/`)
       );
     });
-  }
-
-  getTags(cache) {
-    const tags = new Set();
-    for (const tag of cache?.tags ?? []) tags.add(tag.tag);
-
-    const frontmatterTags = cache?.frontmatter?.tags;
-    if (Array.isArray(frontmatterTags)) {
-      for (const tag of frontmatterTags) tags.add(String(tag));
-    } else if (typeof frontmatterTags === "string") {
-      tags.add(frontmatterTags);
-    }
-
-    return [...tags].sort();
-  }
-
-  getAliases(cache) {
-    const aliases = cache?.frontmatter?.aliases;
-    return Array.isArray(aliases)
-      ? aliases.map(String)
-      : typeof aliases === "string"
-        ? [aliases]
-        : [];
-  }
-
-  getHeadings(cache) {
-    return (cache?.headings ?? [])
-      .map((heading) => heading.heading)
-      .filter(Boolean)
-      .slice(0, 20);
   }
 }

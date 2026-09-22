@@ -32,8 +32,10 @@ vi.mock("obsidian", () => ({
 }));
 
 const { AnnotationStore } = await import("../src/annotations/annotation-store.mjs");
-const { ContextBuilder } = await import("../src/context/context-builder.mjs");
+const { ContextService } = await import("../src/context/context-service.mjs");
 const { VaultGraph } = await import("../src/context/vault-graph.mjs");
+const { VaultAdapter } = await import("../src/obsidian/vault-adapter.mjs");
+const { WorkspaceAdapter } = await import("../src/obsidian/workspace-adapter.mjs");
 const { DEFAULT_SETTINGS } = await import("../src/plugin/settings.mjs");
 
 const ACTIVE_CONTENT = [
@@ -103,7 +105,11 @@ function noteSources() {
 function createWorkspace() {
   const { app, readCounts } = createVaultApp(noteSources());
   const settings = { ...DEFAULT_SETTINGS };
-  const graph = new VaultGraph(app, settings, () => app.workspace.getActiveFile());
+  const graph = new VaultGraph({
+    vault: new VaultAdapter(app),
+    workspace: new WorkspaceAdapter(app),
+    settings
+  });
   const annotationStore = new AnnotationStore();
   const from = ACTIVE_CONTENT.indexOf("exact target");
   const annotation = annotationStore.create({
@@ -122,7 +128,7 @@ function createWorkspace() {
     targetKind: "selection",
     status: "attached"
   });
-  const contextBuilder = new ContextBuilder(
+  const contextBuilder = new ContextService(
     graph,
     settings,
     "Bundled",

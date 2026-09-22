@@ -4174,8 +4174,8 @@ function getSlashCommands(piCommands = []) {
   return [...builtins, ...piCommands.filter((command) => !builtinNames.has(command.command))];
 }
 
-// src/context/context-builder.mjs
-var ContextBuilder = class {
+// src/context/context-service.mjs
+var ContextService = class {
   /**
    * @param {any} graph
    * @param {any} settings
@@ -4381,14 +4381,14 @@ ${contextPacket}`;
     for (const reference of references) {
       try {
         if (reference.type === "note") {
-          const noteFile = this.graph.resolveNoteFile(reference.value);
+          const notePath = this.graph.resolveNotePath(reference.value);
           attachments.push({
             type: "note",
             label: reference.value,
-            content: noteFile
+            content: notePath
               ? {
-                  context: await this.graph.getNoteContext(noteFile),
-                  content: await this.graph.readVaultFile(noteFile.path)
+                  context: await this.graph.getNoteContext(notePath),
+                  content: await this.graph.readVaultFile(notePath)
                 }
               : { error: `Note not found: ${reference.value}` }
           });
@@ -4639,9 +4639,6 @@ function resolveSkillPath(skillPath, basePath) {
     : resolved;
 }
 
-// src/context/vault-graph.mjs
-var import_obsidian3 = require("obsidian");
-
 // src/shared/text.mjs
 function tokenizeQuery(query) {
   return query
@@ -4692,10 +4689,10 @@ var SEARCH_CANDIDATE_LIMIT = 128;
 var VaultIndex = class {
   /**
    * @param {object} options
-   * @param {any} options.app Obsidian app (vault + metadataCache).
+   * @param {import("../obsidian/vault-adapter.mjs").VaultAdapter} options.vault
    */
-  constructor({ app }) {
-    this.app = app;
+  constructor({ vault }) {
+    this.vault = vault;
     this.metadata = /* @__PURE__ */ new Map();
     this.outgoing = /* @__PURE__ */ new Map();
     this.backlinks = /* @__PURE__ */ new Map();
@@ -4713,17 +4710,15 @@ var VaultIndex = class {
    */
   start(register = () => {}) {
     this.ensureBuilt();
-    const cache = this.app.metadataCache;
-    register(cache.on("changed", (file) => this.updateFile(file)));
-    register(cache.on("resolved", () => this.rebuild()));
-    const vault = this.app.vault;
-    register(vault.on("create", (file) => this.updateFile(file)));
-    register(vault.on("modify", (file) => this.updateFile(file)));
-    register(vault.on("delete", (file) => this.removePath(file?.path)));
+    register(this.vault.onMetadataChanged((file) => this.updatePath(file?.path)));
+    register(this.vault.onMetadataResolved(() => this.rebuild()));
+    register(this.vault.on("create", (file) => this.updatePath(file?.path)));
+    register(this.vault.on("modify", (file) => this.updatePath(file?.path)));
+    register(this.vault.on("delete", (file) => this.removePath(file?.path)));
     register(
-      vault.on("rename", (file, oldPath) => {
+      this.vault.on("rename", (file, oldPath) => {
         this.renamePath(oldPath, file?.path);
-        this.updateFile(file);
+        this.updatePath(file?.path);
       })
     );
   }
@@ -4736,34 +4731,33 @@ var VaultIndex = class {
     this.outgoing.clear();
     this.backlinks.clear();
     this.unresolved.clear();
-    for (const file of this.app.vault.getMarkdownFiles()) this.indexFileMetadata(file);
-    const resolvedLinks = this.app.metadataCache.resolvedLinks ?? {};
+    for (const note of this.vault.listNotes()) this.indexNoteMetadata(note);
+    const resolvedLinks = this.vault.resolvedLinks();
     for (const [source, links] of Object.entries(resolvedLinks)) {
       const counts = toCountMap(links);
       if (counts.size > 0) this.setOutgoing(source, counts);
     }
-    const unresolvedLinks = this.app.metadataCache.unresolvedLinks ?? {};
+    const unresolvedLinks = this.vault.unresolvedLinks();
     for (const [source, links] of Object.entries(unresolvedLinks)) {
       const counts = toCountMap(links);
       if (counts.size > 0) this.unresolved.set(source, counts);
     }
     this.built = true;
   }
-  /** @param {any} file */
-  updateFile(file) {
-    if (!file?.path) return;
+  /** @param {string | undefined} path */
+  updatePath(path6) {
+    if (!path6) return;
     this.ensureBuilt();
-    this.indexFileMetadata(file);
-    const links =
-      /** @type {Record<string, number>} */
-      this.app.metadataCache.resolvedLinks?.[file.path] ?? {};
-    this.setOutgoing(file.path, toCountMap(links));
-    const unresolved =
-      /** @type {Record<string, number>} */
-      this.app.metadataCache.unresolvedLinks?.[file.path] ?? {};
-    if (unresolved && Object.keys(unresolved).length > 0)
-      this.unresolved.set(file.path, toCountMap(unresolved));
-    else this.unresolved.delete(file.path);
+    const note = this.vault.note(path6);
+    if (!note) {
+      this.removePath(path6);
+      return;
+    }
+    this.indexNoteMetadata(note);
+    this.setOutgoing(path6, toCountMap(this.vault.resolvedLinks()[path6] ?? {}));
+    const unresolved = this.vault.unresolvedLinks()[path6] ?? {};
+    if (Object.keys(unresolved).length > 0) this.unresolved.set(path6, toCountMap(unresolved));
+    else this.unresolved.delete(path6);
   }
   /** @param {string} path */
   removePath(path6) {
@@ -4782,16 +4776,16 @@ var VaultIndex = class {
     this.removePath(oldPath);
     if (entry) this.metadata.set(newPath, { ...entry, path: newPath });
   }
-  /** @param {any} file */
-  indexFileMetadata(file) {
-    const cache = this.app.metadataCache.getFileCache(file);
+  /** @param {{ path: string, title: string, mtime: number }} note */
+  indexNoteMetadata(note) {
+    const metadata = this.vault.getMetadata(note.path);
     const entry = {
-      path: file.path,
-      title: String(file.basename ?? ""),
-      aliases: readAliases(cache),
-      tags: readTags(cache),
-      headings: readHeadings(cache),
-      mtime: Number(file.stat?.mtime ?? 0)
+      path: note.path,
+      title: String(note.title ?? ""),
+      aliases: metadata.aliases,
+      tags: metadata.tags,
+      headings: metadata.headings,
+      mtime: Number(note.mtime ?? 0)
     };
     if (entry.path) this.metadata.set(entry.path, entry);
     return entry;
@@ -4968,48 +4962,33 @@ function toCountMap(links) {
   }
   return counts;
 }
-function readAliases(cache) {
-  const aliases = cache?.frontmatter?.aliases;
-  if (Array.isArray(aliases)) return aliases.map(String);
-  return typeof aliases === "string" ? [aliases] : [];
-}
-function readTags(cache) {
-  const tags = /* @__PURE__ */ new Set();
-  for (const tag of cache?.tags ?? []) if (tag?.tag) tags.add(String(tag.tag));
-  const frontmatterTags = cache?.frontmatter?.tags;
-  if (Array.isArray(frontmatterTags)) for (const tag of frontmatterTags) tags.add(String(tag));
-  else if (typeof frontmatterTags === "string") tags.add(frontmatterTags);
-  return [...tags];
-}
-function readHeadings(cache) {
-  return (cache?.headings ?? [])
-    .map((heading) => heading?.heading)
-    .filter(Boolean)
-    .map(String);
-}
 
 // src/context/vault-graph.mjs
 var CONTEXT_RESULT_LIMIT = 8;
 var NOTE_CONTEXT_CHAR_LIMIT = 12e3;
 var VaultGraph = class {
   /**
-   * @param {any} app
-   * @param {any} settings
-   * @param {() => any} getCurrentContextFile
-   * @param {VaultIndex} [index] Shared metadata/link index. Created lazily when omitted.
+   * @param {object} options
+   * @param {import("../obsidian/vault-adapter.mjs").VaultAdapter} options.vault
+   * @param {import("../obsidian/workspace-adapter.mjs").WorkspaceAdapter} options.workspace
+   * @param {any} options.settings
+   * @param {() => string | undefined} [options.getActiveNotePath]
+   * @param {VaultIndex} [options.index] Shared index. Created lazily when omitted.
    */
-  constructor(app, settings, getCurrentContextFile, index = void 0) {
-    this.app = app;
+  constructor({ vault, workspace, settings, getActiveNotePath, index }) {
+    this.vault = vault;
+    this.workspace = workspace;
     this.settings = settings;
-    this.getCurrentContextFile = getCurrentContextFile;
+    this.getActiveNotePath = getActiveNotePath;
     this.index = index;
   }
   getIndex() {
-    if (!this.index) this.index = new VaultIndex({ app: this.app }).ensureBuilt();
+    if (!this.index) this.index = new VaultIndex({ vault: this.vault }).ensureBuilt();
     return this.index;
   }
-  getMarkdownFiles() {
-    return this.app.vault.getMarkdownFiles().filter((file) => this.isPathAllowed(file.path));
+  /** @returns {Array<{ path: string, title: string, mtime: number }>} */
+  getNotes() {
+    return this.vault.listNotes().filter((note) => this.isPathAllowed(note.path));
   }
   async searchNotes(query, options = {}) {
     const terms = tokenizeQuery(query);
@@ -5023,66 +5002,67 @@ var VaultGraph = class {
     });
     const results = [];
     for (const candidate of candidates) {
-      const file = this.app.vault.getAbstractFileByPath(candidate.path);
-      if (!(file instanceof import_obsidian3.TFile)) continue;
-      const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
-      const cache = this.app.metadataCache.getFileCache(file);
+      const note = this.vault.note(candidate.path);
+      if (!note) continue;
+      const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
-        path: file.path,
-        title: file.basename,
-        score: scoreSearchResult(file.path, content, terms),
+        path: note.path,
+        title: note.title,
+        score: scoreSearchResult(note.path, content, terms),
         excerpt: createExcerpt(content, terms),
-        tags: this.getTags(cache)
+        tags: this.vault.getMetadata(note.path).tags.sort()
       });
     }
     return rankSearchResults(results, limit);
   }
+  /**
+   * @param {string} [selection]
+   */
   async getActiveNoteContext(selection = "") {
-    const file = this.getActiveFile();
-    if (!file) return void 0;
-    const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
-    return { ...(await this.getNoteContext(file)), content, selection };
+    const path6 = this.getActivePath();
+    if (!path6) return void 0;
+    const content = await this.readFile(path6, NOTE_CONTEXT_CHAR_LIMIT);
+    return { ...(await this.getNoteContext(path6)), content, selection };
   }
-  async getNoteContext(fileOrPath) {
-    const file =
-      typeof fileOrPath === "string"
-        ? this.app.vault.getAbstractFileByPath(fileOrPath)
-        : fileOrPath;
-    if (!(file instanceof import_obsidian3.TFile))
-      throw new Error(`Note not found: ${String(fileOrPath)}`);
-    const cache = this.app.metadataCache.getFileCache(file);
-    const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+  /** @param {string} path */
+  async getNoteContext(path6) {
+    const note = this.vault.note(path6);
+    if (!note) throw new Error(`Note not found: ${String(path6)}`);
+    const metadata = this.vault.getMetadata(note.path);
+    const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
     return {
-      path: file.path,
-      title: file.basename,
-      frontmatter: cache?.frontmatter ?? {},
-      tags: this.getTags(cache),
-      aliases: this.getAliases(cache),
-      headings: this.getHeadings(cache),
-      backlinks: await this.getBacklinks(file.path),
-      outgoingLinks: this.getOutgoingLinks(file.path),
-      unresolvedLinks: this.getUnresolvedLinks(file.path),
-      excerpt: createExcerpt(content, tokenizeQuery(file.basename), 320)
+      path: note.path,
+      title: note.title,
+      frontmatter: metadata.frontmatter,
+      tags: metadata.tags.sort(),
+      aliases: metadata.aliases,
+      headings: metadata.headings,
+      backlinks: await this.getBacklinks(note.path),
+      outgoingLinks: this.getOutgoingLinks(note.path),
+      unresolvedLinks: this.getUnresolvedLinks(note.path),
+      excerpt: createExcerpt(content, tokenizeQuery(note.title), 320)
     };
   }
+  /** @param {string} folderPath */
   async getFolderSummary(folderPath) {
     const normalizedFolderPath = folderPath.replace(/^\/+|\/+$/g, "");
-    const files = this.getMarkdownFiles()
-      .filter((file) => file.path.startsWith(`${normalizedFolderPath}/`))
+    const notes = this.getNotes()
+      .filter((note) => note.path.startsWith(`${normalizedFolderPath}/`))
       .slice(0, CONTEXT_RESULT_LIMIT);
     const results = [];
-    for (const file of files) {
-      const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+    for (const note of notes) {
+      const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
-        path: file.path,
-        title: file.basename,
+        path: note.path,
+        title: note.title,
         score: 1,
-        excerpt: createExcerpt(content, tokenizeQuery(file.basename), 260),
-        tags: this.getTags(this.app.metadataCache.getFileCache(file))
+        excerpt: createExcerpt(content, tokenizeQuery(note.title), 260),
+        tags: this.vault.getMetadata(note.path).tags.sort()
       });
     }
     return results;
   }
+  /** @param {string} tag */
   async getNotesByTag(tag) {
     const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
     const paths = this.getIndex()
@@ -5091,20 +5071,26 @@ var VaultGraph = class {
       .slice(0, CONTEXT_RESULT_LIMIT);
     const results = [];
     for (const path6 of paths) {
-      const file = this.app.vault.getAbstractFileByPath(path6);
-      if (!(file instanceof import_obsidian3.TFile)) continue;
-      const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+      const note = this.vault.note(path6);
+      if (!note) continue;
+      const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
-        path: file.path,
-        title: file.basename,
+        path: note.path,
+        title: note.title,
         score: 1,
         excerpt: createExcerpt(content, tokenizeQuery(normalizedTag), 260),
-        tags: this.getTags(this.app.metadataCache.getFileCache(file))
+        tags: this.vault.getMetadata(note.path).tags.sort()
       });
     }
     return results;
   }
-  resolveNoteFile(notePath) {
+  /**
+   * Resolves a wikilink-style reference to a vault path.
+   *
+   * @param {string} notePath
+   * @returns {string | undefined}
+   */
+  resolveNotePath(notePath) {
     const normalizedPath = notePath.replace(/^\/+/, "").replace(/#.*$/, "");
     const candidates = [
       normalizedPath,
@@ -5112,17 +5098,14 @@ var VaultGraph = class {
       normalizedPath.replace(/\.md$/i, "")
     ];
     for (const candidate of candidates) {
-      const directFile = this.app.vault.getAbstractFileByPath(candidate);
-      if (directFile instanceof import_obsidian3.TFile && this.isPathAllowed(directFile.path))
-        return directFile;
-      const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
-        candidate.replace(/\.md$/i, ""),
-        ""
-      );
-      if (linkedFile && this.isPathAllowed(linkedFile.path)) return linkedFile;
+      const note = this.vault.note(candidate);
+      if (note && this.isPathAllowed(note.path)) return note.path;
+      const linkedPath = this.vault.resolveLinkPath(candidate.replace(/\.md$/i, ""), "");
+      if (linkedPath && this.isPathAllowed(linkedPath)) return linkedPath;
     }
     return void 0;
   }
+  /** @param {string} filePath */
   async getBacklinks(filePath) {
     const backlinkEntries = this.getIndex()
       .getBacklinkCounts(filePath)
@@ -5130,10 +5113,10 @@ var VaultGraph = class {
       .slice(0, CONTEXT_RESULT_LIMIT);
     const backlinks = [];
     for (const backlink of backlinkEntries) {
-      const file = this.app.vault.getAbstractFileByPath(backlink.path);
+      const note = this.vault.note(backlink.path);
       let excerpt = "";
-      if (file instanceof import_obsidian3.TFile) {
-        const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+      if (note) {
+        const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
         excerpt = createExcerpt(content, tokenizeQuery(filePath.replace(/\.md$/i, "")), 220);
       }
       backlinks.push({
@@ -5145,6 +5128,7 @@ var VaultGraph = class {
     }
     return backlinks;
   }
+  /** @param {string} filePath */
   getOutgoingLinks(filePath) {
     return this.getIndex()
       .getOutgoingCounts(filePath)
@@ -5155,11 +5139,16 @@ var VaultGraph = class {
         count: link.count
       }));
   }
+  /** @param {string} filePath */
   getUnresolvedLinks(filePath) {
     return this.getIndex()
       .getUnresolvedCounts(filePath)
       .map((link) => ({ path: link.path, display: link.path, count: link.count }));
   }
+  /**
+   * @param {string} filePath
+   * @param {number} [depth]
+   */
   async getLinkedNeighborhood(filePath, depth = 1) {
     const index = this.getIndex();
     const seen = /* @__PURE__ */ new Set([filePath]);
@@ -5186,25 +5175,26 @@ var VaultGraph = class {
     }
     return notes.slice(0, CONTEXT_RESULT_LIMIT);
   }
-  getActiveFile() {
-    const file = this.getCurrentContextFile?.() ?? this.app.workspace.getActiveFile();
-    return file && file.extension === "md" && this.isPathAllowed(file.path) ? file : void 0;
+  /** @returns {string | undefined} */
+  getActivePath() {
+    return this.getActiveNotePath?.() ?? this.workspace.activeNotePath();
   }
+  /** @param {string} filePath */
   async readVaultFile(filePath) {
-    const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${filePath}`);
-    if (!this.isPathAllowed(file.path)) throw new Error(`Path is not allowed: ${filePath}`);
-    return this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
+    if (!this.vault.note(filePath)) throw new Error(`File not found: ${filePath}`);
+    if (!this.isPathAllowed(filePath)) throw new Error(`Path is not allowed: ${filePath}`);
+    return this.readFile(filePath, NOTE_CONTEXT_CHAR_LIMIT);
   }
-  async readFile(file, maxChars = NOTE_CONTEXT_CHAR_LIMIT) {
-    const content = await this.app.vault.cachedRead(file);
-    return content.length > maxChars
-      ? `${content.slice(0, maxChars)}
-...[truncated]`
-      : content;
+  /**
+   * @param {string} path
+   * @param {number} [maxChars]
+   */
+  async readFile(path6, maxChars = NOTE_CONTEXT_CHAR_LIMIT) {
+    return this.vault.read(path6, maxChars);
   }
+  /** @param {string} filePath */
   isPathAllowed(filePath) {
-    const normalizedPath = filePath.replace(/\\/g, "/");
+    const normalizedPath = String(filePath).replace(/\\/g, "/");
     return !this.settings.ignoredFolders.some((ignoredFolder) => {
       const normalizedIgnoredFolder = ignoredFolder.replace(/\/+$/, "");
       return (
@@ -5213,30 +5203,192 @@ var VaultGraph = class {
       );
     });
   }
-  getTags(cache) {
+};
+
+// src/obsidian/vault-adapter.mjs
+var import_obsidian3 = require("obsidian");
+var VaultAdapter = class {
+  /** @param {any} app Obsidian app. */
+  constructor(app) {
+    this.app = app;
+  }
+  getBasePath() {
+    return (
+      /** @type {any} */
+      this.app.vault.adapter?.getBasePath?.()
+    );
+  }
+  getConfigDir() {
+    return this.app.vault.configDir;
+  }
+  /** @returns {NoteDescriptor[]} */
+  listNotes() {
+    return this.app.vault.getMarkdownFiles().map((file) => this.describe(file));
+  }
+  /** @param {string} path */
+  note(path6) {
+    const file = this.app.vault.getAbstractFileByPath(path6);
+    return file instanceof import_obsidian3.TFile ? this.describe(file) : void 0;
+  }
+  /** @param {string} path */
+  exists(path6) {
+    return !!this.app.vault.getAbstractFileByPath(path6);
+  }
+  /**
+   * @param {string} path
+   * @param {number} [maxChars]
+   */
+  async read(path6, maxChars = Number.POSITIVE_INFINITY) {
+    const file = this.app.vault.getAbstractFileByPath(path6);
+    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path6}`);
+    const content = await this.app.vault.cachedRead(file);
+    return content.length > maxChars
+      ? `${content.slice(0, maxChars)}
+...[truncated]`
+      : content;
+  }
+  /** Uncached read, used when the caller must see the latest bytes on disk. */
+  async readFresh(path6) {
+    const file = this.app.vault.getAbstractFileByPath(path6);
+    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path6}`);
+    return this.app.vault.read(file);
+  }
+  /** @param {string} path */
+  async delete(path6) {
+    const file = this.app.vault.getAbstractFileByPath(path6);
+    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path6}`);
+    await this.app.vault.delete(file);
+  }
+  /**
+   * @param {string} path
+   * @returns {NoteMetadata}
+   */
+  getMetadata(path6) {
+    const file = this.app.vault.getAbstractFileByPath(path6);
+    const cache =
+      file instanceof import_obsidian3.TFile ? this.app.metadataCache.getFileCache(file) : void 0;
     const tags = /* @__PURE__ */ new Set();
-    for (const tag of cache?.tags ?? []) tags.add(tag.tag);
+    for (const tag of cache?.tags ?? []) if (tag?.tag) tags.add(String(tag.tag));
     const frontmatterTags = cache?.frontmatter?.tags;
-    if (Array.isArray(frontmatterTags)) {
-      for (const tag of frontmatterTags) tags.add(String(tag));
-    } else if (typeof frontmatterTags === "string") {
-      tags.add(frontmatterTags);
-    }
-    return [...tags].sort();
-  }
-  getAliases(cache) {
+    if (Array.isArray(frontmatterTags)) for (const tag of frontmatterTags) tags.add(String(tag));
+    else if (typeof frontmatterTags === "string") tags.add(frontmatterTags);
     const aliases = cache?.frontmatter?.aliases;
-    return Array.isArray(aliases)
-      ? aliases.map(String)
-      : typeof aliases === "string"
-        ? [aliases]
-        : [];
+    return {
+      tags: [...tags],
+      aliases: Array.isArray(aliases)
+        ? aliases.map(String)
+        : typeof aliases === "string"
+          ? [aliases]
+          : [],
+      headings: (cache?.headings ?? [])
+        .map((heading) => heading?.heading)
+        .filter(Boolean)
+        .slice(0, 20)
+        .map(String),
+      frontmatter: cache?.frontmatter ?? {}
+    };
   }
-  getHeadings(cache) {
-    return (cache?.headings ?? [])
-      .map((heading) => heading.heading)
-      .filter(Boolean)
-      .slice(0, 20);
+  /** @returns {Record<string, Record<string, number>>} */
+  resolvedLinks() {
+    return this.app.metadataCache.resolvedLinks ?? {};
+  }
+  /** @returns {Record<string, Record<string, number>>} */
+  unresolvedLinks() {
+    return this.app.metadataCache.unresolvedLinks ?? {};
+  }
+  /**
+   * @param {string} linkpath
+   * @param {string} [sourcePath]
+   * @returns {string | undefined}
+   */
+  resolveLinkPath(linkpath, sourcePath = "") {
+    const file = this.app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
+    return file instanceof import_obsidian3.TFile ? file.path : void 0;
+  }
+  /** @returns {any} Obsidian EventRef, for `registerEvent`. */
+  on(eventName, callback) {
+    return this.app.vault.on(eventName, callback);
+  }
+  /** @returns {any} Obsidian EventRef, for `registerEvent`. */
+  onMetadataChanged(callback) {
+    return this.app.metadataCache.on("changed", callback);
+  }
+  /** @returns {any} Obsidian EventRef, for `registerEvent`. */
+  onMetadataResolved(callback) {
+    return this.app.metadataCache.on("resolved", callback);
+  }
+  /** @param {any} file */
+  describe(file) {
+    return {
+      path: String(file.path),
+      title: String(file.basename ?? file.name ?? ""),
+      mtime: Number(file.stat?.mtime ?? 0)
+    };
+  }
+  /** @param {string} path */
+  toEventPath(path6) {
+    const file = this.app.vault.getAbstractFileByPath(path6);
+    return file instanceof import_obsidian3.TFile ? file.path : void 0;
+  }
+};
+
+// src/obsidian/workspace-adapter.mjs
+var WorkspaceAdapter = class {
+  /** @param {any} app Obsidian app. */
+  constructor(app) {
+    this.app = app;
+  }
+  /** @returns {string | undefined} Path of the active markdown note. */
+  activeNotePath() {
+    const file = this.app.workspace.getActiveFile();
+    return file && file.extension === "md" ? String(file.path) : void 0;
+  }
+  /** @returns {string} Currently selected text in the active editor. */
+  activeSelection() {
+    return this.app.workspace.activeEditor?.editor?.getSelection() ?? "";
+  }
+  /** @param {string} path */
+  async openNote(path6) {
+    const file = this.app.vault.getAbstractFileByPath(path6);
+    if (file) await this.app.workspace.getLeaf(false).openFile(file);
+  }
+  /**
+   * @param {string} eventName
+   * @param {(...args: any[]) => void} callback
+   */
+  on(eventName, callback) {
+    return this.app.workspace.on(eventName, callback);
+  }
+};
+
+// src/obsidian/editor-adapter.mjs
+var EditorAdapter = class {
+  /** @param {any} app Obsidian app. */
+  constructor(app) {
+    this.app = app;
+  }
+  /**
+   * Returns the live editor value for a note when that note is open.
+   *
+   * @param {string} path
+   * @returns {string | undefined}
+   */
+  valueForOpenNote(path6) {
+    const activeEditor = this.app.workspace.activeEditor;
+    if (activeEditor?.file?.path === path6) {
+      const value2 = activeEditor.editor?.getValue?.();
+      if (typeof value2 === "string") return value2;
+    }
+    const leaf = this.app.workspace.getLeavesOfType("markdown").find((candidate) => {
+      const view =
+        /** @type {any} */
+        candidate.view;
+      return view?.file?.path === path6 && typeof view?.editor?.getValue === "function";
+    });
+    const value =
+      /** @type {any} */
+      leaf?.view?.editor?.getValue?.();
+    return typeof value === "string" ? value : void 0;
   }
 };
 
@@ -8897,9 +9049,7 @@ function getLinkLabel(value) {
 }
 function getLinkSourcePath() {
   return (
-    this.plugin.getCurrentContextFile()?.path ??
-    this.plugin.app.workspace.getActiveFile()?.path ??
-    ""
+    this.plugin.getCurrentContextPath() || this.plugin.app.workspace.getActiveFile()?.path || ""
   );
 }
 function revealLine(leaf, line) {
@@ -10574,14 +10724,14 @@ var PiAgentView = class extends f4.ItemView {
       cls: "pi-agent-context-badges",
       attr: { role: "list", "aria-label": STRINGS.view.pendingContext }
     });
-    const contextFile = this.plugin.getCurrentContextFile();
-    const includeActiveNote = this.resolveActiveNoteInclusion(contextFile);
-    if (includeActiveNote)
-      this.renderPendingBadge(badges, contextFile.name, {
-        title: contextFile.path,
-        removeLabel: STRINGS.view.removeNote(contextFile.name),
+    const contextFilePath = this.plugin.getCurrentContextPath();
+    const includeActiveNote = this.resolveActiveNoteInclusion(contextFilePath);
+    if (includeActiveNote && contextFilePath)
+      this.renderPendingBadge(badges, noteTitleFromPath(contextFilePath), {
+        title: contextFilePath,
+        removeLabel: STRINGS.view.removeNote(noteTitleFromPath(contextFilePath)),
         onRemove: () => {
-          this.excludedContextPath = contextFile.path;
+          this.excludedContextPath = contextFilePath;
           this.renderToolBadges();
         }
       });
@@ -10604,14 +10754,14 @@ var PiAgentView = class extends f4.ItemView {
         }
       });
     const annotations =
-      includeActiveNote && contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
+      includeActiveNote && contextFilePath ? this.plugin.annotationStore.list(contextFilePath) : [];
     if (annotations.length > 0) {
       const label = STRINGS.view.annotationsCount(annotations.length);
       this.renderPendingBadge(badges, label, {
         removeLabel: STRINGS.view.clearAnnotations(annotations.length),
         onRemove: () => {
           this.plugin.annotationController?.cancelPick();
-          this.plugin.annotationStore.deletePath(contextFile.path);
+          this.plugin.annotationStore.deletePath(contextFilePath);
           this.renderToolBadges();
         }
       });
@@ -10619,16 +10769,12 @@ var PiAgentView = class extends f4.ItemView {
     this.renderToolBadgesContextUsage(root);
   }
   shouldIncludeActiveNote() {
-    return this.resolveActiveNoteInclusion(this.plugin.getCurrentContextFile());
+    return this.resolveActiveNoteInclusion(this.plugin.getCurrentContextPath());
   }
-  resolveActiveNoteInclusion(contextFile) {
-    if (
-      this.excludedContextPath &&
-      contextFile?.path &&
-      this.excludedContextPath !== contextFile.path
-    )
+  resolveActiveNoteInclusion(contextPath) {
+    if (this.excludedContextPath && contextPath && this.excludedContextPath !== contextPath)
       this.excludedContextPath = void 0;
-    return !!contextFile && this.excludedContextPath !== contextFile.path;
+    return !!contextPath && this.excludedContextPath !== contextPath;
   }
   renderPendingBadge(parent, label, options = {}) {
     const { removeLabel, onRemove, title = label } = options;
@@ -10742,7 +10888,7 @@ var PiAgentView = class extends f4.ItemView {
     const text = this.inputEl?.value.trim();
     const images = this.composerImages.map((image) => ({ ...image }));
     const attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
-    const contextFilePath = this.plugin.getCurrentContextFile()?.path;
+    const contextFilePath = this.plugin.getCurrentContextPath();
     const includeActiveNote = this.shouldIncludeActiveNote();
     if (!text && images.length === 0 && attachments.length === 0) return;
     if (images.length > 0) {
@@ -11580,6 +11726,13 @@ var PiAgentView = class extends f4.ItemView {
     (0, f4.setIcon)(element, PI_AGENT_ICON_ID);
   }
 };
+function noteTitleFromPath(path6) {
+  const name =
+    String(path6 ?? "")
+      .split("/")
+      .pop() ?? "";
+  return name.replace(/\.md$/i, "") || name;
+}
 function mimeForName(name) {
   const extension = String(name || "")
     .toLowerCase()
@@ -12410,6 +12563,9 @@ var PiAgentPlugin = class extends P.Plugin {
     this.extensionStatuses = /* @__PURE__ */ new Map();
     this.extensionWidgets = /* @__PURE__ */ new Map();
     this.extensionTitle = "";
+    this.vault = new VaultAdapter(app);
+    this.workspace = new WorkspaceAdapter(app);
+    this.editor = new EditorAdapter(app);
     this.views = new ViewRegistry({
       app: this.app,
       viewType: PI_AGENT_VIEW_TYPE,
@@ -12429,7 +12585,7 @@ var PiAgentPlugin = class extends P.Plugin {
       void requestDesktopNotificationPermission().catch(() => {});
     (0, P.addIcon)(PI_AGENT_ICON_ID, PI_AGENT_ICON_SVG);
     this.extensionStatusEl = this.addStatusBarItem();
-    this.vaultIndex = new VaultIndex({ app: this.app });
+    this.vaultIndex = new VaultIndex({ vault: this.vault });
     this.vaultIndex.start((eventRef) => this.registerEvent(eventRef));
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
@@ -12437,15 +12593,15 @@ var PiAgentPlugin = class extends P.Plugin {
     if (!this.settings.dryRun) {
       warmupPiCli(this.settings.piExecutablePath, this.getPluginDirectory());
     }
-    this.refreshCurrentContextFile();
+    this.refreshCurrentContextPath();
     this.registerEvent(
-      this.app.workspace.on("file-open", (file) => {
-        this.setCurrentContextFile(file);
+      this.workspace.on("file-open", (file) => {
+        this.setCurrentContextPath(file?.path);
       })
     );
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => {
-        this.refreshCurrentContextFile();
+      this.workspace.on("active-leaf-change", () => {
+        this.refreshCurrentContextPath();
       })
     );
     this.registerEvent(
@@ -12764,7 +12920,7 @@ var PiAgentPlugin = class extends P.Plugin {
     const context =
       getCompactInstructions(prompt) === void 0
         ? (promptContext ??
-          (await /** @type {ContextBuilder} */
+          (await /** @type {ContextService} */
           this.contextBuilder.build(prompt, selection)))
         : void 0;
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
@@ -12811,7 +12967,7 @@ var PiAgentPlugin = class extends P.Plugin {
   async enrichPromptDelivery(delivery, context) {
     const enriched = await applyPromptEnricher(delivery, this.promptEnricher, context);
     const hasAnnotationSnapshot = Object.prototype.hasOwnProperty.call(enriched, "annotations");
-    const promptContext = await /** @type {ContextBuilder} */
+    const promptContext = await /** @type {ContextService} */
     this.contextBuilder.build(enriched.prompt, this.getEditorSelection(), {
       ...(hasAnnotationSnapshot ? { annotations: enriched.annotations } : {}),
       activeNotePath: enriched.contextFilePath,
@@ -12843,8 +12999,8 @@ var PiAgentPlugin = class extends P.Plugin {
       throw new Error(STRINGS.plugin.contextBuilderUnavailable);
     return this.contextBuilder.inspectContext(prompt, this.getEditorSelection());
   }
-  getCurrentContextFile() {
-    return (this.refreshCurrentContextFile(), this.currentContextFile);
+  getCurrentContextPath() {
+    return (this.refreshCurrentContextPath(), this.currentContextPath);
   }
   cancelPiRun(runner) {
     (runner ?? this.pi)?.cancelCurrentRun();
@@ -12894,13 +13050,14 @@ var PiAgentPlugin = class extends P.Plugin {
     this.threadRunners.disposeAll();
     this.piCommands = [];
     this.commandCatalogLoaded = false;
-    this.graph = new VaultGraph(
-      this.app,
-      this.settings,
-      () => this.getCurrentContextFile(),
-      this.vaultIndex
-    );
-    this.contextBuilder = new ContextBuilder(
+    this.graph = new VaultGraph({
+      vault: this.vault,
+      workspace: this.workspace,
+      settings: this.settings,
+      getActiveNotePath: () => this.getCurrentContextPath(),
+      index: this.vaultIndex
+    });
+    this.contextBuilder = new ContextService(
       this.graph,
       this.settings,
       be,
@@ -12935,10 +13092,10 @@ var PiAgentPlugin = class extends P.Plugin {
       if (annotations2.length > 0) this.annotationStore.deletePath(explicitFile.path);
       return annotations2;
     }
-    const file = this.getCurrentContextFile();
-    if (!file) return [];
-    const annotations = await this.getAnnotationsForContext(file.path);
-    if (annotations.length > 0) this.annotationStore.deletePath(file.path);
+    const path6 = this.getCurrentContextPath();
+    if (!path6) return [];
+    const annotations = await this.getAnnotationsForContext(path6);
+    if (annotations.length > 0) this.annotationStore.deletePath(path6);
     return annotations;
   }
   beginAnnotationProcessing(threadId, annotations) {
@@ -12978,23 +13135,8 @@ var PiAgentPlugin = class extends P.Plugin {
   async getAnnotationsForContext(path6) {
     const annotations = this.annotationStore.list(path6);
     if (annotations.length === 0) return annotations;
-    const file = this.app.vault.getAbstractFileByPath(path6);
-    if (!(file instanceof P.TFile) || file.extension !== "md") return annotations;
-    const activeEditor = this.app.workspace.activeEditor;
-    let content =
-      activeEditor && activeEditor.file?.path === path6
-        ? activeEditor.editor?.getValue?.()
-        : void 0;
-    if (typeof content !== "string") {
-      const openLeaf = this.app.workspace.getLeavesOfType("markdown").find((leaf) => {
-        const view =
-          /** @type {any} */
-          leaf.view;
-        return view?.file?.path === path6 && view?.editor?.getValue;
-      });
-      content = /** @type {any} */ openLeaf?.view?.editor?.getValue?.();
-    }
-    if (typeof content !== "string") content = await this.app.vault.read(file);
+    if (!this.vault.note(path6)) return annotations;
+    const content = this.editor.valueForOpenNote(path6) ?? (await this.vault.readFresh(path6));
     return this.annotationStore.reanchorPath(path6, content);
   }
   buildThreadService() {
@@ -13055,11 +13197,11 @@ var PiAgentPlugin = class extends P.Plugin {
   savePluginData() {
     return this.store.saveNow();
   }
-  refreshCurrentContextFile() {
-    this.setCurrentContextFile(this.app.workspace.getActiveFile());
+  refreshCurrentContextPath() {
+    this.setCurrentContextPath(this.workspace.activeNotePath());
   }
-  setCurrentContextFile(file) {
-    this.currentContextFile = file && file.extension === "md" ? file : void 0;
+  setCurrentContextPath(path6) {
+    this.currentContextPath = typeof path6 === "string" && path6 ? path6 : void 0;
   }
   runWithActiveMarkdownNote(checking, action) {
     const activeFile = this.app.workspace.getActiveFile();
@@ -13104,22 +13246,22 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   async suggestFrontmatterForCurrentNote() {
     this.graph || this.rebuildServices();
-    const file = this.graph?.getActiveFile();
-    if (!file) {
+    const path6 = this.graph?.getActivePath();
+    if (!path6) {
       new P.Notice(STRINGS.plugin.openMarkdownFirst);
       return;
     }
-    const content = await this.app.vault.cachedRead(file);
+    const content = await this.vault.read(path6);
     const today = /* @__PURE__ */ new Date().toISOString().slice(0, 10);
     const after = previewSuggestedFrontmatter(content, {
       type: "note",
       status: "draft",
       updated: today,
-      tags: this.inferTags(file, content)
+      tags: this.inferTags(path6, content)
     });
     const patch = {
-      id: `${Date.now()}-${file.path}`,
-      path: file.path,
+      id: `${Date.now()}-${path6}`,
+      path: path6,
       before: content,
       after,
       reason: "Add baseline Pi-suggested frontmatter",
@@ -13127,15 +13269,15 @@ var PiAgentPlugin = class extends P.Plugin {
         type: "note",
         status: "draft",
         updated: today,
-        tags: this.inferTags(file, content)
+        tags: this.inferTags(path6, content)
       }
     };
     new ApprovalModal(this, patch, () => {}).open();
   }
-  inferTags(file, content) {
+  inferTags(path6, content) {
     const tags = /* @__PURE__ */ new Set();
-    const folderPath = file.parent?.path;
-    if (folderPath && folderPath !== "/") {
+    const folderPath = String(path6).split("/").slice(0, -1).join("/");
+    if (folderPath) {
       const folderName = folderPath.split("/").pop();
       if (folderName) tags.add(folderName.toLowerCase().replace(/\s+/g, "-"));
     }
@@ -13147,10 +13289,7 @@ var PiAgentPlugin = class extends P.Plugin {
     return activeEditor?.editor?.getSelection() ?? "";
   }
   getVaultBasePath() {
-    return (
-      /** @type {any} */
-      this.app.vault.adapter.getBasePath?.()
-    );
+    return this.vault.getBasePath();
   }
   getPluginDirectory() {
     const basePath = this.getVaultBasePath();

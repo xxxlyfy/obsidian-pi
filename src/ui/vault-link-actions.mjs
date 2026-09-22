@@ -83,9 +83,7 @@ export function getLinkLabel(value) {
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function getLinkSourcePath() {
   return (
-    this.plugin.getCurrentContextFile()?.path ??
-    this.plugin.app.workspace.getActiveFile()?.path ??
-    ""
+    this.plugin.getCurrentContextPath() || this.plugin.app.workspace.getActiveFile()?.path || ""
   );
 }
 

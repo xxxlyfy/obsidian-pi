@@ -15,9 +15,13 @@ describe("pending context badges", () => {
     expect(viewSource).not.toContain("Current:");
     expect(viewSource).not.toContain("No current note");
     expect(viewSource).toContain("pi-agent-context-badge-remove");
-    expect(viewSource).toContain("this.renderPendingBadge(badges, contextFile.name, {");
-    expect(viewSource).toContain("title: contextFile.path");
-    expect(viewSource).toContain("removeLabel: STRINGS.view.removeNote(contextFile.name)");
+    expect(viewSource).toContain(
+      "this.renderPendingBadge(badges, noteTitleFromPath(contextFilePath), {"
+    );
+    expect(viewSource).toContain("title: contextFilePath");
+    expect(viewSource).toContain(
+      "removeLabel: STRINGS.view.removeNote(noteTitleFromPath(contextFilePath))"
+    );
     expect(viewSource).toContain('STRINGS.view.removePending(image.fileName || "image")');
     expect(viewSource).toContain("STRINGS.view.removePending(attachment.fileName)");
     expect(viewSource).toContain("STRINGS.view.clearAnnotations(annotations.length)");
@@ -27,16 +31,16 @@ describe("pending context badges", () => {
   });
 
   it("keeps pending files and annotations removable while the current note can be excluded", () => {
-    expect(viewSource).toContain("this.excludedContextPath = contextFile.path");
+    expect(viewSource).toContain("this.excludedContextPath = contextFilePath");
     expect(viewSource).toContain(
-      "return !!contextFile && this.excludedContextPath !== contextFile.path;"
+      "return !!contextPath && this.excludedContextPath !== contextPath;"
     );
     expect(viewSource).toContain("if (!onRemove) return");
     expect(viewSource).toContain(
       "this.composerImages = this.composerImages.filter((item) => item.id !== image.id)"
     );
     expect(viewSource).toContain("(item) => item.id !== attachment.id");
-    expect(viewSource).toContain("this.plugin.annotationStore.deletePath(contextFile.path)");
+    expect(viewSource).toContain("this.plugin.annotationStore.deletePath(contextFilePath)");
     expect(viewSource).toContain("contextFilePath: annotationSnapshot.sourcePath");
     expect(pluginSource).toContain("this.refreshAnnotationBadges()");
     expect(pluginSource).toContain("Follow every annotation's user-authored request");

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ANNOTATION_LIMITS } from "../src/annotations/annotation-model.mjs";
-import { ContextBuilder, findPiCommand } from "../src/context/context-builder.mjs";
+import { ContextService, findPiCommand } from "../src/context/context-service.mjs";
 import { DEFAULT_SETTINGS } from "../src/plugin/settings.mjs";
 
 function createGraph() {
@@ -30,9 +30,9 @@ function createGraph() {
   };
 }
 
-describe("ContextBuilder", () => {
+describe("ContextService", () => {
   it("builds pre-attached context from active notes, explicit attachments, commands, and inspection", async () => {
-    const builder = new ContextBuilder(
+    const builder = new ContextService(
       createGraph(),
       { ...DEFAULT_SETTINGS, includeDefaultSkills: false, customInstructions: "Custom" },
       "Bundled",
@@ -106,7 +106,7 @@ describe("ContextBuilder", () => {
       title: "Pinned"
     }));
     graph.readVaultFile = vi.fn(async (path) => `content for ${path}`);
-    const builder = new ContextBuilder(graph, DEFAULT_SETTINGS, "Bundled", "");
+    const builder = new ContextService(graph, DEFAULT_SETTINGS, "Bundled", "");
 
     const pinned = await builder.build("Prompt", "selection", {
       activeNotePath: "Folder/Pinned.md"
@@ -130,7 +130,7 @@ describe("ContextBuilder", () => {
   });
 
   it("advertises Pi's batched edit schema in edit-capable modes", () => {
-    const builder = new ContextBuilder(
+    const builder = new ContextService(
       createGraph(),
       { ...DEFAULT_SETTINGS, sandboxMode: "edit" },
       "Bundled",
@@ -142,7 +142,7 @@ describe("ContextBuilder", () => {
   });
 
   it("keeps instruction-like annotation text inside escaped structured data", async () => {
-    const builder = new ContextBuilder(
+    const builder = new ContextService(
       createGraph(),
       DEFAULT_SETTINGS,
       "Bundled",
@@ -171,7 +171,7 @@ describe("ContextBuilder", () => {
   });
 
   it("bounds annotation records and prompt characters", () => {
-    const builder = new ContextBuilder(createGraph(), DEFAULT_SETTINGS, "Bundled", "");
+    const builder = new ContextService(createGraph(), DEFAULT_SETTINGS, "Bundled", "");
     const annotation = {
       id: "a",
       path: "Note.md",
@@ -199,7 +199,7 @@ describe("ContextBuilder", () => {
   it("resolves annotations again from current content at prompt time", async () => {
     let quote = "first version";
     const provider = async (path) => [{ id: "annotation-1", path, quote }];
-    const builder = new ContextBuilder(
+    const builder = new ContextService(
       createGraph(),
       DEFAULT_SETTINGS,
       "Bundled",
@@ -218,7 +218,7 @@ describe("ContextBuilder", () => {
 
   it("uses a consumed annotation snapshot instead of reading later annotations", async () => {
     const provider = vi.fn(async () => [{ id: "later", path: "Active.md", quote: "later" }]);
-    const builder = new ContextBuilder(
+    const builder = new ContextService(
       createGraph(),
       DEFAULT_SETTINGS,
       "Bundled",
@@ -239,7 +239,7 @@ describe("ContextBuilder", () => {
       { command: "/skill:review", source: "skill", label: "review", detail: "Review files" },
       { command: "/hello", source: "extension", label: "hello", detail: "Say hello" }
     ];
-    const builder = new ContextBuilder(
+    const builder = new ContextService(
       createGraph(),
       DEFAULT_SETTINGS,
       "Bundled",
@@ -261,7 +261,7 @@ describe("ContextBuilder", () => {
   });
 
   it("formats only current-turn context and does not duplicate thread history", async () => {
-    const builder = new ContextBuilder(createGraph(), DEFAULT_SETTINGS, "Bundled", "");
+    const builder = new ContextService(createGraph(), DEFAULT_SETTINGS, "Bundled", "");
     const context = await builder.build("Second prompt", "current selection");
     const priorMessage = "prior-local-message-" + "x".repeat(12_000);
     const formatted = builder.formatPrompt("Second prompt", context, [

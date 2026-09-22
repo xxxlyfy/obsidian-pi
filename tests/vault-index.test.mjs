@@ -18,18 +18,22 @@ vi.mock("obsidian", () => ({ TFile: obsidian.TFile, Notice: class {} }));
 
 const { VaultIndex, SEARCH_CANDIDATE_LIMIT } = await import("../src/context/vault-index.mjs");
 const { VaultGraph } = await import("../src/context/vault-graph.mjs");
+const { VaultAdapter } = await import("../src/obsidian/vault-adapter.mjs");
+const { WorkspaceAdapter } = await import("../src/obsidian/workspace-adapter.mjs");
 const { DEFAULT_SETTINGS } = await import("../src/plugin/settings.mjs");
 
 function createFixture(notes = 300) {
   const vault = createSyntheticVault(obsidian.TFile, { notes });
-  const index = new VaultIndex({ app: vault.app }).ensureBuilt();
-  const graph = new VaultGraph(
-    vault.app,
-    { ...DEFAULT_SETTINGS },
-    () => vault.app.workspace.getActiveFile(),
+  const adapter = new VaultAdapter(vault.app);
+  const workspace = new WorkspaceAdapter(vault.app);
+  const index = new VaultIndex({ vault: adapter }).ensureBuilt();
+  const graph = new VaultGraph({
+    vault: adapter,
+    workspace,
+    settings: { ...DEFAULT_SETTINGS },
     index
-  );
-  return { ...vault, index, graph };
+  });
+  return { ...vault, index, graph, adapter };
 }
 
 describe("VaultIndex", () => {
@@ -68,12 +72,12 @@ describe("VaultIndex", () => {
   });
 
   it("updates metadata, links, and backlinks incrementally", () => {
-    const { index, resolvedLinks, pathFor, caches, files } = createFixture(50);
+    const { index, resolvedLinks, pathFor, caches } = createFixture(50);
     const source = pathFor(3);
     const oldTarget = Object.keys(resolvedLinks[source])[0];
     const newTarget = pathFor(20);
 
-    index.updateFile(files.get(source));
+    index.updatePath(source);
     expect(index.getBacklinkCounts(oldTarget)).toContainEqual({ path: source, count: 1 });
 
     caches.set(source, {
@@ -82,7 +86,7 @@ describe("VaultIndex", () => {
       headings: []
     });
     resolvedLinks[source] = { [newTarget]: 5 };
-    index.updateFile(files.get(source));
+    index.updatePath(source);
 
     expect(index.getMetadata(source).tags).toEqual(["#reindexed"]);
     expect(index.getBacklinkCounts(oldTarget).some((entry) => entry.path === source)).toBe(false);

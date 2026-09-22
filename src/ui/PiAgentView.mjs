@@ -362,14 +362,14 @@ export class PiAgentView extends f.ItemView {
       cls: "pi-agent-context-badges",
       attr: { role: "list", "aria-label": STRINGS.view.pendingContext }
     });
-    const contextFile = this.plugin.getCurrentContextFile();
-    const includeActiveNote = this.resolveActiveNoteInclusion(contextFile);
-    if (includeActiveNote)
-      this.renderPendingBadge(badges, contextFile.name, {
-        title: contextFile.path,
-        removeLabel: STRINGS.view.removeNote(contextFile.name),
+    const contextFilePath = this.plugin.getCurrentContextPath();
+    const includeActiveNote = this.resolveActiveNoteInclusion(contextFilePath);
+    if (includeActiveNote && contextFilePath)
+      this.renderPendingBadge(badges, noteTitleFromPath(contextFilePath), {
+        title: contextFilePath,
+        removeLabel: STRINGS.view.removeNote(noteTitleFromPath(contextFilePath)),
         onRemove: () => {
-          this.excludedContextPath = contextFile.path;
+          this.excludedContextPath = contextFilePath;
           this.renderToolBadges();
         }
       });
@@ -392,14 +392,14 @@ export class PiAgentView extends f.ItemView {
         }
       });
     const annotations =
-      includeActiveNote && contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
+      includeActiveNote && contextFilePath ? this.plugin.annotationStore.list(contextFilePath) : [];
     if (annotations.length > 0) {
       const label = STRINGS.view.annotationsCount(annotations.length);
       this.renderPendingBadge(badges, label, {
         removeLabel: STRINGS.view.clearAnnotations(annotations.length),
         onRemove: () => {
           this.plugin.annotationController?.cancelPick();
-          this.plugin.annotationStore.deletePath(contextFile.path);
+          this.plugin.annotationStore.deletePath(contextFilePath);
           this.renderToolBadges();
         }
       });
@@ -407,16 +407,12 @@ export class PiAgentView extends f.ItemView {
     this.renderToolBadgesContextUsage(root);
   }
   shouldIncludeActiveNote() {
-    return this.resolveActiveNoteInclusion(this.plugin.getCurrentContextFile());
+    return this.resolveActiveNoteInclusion(this.plugin.getCurrentContextPath());
   }
-  resolveActiveNoteInclusion(contextFile) {
-    if (
-      this.excludedContextPath &&
-      contextFile?.path &&
-      this.excludedContextPath !== contextFile.path
-    )
+  resolveActiveNoteInclusion(contextPath) {
+    if (this.excludedContextPath && contextPath && this.excludedContextPath !== contextPath)
       this.excludedContextPath = undefined;
-    return !!contextFile && this.excludedContextPath !== contextFile.path;
+    return !!contextPath && this.excludedContextPath !== contextPath;
   }
   renderPendingBadge(parent, label, options = {}) {
     const { removeLabel, onRemove, title = label } = options;
@@ -530,7 +526,7 @@ export class PiAgentView extends f.ItemView {
     const text = this.inputEl?.value.trim();
     const images = this.composerImages.map((image) => ({ ...image }));
     const attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
-    const contextFilePath = this.plugin.getCurrentContextFile()?.path;
+    const contextFilePath = this.plugin.getCurrentContextPath();
     const includeActiveNote = this.shouldIncludeActiveNote();
     if (!text && images.length === 0 && attachments.length === 0) return;
     if (images.length > 0) {
@@ -1369,6 +1365,13 @@ export class PiAgentView extends f.ItemView {
   }
 }
 
+function noteTitleFromPath(path) {
+  const name =
+    String(path ?? "")
+      .split("/")
+      .pop() ?? "";
+  return name.replace(/\.md$/i, "") || name;
+}
 function mimeForName(name) {
   const extension = String(name || "")
     .toLowerCase()

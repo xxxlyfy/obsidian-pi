@@ -48,7 +48,7 @@ function createPlugin({ files = {}, currentFile, annotationsByPath = {} } = {}) 
         getAbstractFileByPath: (path) => files[path]
       }
     },
-    getCurrentContextFile: () => currentFile,
+    getCurrentContextPath: () => currentFile,
     getAnnotationsForContext: vi.fn(async (path) => annotationsByPath[path] ?? []),
     annotationStore: {
       deletePath: (path) => deletedPaths.push(path),
@@ -67,7 +67,7 @@ function consumeAnnotations(plugin, sourcePath) {
 describe("PiAgentPlugin annotation consumption", () => {
   it("does not fall back to the current note when an explicit source path is gone", async () => {
     const plugin = createPlugin({
-      currentFile: new obsidian.TFile("B.md", "md"),
+      currentFile: "B.md",
       annotationsByPath: { "B.md": [{ id: "b1", path: "B.md" }] }
     });
     obsidian.Notice.messages.length = 0;
@@ -82,7 +82,7 @@ describe("PiAgentPlugin annotation consumption", () => {
   it("treats non-markdown explicit source paths as missing", async () => {
     const plugin = createPlugin({
       files: { "A.png": new obsidian.TFile("A.png", "png") },
-      currentFile: new obsidian.TFile("B.md", "md"),
+      currentFile: "B.md",
       annotationsByPath: { "B.md": [{ id: "b1", path: "B.md" }] }
     });
     obsidian.Notice.messages.length = 0;
@@ -97,7 +97,7 @@ describe("PiAgentPlugin annotation consumption", () => {
     const explicit = [{ id: "a1", path: "A.md" }];
     const plugin = createPlugin({
       files: { "A.md": new obsidian.TFile("A.md", "md") },
-      currentFile: new obsidian.TFile("B.md", "md"),
+      currentFile: "B.md",
       annotationsByPath: { "A.md": explicit, "B.md": [{ id: "b1", path: "B.md" }] }
     });
 
@@ -109,7 +109,7 @@ describe("PiAgentPlugin annotation consumption", () => {
   it("falls back to the current note only when no source path is provided", async () => {
     const current = [{ id: "b1", path: "B.md" }];
     const plugin = createPlugin({
-      currentFile: new obsidian.TFile("B.md", "md"),
+      currentFile: "B.md",
       annotationsByPath: { "B.md": current }
     });
 

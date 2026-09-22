@@ -3,7 +3,17 @@ import { getResolvedReasoning, CUSTOM_MODEL_VALUE } from "../plugin/settings.mjs
 import { parsePromptReferences } from "./prompt-references.mjs";
 import { getSlashCommands } from "./slash-commands.mjs";
 
-export class ContextBuilder {
+/**
+ * The context service: it answers "what exactly did the agent see for this
+ * prompt?".
+ *
+ * `build()` returns a stable snapshot (`activeNote`, `annotations`,
+ * `linkedNeighborhood`, `searchResults`, `attachments`) plus an `inspection`
+ * summary that diagnostics and the context-show command read. Explicit prompt
+ * references (`@note`, `#tag`, `/search`, folder refs) are resolved from the
+ * prompt itself, so there is no separate `query` parameter.
+ */
+export class ContextService {
   /**
    * @param {any} graph
    * @param {any} settings
@@ -218,14 +228,14 @@ export class ContextBuilder {
     for (const reference of references) {
       try {
         if (reference.type === "note") {
-          const noteFile = this.graph.resolveNoteFile(reference.value);
+          const notePath = this.graph.resolveNotePath(reference.value);
           attachments.push({
             type: "note",
             label: reference.value,
-            content: noteFile
+            content: notePath
               ? {
-                  context: await this.graph.getNoteContext(noteFile),
-                  content: await this.graph.readVaultFile(noteFile.path)
+                  context: await this.graph.getNoteContext(notePath),
+                  content: await this.graph.readVaultFile(notePath)
                 }
               : { error: `Note not found: ${reference.value}` }
           });

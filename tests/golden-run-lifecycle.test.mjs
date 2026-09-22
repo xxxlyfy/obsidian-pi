@@ -57,7 +57,7 @@ function createPluginDouble(runner) {
   const plugin = {
     settings: { ...DEFAULT_SETTINGS, desktopNotifications: false },
     threadHistory: store,
-    getCurrentContextFile: () => undefined,
+    getCurrentContextPath: () => undefined,
     consumeAnnotationsForPrompt: vi.fn(async () => []),
     restoreConsumedAnnotations: vi.fn(),
     enrichPromptDelivery: vi.fn(async (delivery) => ({ ...delivery, promptContext: undefined })),

@@ -18,19 +18,21 @@ vi.mock("obsidian", () => ({ TFile: obsidian.TFile, Notice: class {} }));
 
 const { VaultIndex, SEARCH_CANDIDATE_LIMIT } = await import("../../src/context/vault-index.mjs");
 const { VaultGraph } = await import("../../src/context/vault-graph.mjs");
+const { VaultAdapter } = await import("../../src/obsidian/vault-adapter.mjs");
+const { WorkspaceAdapter } = await import("../../src/obsidian/workspace-adapter.mjs");
 const { DEFAULT_SETTINGS } = await import("../../src/plugin/settings.mjs");
 
 const SIZES = [500, 2_000, 5_000, 10_000];
 
 function buildVault(notes) {
   const vault = createSyntheticVault(obsidian.TFile, { notes });
-  const index = new VaultIndex({ app: vault.app });
-  const graph = new VaultGraph(
-    vault.app,
-    { ...DEFAULT_SETTINGS },
-    () => vault.app.workspace.getActiveFile(),
+  const index = new VaultIndex({ vault: new VaultAdapter(vault.app) });
+  const graph = new VaultGraph({
+    vault: new VaultAdapter(vault.app),
+    workspace: new WorkspaceAdapter(vault.app),
+    settings: { ...DEFAULT_SETTINGS },
     index
-  );
+  });
   return { ...vault, index, graph };
 }
 

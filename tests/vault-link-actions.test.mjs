@@ -20,7 +20,7 @@ beforeAll(async () => {
     activeWindow: globalThis,
     plugin: {
       app: { workspace },
-      getCurrentContextFile: () => (contextPath ? { path: contextPath } : undefined)
+      getCurrentContextPath: () => contextPath
     },
     ...methods
   });
