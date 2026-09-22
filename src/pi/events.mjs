@@ -1,5 +1,47 @@
 import { normalizeTokenUsage } from "./token-usage.mjs";
 
+/**
+ * A raw line of Pi RPC/JSON output before normalization. The shape is open by
+ * design: Pi adds event types over time, so unknown keys are carried through in
+ * `raw` instead of being dropped.
+ *
+ * @typedef {{
+ *   type?: string,
+ *   message?: any,
+ *   messages?: any[],
+ *   assistantMessageEvent?: any,
+ *   toolName?: string,
+ *   toolCallId?: string,
+ *   args?: Record<string, any>,
+ *   isError?: boolean,
+ *   [key: string]: any
+ * }} RpcEvent
+ */
+
+/**
+ * The event the view renders: a normalized `type` plus the original payload.
+ *
+ * @typedef {{
+ *   type: string,
+ *   raw?: RpcEvent,
+ *   message?: string,
+ *   toolName?: string,
+ *   toolCallId?: string,
+ *   toolArgs?: Record<string, any>,
+ *   isError?: boolean,
+ *   thinkingDelta?: string,
+ *   assistantEvent?: any,
+ *   [key: string]: any
+ * }} RunEvent
+ */
+
+/**
+ * @param {string} line
+ * @param {any} callbacks May be undefined; Pi events are still recorded.
+ * @param {RunEvent[]} events
+ * @param {(delta: string) => void} appendText
+ * @param {(runState: any) => void} updateRunState
+ */
 export function handlePiJsonEventLine(line, callbacks, events, appendText, updateRunState) {
   if (!line.trim()) return;
 
@@ -155,6 +197,7 @@ export function getAssistantRunState(messageOrMessages) {
   };
 }
 
+/** @param {RunEvent} [event] */
 export function extractEventTokenUsage(event) {
   if (!event) return undefined;
 

@@ -1131,7 +1131,7 @@ var PluginStore = class {
    * @param {() => Promise<any>} options.loadData
    * @param {(data: any) => Promise<void>} options.saveData
    * @param {() => string | undefined} options.getPluginDirectory
-   * @param {() => any} options.buildPayload Builds the current snapshot to persist.
+   * @param {() => PersistedData} options.buildPayload Builds the current snapshot to persist.
    * @param {(error: unknown) => void} [options.onSaveError] For scheduled/flushed writes.
    * @param {number} [options.flushDelayMs]
    */
@@ -4198,6 +4198,7 @@ var ContextService = class {
    * @param {any} prompt
    * @param {string} [selection]
    * @param {any} [options]
+   * @returns {Promise<ContextSnapshot>}
    */
   async build(prompt, selection = "", options = void 0) {
     const userPrompt = String(prompt ?? "");

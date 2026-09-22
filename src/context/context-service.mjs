@@ -4,6 +4,38 @@ import { parsePromptReferences } from "./prompt-references.mjs";
 import { getSlashCommands } from "./slash-commands.mjs";
 
 /**
+ * The prompt context snapshot: everything the agent receives besides the user's
+ * own words. Field names are part of the prompt format and must stay stable.
+ *
+ * @typedef {{
+ *   activeNote?: {
+ *     path: string,
+ *     title: string,
+ *     content: string,
+ *     selection: string,
+ *     frontmatter: Record<string, any>,
+ *     tags: string[],
+ *     aliases: string[],
+ *     headings: string[],
+ *     backlinks: any[],
+ *     outgoingLinks: any[],
+ *     unresolvedLinks: any[],
+ *     excerpt: string
+ *   },
+ *   annotations: any[],
+ *   linkedNeighborhood: any[],
+ *   searchResults: any[],
+ *   attachments: any[],
+ *   fileAttachmentsContext?: string,
+ *   toolCatalog: string[],
+ *   inspection: any,
+ *   slashCommands: any[],
+ *   piCommand?: any,
+ *   userPrompt: string
+ * }} ContextSnapshot
+ */
+
+/**
  * The context service: it answers "what exactly did the agent see for this
  * prompt?".
  *
@@ -42,6 +74,7 @@ export class ContextService {
    * @param {any} prompt
    * @param {string} [selection]
    * @param {any} [options]
+   * @returns {Promise<ContextSnapshot>}
    */
   async build(prompt, selection = "", options = undefined) {
     const userPrompt = String(prompt ?? "");

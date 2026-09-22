@@ -1,6 +1,30 @@
 import { STRINGS } from "../shared/strings.mjs";
 const DEFAULT_THREAD_TITLE = STRINGS.threads.newChat;
 
+/**
+ * @typedef {{
+ *   id: string,
+ *   title: string,
+ *   messages: Array<{
+ *     role: "user" | "assistant" | "system",
+ *     content: string,
+ *     createdAt: number,
+ *     contextUsage?: any,
+ *     tokenUsage?: any,
+ *     runMetadata?: any,
+ *     thinking?: string,
+ *     toolErrors?: string[]
+ *   }>,
+ *   createdAt: number,
+ *   updatedAt: number,
+ *   archived: boolean,
+ *   favorite: boolean,
+ *   piSessionId?: string
+ * }} Thread
+ *
+ * @typedef {{ currentThreadId: string, threads: Thread[] }} ThreadHistory
+ */
+
 export class ThreadStore {
   constructor(history, legacyMessages, legacyPiSessionId) {
     this.history = normalizeThreadHistory(history, legacyMessages, legacyPiSessionId);

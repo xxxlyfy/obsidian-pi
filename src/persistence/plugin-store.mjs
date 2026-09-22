@@ -3,6 +3,19 @@ import { readChatHistoryBackup, writeChatHistoryBackup } from "../threads/chat-h
 const DEFAULT_FLUSH_DELAY_MS = 250;
 
 /**
+ * The exact shape written to `data.json`: every plugin setting at the top level
+ * plus the four state fields the plugin owns.
+ *
+ * @typedef {{
+ *   chatHistory: { currentThreadId: string, threads: any[] },
+ *   localPromptQueue: any[],
+ *   localPromptSteering: any[],
+ *   annotationData: { schemaVersion: number, annotations: Record<string, any[]> },
+ *   [setting: string]: any
+ * }} PersistedData
+ */
+
+/**
  * Owns plugin data persistence: writing `data.json`, keeping the checksummed
  * chat-history backup in sync, and coalescing frequent mutations into one write.
  *
@@ -15,7 +28,7 @@ export class PluginStore {
    * @param {() => Promise<any>} options.loadData
    * @param {(data: any) => Promise<void>} options.saveData
    * @param {() => string | undefined} options.getPluginDirectory
-   * @param {() => any} options.buildPayload Builds the current snapshot to persist.
+   * @param {() => PersistedData} options.buildPayload Builds the current snapshot to persist.
    * @param {(error: unknown) => void} [options.onSaveError] For scheduled/flushed writes.
    * @param {number} [options.flushDelayMs]
    */
