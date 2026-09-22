@@ -23,36 +23,6 @@ export function getToolKind(toolName) {
           : "thinking";
 }
 
-export function getToolIcon(kind) {
-  return kind === "write"
-    ? "pencil-line"
-    : kind === "shell"
-      ? "terminal"
-      : kind === "search"
-        ? "search"
-        : "file-text";
-}
-
-export function getActivityIcon(kind) {
-  return kind === "skill"
-    ? "book-open-check"
-    : kind === "context"
-      ? "paperclip"
-      : kind === "answer"
-        ? "message-square"
-        : kind === "shell"
-          ? "terminal"
-          : kind === "edit"
-            ? "pencil-line"
-            : kind === "search"
-              ? "search"
-              : kind === "read"
-                ? "file-text"
-                : kind === "done" || kind === "finishing"
-                  ? "check-circle"
-                  : "brain";
-}
-
 export function formatToolStatus(toolName, toolArgs, phase = "running") {
   const name = String(toolName || "tool").toLowerCase();
   const skillName = getReadSkillName(name, toolArgs);
