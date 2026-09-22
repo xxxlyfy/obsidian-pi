@@ -88,10 +88,14 @@ export class PiRunner {
   }
 
   /**
-   * Hard stop used by the runtime's cancel watchdog. The current RPC client is
-   * disposed and dropped so the next run cannot inherit a wedged process: it
-   * starts a fresh client instead. The runner itself stays in the registry and
-   * becomes reusable.
+   * Hard stop used by the runtime's cancel watchdog.
+   *
+   * The runner becomes invalid and must never run again:
+   * - its current RPC client is disposed and dropped, so no later run can
+   *   inherit the wedged process
+   * - `run()` rejects on an invalid runner
+   * - the registry replaces it on the next `create(threadId)`, and the
+   *   replacement builds its own fresh RPC client
    */
   forceTerminate() {
     this.invalid = true;

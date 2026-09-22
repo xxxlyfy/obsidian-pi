@@ -136,6 +136,31 @@ describe("PiRunner", () => {
     expect(runner.isRunning).toBe(false);
   });
 
+  it("marks the runner invalid when force terminated", () => {
+    const runner = createRunner();
+
+    expect(runner.invalid).toBe(false);
+
+    runner.forceTerminate();
+
+    expect(runner.invalid).toBe(true);
+    expect(runner.isRunning).toBe(false);
+    expect(runner.cancelRequested).toBe(false);
+    expect(runner.rpcClient).toBeUndefined();
+  });
+
+  it("refuses to run once the runner was force terminated", async () => {
+    const runner = createRunner();
+    runner.forceTerminate();
+
+    await expect(
+      runner.run("hello", undefined, undefined, [], { isCanceled: () => false })
+    ).rejects.toThrow("force-stopped");
+    await expect(
+      runner.run("/compact", undefined, undefined, [], { isCanceled: () => false })
+    ).rejects.toThrow("force-stopped");
+  });
+
   it("honors cancellation before spawning Pi", async () => {
     await expect(
       createRunner({ dryRun: true }).run(
