@@ -20,12 +20,6 @@ export class WorkspaceAdapter {
     return this.app.workspace.activeEditor?.editor?.getSelection() ?? "";
   }
 
-  /** @param {string} path */
-  async openNote(path) {
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (file) await this.app.workspace.getLeaf(false).openFile(file);
-  }
-
   /**
    * @param {string} eventName
    * @param {(...args: any[]) => void} callback

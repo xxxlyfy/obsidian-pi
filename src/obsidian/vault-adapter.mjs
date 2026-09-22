@@ -40,11 +40,6 @@ export class VaultAdapter {
     return file instanceof TFile ? this.describe(file) : undefined;
   }
 
-  /** @param {string} path */
-  exists(path) {
-    return !!this.app.vault.getAbstractFileByPath(path);
-  }
-
   /**
    * @param {string} path
    * @param {number} [maxChars]
@@ -61,13 +56,6 @@ export class VaultAdapter {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) throw new Error(`File not found: ${path}`);
     return this.app.vault.read(file);
-  }
-
-  /** @param {string} path */
-  async delete(path) {
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) throw new Error(`File not found: ${path}`);
-    await this.app.vault.delete(file);
   }
 
   /**
@@ -142,11 +130,5 @@ export class VaultAdapter {
       title: String(file.basename ?? file.name ?? ""),
       mtime: Number(file.stat?.mtime ?? 0)
     };
-  }
-
-  /** @param {string} path */
-  toEventPath(path) {
-    const file = this.app.vault.getAbstractFileByPath(path);
-    return file instanceof TFile ? file.path : undefined;
   }
 }

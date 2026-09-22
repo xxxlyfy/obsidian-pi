@@ -151,7 +151,7 @@ var STRINGS = {
     unknownDate: "未知日期",
     bulkDeleted: (count) => `已删除 ${count} 个会话`,
     bulkSkipped: (count) => `跳过 ${count} 个运行中的会话`,
-    exportTo: (path6) => `已导出到 ${path6}`,
+    exportTo: (path5) => `已导出到 ${path5}`,
     messageCount: (count) => `${count} 条消息`,
     sessionStats: (file, messages, entries, tokens, cost) => `${file}
 ${messages} 条消息 · ${entries} 个树节点 · ${tokens} tokens · $${cost}`,
@@ -337,9 +337,7 @@ ${messages} 条消息 · ${entries} 个树节点 · ${tokens} tokens · $${cost}
     commandsFailed: "Pi Agent：刷新 Pi 命令失败",
     contextBuilderUnavailable: "Pi 上下文构建器不可用。",
     errorPrefix: "错误：",
-    historyImportFailed: "Pi Agent：无法导入库内会话历史",
     historySaveFailed: "Pi Agent：无法保存会话历史",
-    historyUnrecognizedFiles: "Pi Agent：有无法识别的会话文件被留在原处",
     modelCatalogFailed: "Pi Agent：刷新模型目录失败",
     modelServiceNotReady: "Pi 模型服务尚未就绪。",
     runnerUnavailable: "Pi 运行器不可用。",
@@ -348,14 +346,11 @@ ${messages} 条消息 · ${entries} 个树节点 · ${tokens} tokens · $${cost}
     sessionDeleteFailed: "Pi Agent：无法删除本地 Pi 会话",
     sessionRenameFailed: "Pi Agent：无法重命名 Pi 会话",
     threadGone: "会话已不存在。",
-    verifyImportFailed: "无法在插件数据中校验导入的会话历史。",
     warningPrefix: "警告：",
     commandsLoaded: (count) => `已加载 ${count} 个 Pi 命令。`,
     couldNotOpenView: "无法打开 Pi 视图。",
     desktopOnly: "Pi Agent 仅支持桌面端。",
     historyRecovered: "Pi Agent 已从本地备份恢复会话历史。",
-    historyRestored: "会话历史已恢复到 Pi Agent 的本地插件数据。",
-    historyRestoredPartially: "会话历史已恢复，但无法读取的会话文件被留在原处。",
     noAnnotationsToSend: "该笔记没有可发送的注解。",
     openAgent: (name) => `打开 ${name}`,
     commandOpenChat: "打开智能体会话",
@@ -1260,13 +1255,13 @@ function normalizeAnnotationData(raw) {
     JSON.stringify({ schemaVersion: ANNOTATION_SCHEMA_VERSION, annotations: {} })
   );
   for (const [rawPath, rawItems] of Object.entries(source).slice(0, ANNOTATION_LIMITS.paths)) {
-    const path6 = boundedString(rawPath, ANNOTATION_LIMITS.path).trim();
-    if (!path6 || !Array.isArray(rawItems)) continue;
+    const path5 = boundedString(rawPath, ANNOTATION_LIMITS.path).trim();
+    if (!path5 || !Array.isArray(rawItems)) continue;
     const items = [];
     const ids = /* @__PURE__ */ new Set();
-    const pathBytes = utf8Bytes(JSON.stringify(path6)) + 4;
+    const pathBytes = utf8Bytes(JSON.stringify(path5)) + 4;
     for (const rawItem of rawItems) {
-      const item = normalizeAnnotation(rawItem, path6);
+      const item = normalizeAnnotation(rawItem, path5);
       if (!item || ids.has(item.id)) continue;
       const itemBytes = utf8Bytes(JSON.stringify(item));
       if (
@@ -1281,16 +1276,16 @@ function normalizeAnnotationData(raw) {
       storageBytes += itemBytes + (items.length === 1 ? pathBytes : 1);
       if (items.length >= ANNOTATION_LIMITS.perPath) break;
     }
-    if (items.length > 0) annotations[path6] = items;
+    if (items.length > 0) annotations[path5] = items;
   }
   return { schemaVersion: ANNOTATION_SCHEMA_VERSION, annotations };
 }
 function normalizeAnnotation(raw, pathOverride) {
   if (!isRecord(raw)) return void 0;
-  const path6 = boundedString(pathOverride ?? raw.path, ANNOTATION_LIMITS.path).trim();
+  const path5 = boundedString(pathOverride ?? raw.path, ANNOTATION_LIMITS.path).trim();
   const id = boundedString(raw.id, ANNOTATION_LIMITS.id).trim();
   const quote = boundedString(raw.quote, ANNOTATION_LIMITS.quote);
-  if (!path6 || !id || !quote) return void 0;
+  if (!path5 || !id || !quote) return void 0;
   const from = nonNegativeInteger(raw.range?.from);
   const to = nonNegativeInteger(raw.range?.to);
   if (from === void 0 || to === void 0 || to < from) return void 0;
@@ -1298,7 +1293,7 @@ function normalizeAnnotation(raw, pathOverride) {
   const updatedAt = normalizeTimestamp(raw.updatedAt, createdAt);
   return {
     id,
-    path: path6,
+    path: path5,
     intent: INTENTS.has(raw.intent) ? raw.intent : "question",
     context: boundedString(raw.context, ANNOTATION_LIMITS.context),
     quote,
@@ -1648,7 +1643,7 @@ function isSupportedTextFile(fileName, mimeType = "") {
   return SUPPORTED_TEXT_EXTENSIONS.includes(extension || base);
 }
 function createPromptTextAttachment(
-  { bytes, fileName, mimeType = "", source = "local", path: path6 = void 0, originalSize = void 0 },
+  { bytes, fileName, mimeType = "", source = "local", path: path5 = void 0, originalSize = void 0 },
   remainingBytes = MAX_TOTAL_TEXT_ATTACHMENT_BYTES
 ) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
@@ -1683,7 +1678,7 @@ function createPromptTextAttachment(
         originalSize: reportedSize,
         truncated: reportedSize > allowed,
         source,
-        path: path6
+        path: path5
       }
     ],
     allowed
@@ -1736,7 +1731,7 @@ function toRpcImages(images) {
 function imagePreviewUrl(image) {
   return `data:${image.mimeType};base64,${stripDataUrlPrefix(image.data)}`;
 }
-function bytesToPromptImage({ bytes, fileName, mimeType, source = "vault", path: path6 }) {
+function bytesToPromptImage({ bytes, fileName, mimeType, source = "vault", path: path5 }) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
   if (!SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType))
     throw new Error("Choose a PNG, JPEG, or WebP image.");
@@ -1751,7 +1746,7 @@ function bytesToPromptImage({ bytes, fileName, mimeType, source = "vault", path:
     data: encodeBase64(binary),
     size: data.length,
     source,
-    path: path6
+    path: path5
   };
 }
 async function fileToPromptImage(file, metadata = {}) {
@@ -1882,19 +1877,19 @@ function migrateLocalPromptPaths(queue, oldPath, newPath) {
     )
   }));
 }
-function invalidateLocalPromptPaths(queue, path6) {
-  if (!path6) return Array.isArray(queue) ? queue : [];
+function invalidateLocalPromptPaths(queue, path5) {
+  if (!path5) return Array.isArray(queue) ? queue : [];
   return (Array.isArray(queue) ? queue : []).map((item) => ({
     ...item,
-    contextFilePath: item.contextFilePath === path6 ? void 0 : item.contextFilePath,
+    contextFilePath: item.contextFilePath === path5 ? void 0 : item.contextFilePath,
     annotations: (Array.isArray(item.annotations) ? item.annotations : []).filter(
-      (annotation) => annotation?.path !== path6
+      (annotation) => annotation?.path !== path5
     ),
     images: (Array.isArray(item.images) ? item.images : []).map((image) =>
-      image?.path === path6 ? { ...image, path: void 0 } : image
+      image?.path === path5 ? { ...image, path: void 0 } : image
     ),
     attachments: (Array.isArray(item.attachments) ? item.attachments : []).map((attachment) =>
-      attachment?.path === path6 ? { ...attachment, path: void 0 } : attachment
+      attachment?.path === path5 ? { ...attachment, path: void 0 } : attachment
     )
   }));
 }
@@ -1982,9 +1977,9 @@ var PromptQueueService = class {
     this.persist();
   }
   /** @param {string} path */
-  invalidatePaths(path6) {
-    this.items = invalidateLocalPromptPaths(this.items, path6);
-    this.steering = invalidateLocalPromptPaths(this.steering, path6);
+  invalidatePaths(path5) {
+    this.items = invalidateLocalPromptPaths(this.items, path5);
+    this.steering = invalidateLocalPromptPaths(this.steering, path5);
     this.persist();
   }
   /** @param {any} item */
@@ -2499,11 +2494,11 @@ var AnnotationStore = class {
   toJSON() {
     return structuredCloneSafe(this.data);
   }
-  list(path6) {
-    return structuredCloneSafe(this.data.annotations[String(path6 ?? "")] ?? []);
+  list(path5) {
+    return structuredCloneSafe(this.data.annotations[String(path5 ?? "")] ?? []);
   }
-  get(path6, id) {
-    return this.list(path6).find((annotation) => annotation.id === id);
+  get(path5, id) {
+    return this.list(path5).find((annotation) => annotation.id === id);
   }
   create(input) {
     const annotation = createAnnotation(input);
@@ -2528,8 +2523,8 @@ var AnnotationStore = class {
     this.changed();
     return structuredCloneSafe(annotation);
   }
-  update(path6, id, patch) {
-    const items = this.data.annotations[String(path6 ?? "")];
+  update(path5, id, patch) {
+    const items = this.data.annotations[String(path5 ?? "")];
     const index = items?.findIndex((annotation) => annotation.id === id) ?? -1;
     if (index < 0) return void 0;
     const existing = items[index];
@@ -2552,8 +2547,8 @@ var AnnotationStore = class {
     this.changed();
     return structuredCloneSafe(updated);
   }
-  delete(path6, id) {
-    const key = String(path6 ?? "");
+  delete(path5, id) {
+    const key = String(path5 ?? "");
     const items = this.data.annotations[key];
     if (!items) return false;
     const remaining = items.filter((annotation) => annotation.id !== id);
@@ -2587,15 +2582,15 @@ var AnnotationStore = class {
     this.changed();
     return true;
   }
-  deletePath(path6) {
-    const key = String(path6 ?? "");
+  deletePath(path5) {
+    const key = String(path5 ?? "");
     if (!this.data.annotations[key]) return false;
     delete this.data.annotations[key];
     this.changed();
     return true;
   }
-  reanchorPath(path6, text) {
-    const key = String(path6 ?? "");
+  reanchorPath(path5, text) {
+    const key = String(path5 ?? "");
     const items = this.data.annotations[key];
     if (!items) return [];
     let didChange = false;
@@ -2620,8 +2615,8 @@ var AnnotationStore = class {
     }
     return this.list(key);
   }
-  replacePath(path6, annotations) {
-    const key = String(path6 ?? "");
+  replacePath(path5, annotations) {
+    const key = String(path5 ?? "");
     const normalized =
       normalizeAnnotationData({ annotations: { [key]: annotations } }).annotations[key] ?? [];
     const next = { ...this.data.annotations };
@@ -3327,8 +3322,8 @@ var MarkdownAnnotationsController = class {
     const selection = view.state.selection.main;
     if (selection.empty || selection.to <= selection.from) return false;
     const state = this.stateForEditor(view);
-    const path6 = state?.view.file?.path;
-    if (!path6) return false;
+    const path5 = state?.view.file?.path;
+    if (!path5) return false;
     const signature = `${selection.from}:${selection.to}`;
     const previous = this.selectionPicks.get(view);
     const now = Date.now();
@@ -3339,7 +3334,7 @@ var MarkdownAnnotationsController = class {
     }
     this.selectionPicks.set(view, { signature, at: now });
     this.openCreateModal(
-      path6,
+      path5,
       captureAnchor(view.state.doc.toString(), selection.from, selection.to),
       "selection"
     );
@@ -3635,27 +3630,27 @@ var MarkdownAnnotationsController = class {
   isReadingState(state) {
     return state.view.getMode?.() === "preview";
   }
-  openCreateModal(path6, anchor, targetKind) {
-    if (!path6) return;
+  openCreateModal(path5, anchor, targetKind) {
+    if (!path5) return;
     new AnnotationModal(this.plugin.app, {
       anchor,
       onSave: ({ context, intent }) => {
         this.plugin.annotationStore.create({
-          path: path6,
+          path: path5,
           context,
           intent,
           targetKind,
           status: "attached",
           ...anchor
         });
-        this.clearNativeSelection(path6);
+        this.clearNativeSelection(path5);
         this.refresh();
       }
     }).open();
   }
-  clearNativeSelection(path6) {
+  clearNativeSelection(path5) {
     for (const state of this.leaves.values()) {
-      if (state.view.file?.path !== path6) continue;
+      if (state.view.file?.path !== path5) continue;
       if (this.isReadingState(state)) {
         state.view.containerEl.ownerDocument?.getSelection?.()?.removeAllRanges?.();
         continue;
@@ -3675,8 +3670,8 @@ var MarkdownAnnotationsController = class {
     }).open();
   }
   renderList(state) {
-    const path6 = state.view.file?.path;
-    const annotations = path6 ? this.plugin.annotationStore.list(path6) : [];
+    const path5 = state.view.file?.path;
+    const annotations = path5 ? this.plugin.annotationStore.list(path5) : [];
     state.listEl.empty();
     state.listEl.toggleClass("is-empty", annotations.length === 0);
     if (annotations.length === 0) return;
@@ -3689,7 +3684,7 @@ var MarkdownAnnotationsController = class {
     const sendIcon = sendButton.createSpan({ cls: "pi-agent-annotations-send-icon" });
     (0, import_obsidian2.setIcon)(sendIcon, "send");
     sendButton.createSpan({ text: STRINGS.annotations.send });
-    sendButton.addEventListener("click", () => void this.plugin.runAnnotationsPrompt(path6));
+    sendButton.addEventListener("click", () => void this.plugin.runAnnotationsPrompt(path5));
     for (const annotation of annotations) {
       const row = state.listEl.createDiv({
         cls: `pi-agent-annotation-item${annotation.status === "detached" ? " is-detached" : ""}`
@@ -3786,12 +3781,12 @@ var MarkdownAnnotationsController = class {
     }
   }
   annotationsForEditor(view) {
-    const path6 = this.stateForEditor(view)?.view.file?.path;
-    return path6 ? this.plugin.annotationStore.list(path6) : [];
+    const path5 = this.stateForEditor(view)?.view.file?.path;
+    return path5 ? this.plugin.annotationStore.list(path5) : [];
   }
   processingAnnotationsForEditor(view) {
-    const path6 = this.stateForEditor(view)?.view.file?.path;
-    return path6 ? this.processingForPath(path6) : [];
+    const path5 = this.stateForEditor(view)?.view.file?.path;
+    return path5 ? this.processingForPath(path5) : [];
   }
   beginProcessing(threadId, annotations) {
     const key = String(threadId || "");
@@ -3822,9 +3817,9 @@ var MarkdownAnnotationsController = class {
     this.refreshPaths(new Set(annotations.map((annotation) => annotation.path)));
     return true;
   }
-  completeProcessingForPath(threadId, path6) {
+  completeProcessingForPath(threadId, path5) {
     const key = String(threadId || "");
-    const target = String(path6 || "");
+    const target = String(path5 || "");
     const annotations = this.processingByThread.get(key);
     if (!annotations?.some((annotation) => annotation.path === target)) return false;
     const remaining = annotations.filter((annotation) => annotation.path !== target);
@@ -3833,8 +3828,8 @@ var MarkdownAnnotationsController = class {
     this.refreshPath(target);
     return true;
   }
-  processingForPath(path6) {
-    const target = String(path6 || "");
+  processingForPath(path5) {
+    const target = String(path5 || "");
     return [...this.processingByThread.values()].flatMap((annotations) =>
       annotations
         .filter((annotation) => annotation.path === target)
@@ -3873,24 +3868,24 @@ var MarkdownAnnotationsController = class {
         this.modifyGenerations.delete(file.path);
     }
   }
-  clearModifyTimer(path6) {
-    const timer = this.modifyTimers.get(path6);
+  clearModifyTimer(path5) {
+    const timer = this.modifyTimers.get(path5);
     if (timer !== void 0) this.hostWindow?.clearTimeout(timer);
-    this.modifyTimers.delete(path6);
+    this.modifyTimers.delete(path5);
   }
   refreshPaths(paths) {
-    for (const path6 of paths) this.refreshPath(path6);
+    for (const path5 of paths) this.refreshPath(path5);
   }
-  refreshPath(path6) {
+  refreshPath(path5) {
     if (this.destroyed) return;
     for (const state of this.leaves.values()) {
-      if (state.view.file?.path === path6) this.renderList(state);
+      if (state.view.file?.path === path5) this.renderList(state);
     }
     for (const record of this.renderedRecords) {
-      if (record.sourcePath === path6) this.refreshRenderedRecord(record);
+      if (record.sourcePath === path5) this.refreshRenderedRecord(record);
     }
     for (const view of this.editorViews) {
-      if (this.stateForEditor(view)?.view.file?.path === path6) requestAnnotationRefresh(view);
+      if (this.stateForEditor(view)?.view.file?.path === path5) requestAnnotationRefresh(view);
     }
   }
   refreshRenderedRecord(record) {
@@ -4647,10 +4642,10 @@ function tokenizeQuery(query) {
     .map((term) => term.trim())
     .filter((term) => term.length > 1);
 }
-function scoreSearchResult(path6, content, terms) {
-  const normalizedPath = path6.toLowerCase();
+function scoreSearchResult(path5, content, terms) {
+  const normalizedPath = path5.toLowerCase();
   const normalizedContent = content.toLowerCase();
-  const basename = path6.split("/").pop()?.replace(/\.md$/i, "").toLowerCase() ?? path6;
+  const basename = path5.split("/").pop()?.replace(/\.md$/i, "").toLowerCase() ?? path5;
   let score = 0;
   for (const term of terms) {
     if (basename.includes(term)) score += 12;
@@ -4745,26 +4740,26 @@ var VaultIndex = class {
     this.built = true;
   }
   /** @param {string | undefined} path */
-  updatePath(path6) {
-    if (!path6) return;
+  updatePath(path5) {
+    if (!path5) return;
     this.ensureBuilt();
-    const note = this.vault.note(path6);
+    const note = this.vault.note(path5);
     if (!note) {
-      this.removePath(path6);
+      this.removePath(path5);
       return;
     }
     this.indexNoteMetadata(note);
-    this.setOutgoing(path6, toCountMap(this.vault.resolvedLinks()[path6] ?? {}));
-    const unresolved = this.vault.unresolvedLinks()[path6] ?? {};
-    if (Object.keys(unresolved).length > 0) this.unresolved.set(path6, toCountMap(unresolved));
-    else this.unresolved.delete(path6);
+    this.setOutgoing(path5, toCountMap(this.vault.resolvedLinks()[path5] ?? {}));
+    const unresolved = this.vault.unresolvedLinks()[path5] ?? {};
+    if (Object.keys(unresolved).length > 0) this.unresolved.set(path5, toCountMap(unresolved));
+    else this.unresolved.delete(path5);
   }
   /** @param {string} path */
-  removePath(path6) {
-    if (!path6) return;
-    this.metadata.delete(path6);
-    this.setOutgoing(path6, /* @__PURE__ */ new Map());
-    this.unresolved.delete(path6);
+  removePath(path5) {
+    if (!path5) return;
+    this.metadata.delete(path5);
+    this.setOutgoing(path5, /* @__PURE__ */ new Map());
+    this.unresolved.delete(path5);
   }
   /**
    * @param {string} oldPath
@@ -4834,9 +4829,9 @@ var VaultIndex = class {
     if (sources.size === 0) this.backlinks.delete(target);
   }
   /** @param {string} path */
-  getMetadata(path6) {
+  getMetadata(path5) {
     this.ensureBuilt();
-    return this.metadata.get(path6);
+    return this.metadata.get(path5);
   }
   /** @returns {Array<{ path: string, count: number }>} */
   getBacklinkCounts(targetPath) {
@@ -4844,7 +4839,7 @@ var VaultIndex = class {
     const sources = this.backlinks.get(targetPath);
     if (!sources) return [];
     return [...sources.entries()]
-      .map(([path6, count]) => ({ path: path6, count }))
+      .map(([path5, count]) => ({ path: path5, count }))
       .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
   }
   /** @returns {Array<{ path: string, count: number }>} */
@@ -4853,7 +4848,7 @@ var VaultIndex = class {
     const targets = this.outgoing.get(sourcePath);
     if (!targets) return [];
     return [...targets.entries()]
-      .map(([path6, count]) => ({ path: path6, count }))
+      .map(([path5, count]) => ({ path: path5, count }))
       .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
   }
   /** @returns {Array<{ path: string, count: number }>} */
@@ -4862,7 +4857,7 @@ var VaultIndex = class {
     const links = this.unresolved.get(sourcePath);
     if (!links) return [];
     return [...links.entries()]
-      .map(([path6, count]) => ({ path: path6, count }))
+      .map(([path5, count]) => ({ path: path5, count }))
       .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
   }
   /** @param {string} tag */
@@ -4937,14 +4932,14 @@ function stripMtime(candidate) {
 }
 function scoreMetadataEntry(entry, terms) {
   const title = entry.title.toLowerCase();
-  const path6 = entry.path.toLowerCase();
+  const path5 = entry.path.toLowerCase();
   const aliases = entry.aliases.map((alias) => alias.toLowerCase());
   const tags = entry.tags.map((tag) => tag.toLowerCase());
   const headings = entry.headings.map((heading) => heading.toLowerCase());
   let score = 0;
   for (const term of terms) {
     if (title.includes(term)) score += 12;
-    if (path6.includes(term)) score += 4;
+    if (path5.includes(term)) score += 4;
     if (
       aliases.some((value) => value.includes(term)) ||
       tags.some((value) => value.includes(term)) ||
@@ -4956,9 +4951,9 @@ function scoreMetadataEntry(entry, terms) {
 }
 function toCountMap(links) {
   const counts = /* @__PURE__ */ new Map();
-  for (const [path6, count] of Object.entries(links ?? {})) {
-    if (!path6) continue;
-    counts.set(path6, Number(count) || 1);
+  for (const [path5, count] of Object.entries(links ?? {})) {
+    if (!path5) continue;
+    counts.set(path5, Number(count) || 1);
   }
   return counts;
 }
@@ -4994,8 +4989,8 @@ var VaultGraph = class {
     const terms = tokenizeQuery(query);
     if (terms.length === 0) return [];
     const limit = options.limit ?? CONTEXT_RESULT_LIMIT;
-    const isCandidatePath = (path6) =>
-      this.isPathAllowed(path6) && (!options.folder || path6.startsWith(options.folder));
+    const isCandidatePath = (path5) =>
+      this.isPathAllowed(path5) && (!options.folder || path5.startsWith(options.folder));
     const candidates = this.getIndex().candidatesForTerms(terms, {
       limit: SEARCH_CANDIDATE_LIMIT,
       isPathAllowed: isCandidatePath
@@ -5019,15 +5014,15 @@ var VaultGraph = class {
    * @param {string} [selection]
    */
   async getActiveNoteContext(selection = "") {
-    const path6 = this.getActivePath();
-    if (!path6) return void 0;
-    const content = await this.readFile(path6, NOTE_CONTEXT_CHAR_LIMIT);
-    return { ...(await this.getNoteContext(path6)), content, selection };
+    const path5 = this.getActivePath();
+    if (!path5) return void 0;
+    const content = await this.readFile(path5, NOTE_CONTEXT_CHAR_LIMIT);
+    return { ...(await this.getNoteContext(path5)), content, selection };
   }
   /** @param {string} path */
-  async getNoteContext(path6) {
-    const note = this.vault.note(path6);
-    if (!note) throw new Error(`Note not found: ${String(path6)}`);
+  async getNoteContext(path5) {
+    const note = this.vault.note(path5);
+    if (!note) throw new Error(`Note not found: ${String(path5)}`);
     const metadata = this.vault.getMetadata(note.path);
     const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
     return {
@@ -5067,11 +5062,11 @@ var VaultGraph = class {
     const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
     const paths = this.getIndex()
       .pathsWithTag(normalizedTag)
-      .filter((path6) => this.isPathAllowed(path6))
+      .filter((path5) => this.isPathAllowed(path5))
       .slice(0, CONTEXT_RESULT_LIMIT);
     const results = [];
-    for (const path6 of paths) {
-      const note = this.vault.note(path6);
+    for (const path5 of paths) {
+      const note = this.vault.note(path5);
       if (!note) continue;
       const content = await this.readFile(note.path, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
@@ -5156,8 +5151,8 @@ var VaultGraph = class {
     const notes = [];
     for (let level = 0; level < depth; level++) {
       const nextFrontier = /* @__PURE__ */ new Set();
-      for (const path6 of frontier) {
-        const links = [...index.getOutgoingCounts(path6), ...index.getBacklinkCounts(path6)];
+      for (const path5 of frontier) {
+        const links = [...index.getOutgoingCounts(path5), ...index.getBacklinkCounts(path5)];
         for (const link of links) {
           if (!seen.has(link.path) && link.path.endsWith(".md")) {
             seen.add(link.path);
@@ -5166,9 +5161,9 @@ var VaultGraph = class {
         }
       }
       const limitedNextFrontier = [...nextFrontier].slice(0, CONTEXT_RESULT_LIMIT);
-      for (const path6 of limitedNextFrontier) {
+      for (const path5 of limitedNextFrontier) {
         try {
-          notes.push(await this.getNoteContext(path6));
+          notes.push(await this.getNoteContext(path5));
         } catch {}
       }
       frontier = limitedNextFrontier;
@@ -5189,8 +5184,8 @@ var VaultGraph = class {
    * @param {string} path
    * @param {number} [maxChars]
    */
-  async readFile(path6, maxChars = NOTE_CONTEXT_CHAR_LIMIT) {
-    return this.vault.read(path6, maxChars);
+  async readFile(path5, maxChars = NOTE_CONTEXT_CHAR_LIMIT) {
+    return this.vault.read(path5, maxChars);
   }
   /** @param {string} filePath */
   isPathAllowed(filePath) {
@@ -5226,21 +5221,17 @@ var VaultAdapter = class {
     return this.app.vault.getMarkdownFiles().map((file) => this.describe(file));
   }
   /** @param {string} path */
-  note(path6) {
-    const file = this.app.vault.getAbstractFileByPath(path6);
+  note(path5) {
+    const file = this.app.vault.getAbstractFileByPath(path5);
     return file instanceof import_obsidian3.TFile ? this.describe(file) : void 0;
-  }
-  /** @param {string} path */
-  exists(path6) {
-    return !!this.app.vault.getAbstractFileByPath(path6);
   }
   /**
    * @param {string} path
    * @param {number} [maxChars]
    */
-  async read(path6, maxChars = Number.POSITIVE_INFINITY) {
-    const file = this.app.vault.getAbstractFileByPath(path6);
-    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path6}`);
+  async read(path5, maxChars = Number.POSITIVE_INFINITY) {
+    const file = this.app.vault.getAbstractFileByPath(path5);
+    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path5}`);
     const content = await this.app.vault.cachedRead(file);
     return content.length > maxChars
       ? `${content.slice(0, maxChars)}
@@ -5248,23 +5239,17 @@ var VaultAdapter = class {
       : content;
   }
   /** Uncached read, used when the caller must see the latest bytes on disk. */
-  async readFresh(path6) {
-    const file = this.app.vault.getAbstractFileByPath(path6);
-    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path6}`);
+  async readFresh(path5) {
+    const file = this.app.vault.getAbstractFileByPath(path5);
+    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path5}`);
     return this.app.vault.read(file);
-  }
-  /** @param {string} path */
-  async delete(path6) {
-    const file = this.app.vault.getAbstractFileByPath(path6);
-    if (!(file instanceof import_obsidian3.TFile)) throw new Error(`File not found: ${path6}`);
-    await this.app.vault.delete(file);
   }
   /**
    * @param {string} path
    * @returns {NoteMetadata}
    */
-  getMetadata(path6) {
-    const file = this.app.vault.getAbstractFileByPath(path6);
+  getMetadata(path5) {
+    const file = this.app.vault.getAbstractFileByPath(path5);
     const cache =
       file instanceof import_obsidian3.TFile ? this.app.metadataCache.getFileCache(file) : void 0;
     const tags = /* @__PURE__ */ new Set();
@@ -5325,11 +5310,6 @@ var VaultAdapter = class {
       mtime: Number(file.stat?.mtime ?? 0)
     };
   }
-  /** @param {string} path */
-  toEventPath(path6) {
-    const file = this.app.vault.getAbstractFileByPath(path6);
-    return file instanceof import_obsidian3.TFile ? file.path : void 0;
-  }
 };
 
 // src/obsidian/workspace-adapter.mjs
@@ -5346,11 +5326,6 @@ var WorkspaceAdapter = class {
   /** @returns {string} Currently selected text in the active editor. */
   activeSelection() {
     return this.app.workspace.activeEditor?.editor?.getSelection() ?? "";
-  }
-  /** @param {string} path */
-  async openNote(path6) {
-    const file = this.app.vault.getAbstractFileByPath(path6);
-    if (file) await this.app.workspace.getLeaf(false).openFile(file);
   }
   /**
    * @param {string} eventName
@@ -5373,9 +5348,9 @@ var EditorAdapter = class {
    * @param {string} path
    * @returns {string | undefined}
    */
-  valueForOpenNote(path6) {
+  valueForOpenNote(path5) {
     const activeEditor = this.app.workspace.activeEditor;
-    if (activeEditor?.file?.path === path6) {
+    if (activeEditor?.file?.path === path5) {
       const value2 = activeEditor.editor?.getValue?.();
       if (typeof value2 === "string") return value2;
     }
@@ -5383,7 +5358,7 @@ var EditorAdapter = class {
       const view =
         /** @type {any} */
         candidate.view;
-      return view?.file?.path === path6 && typeof view?.editor?.getValue === "function";
+      return view?.file?.path === path5 && typeof view?.editor?.getValue === "function";
     });
     const value =
       /** @type {any} */
@@ -7218,9 +7193,9 @@ function renderProviderIcon(container, providerOrModel) {
     const svg = iconEl.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("role", "presentation");
-    const path6 = iconEl.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "path");
-    path6.setAttribute("d", brand.icon.path);
-    svg.append(path6);
+    const path5 = iconEl.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "path");
+    path5.setAttribute("d", brand.icon.path);
+    svg.append(path5);
     iconEl.append(svg);
   } else {
     iconEl.setText(brand.mark || "AI");
@@ -8191,9 +8166,9 @@ var NoteActions = class {
   }
   async createNoteFromResponse(response) {
     const title = this.getResponseTitle(response);
-    const path6 = await this.getAvailableNotePath(`${title}.md`);
+    const path5 = await this.getAvailableNotePath(`${title}.md`);
     await this.ensureFolder("Pi");
-    const file = await this.plugin.app.vault.create(path6, response);
+    const file = await this.plugin.app.vault.create(path5, response);
     await this.plugin.app.workspace.getLeaf(false).openFile(file);
   }
   async openCitedNotes(text) {
@@ -8257,8 +8232,8 @@ var NoteActions = class {
   }
   async getAvailableNotePath(name, folder = "Pi") {
     const normalizedFolder = normalizeArchiveFolder(folder);
-    const path6 = `${normalizedFolder}/${name}`;
-    if (!this.plugin.app.vault.getAbstractFileByPath(path6)) return path6;
+    const path5 = `${normalizedFolder}/${name}`;
+    if (!this.plugin.app.vault.getAbstractFileByPath(path5)) return path5;
     const basename = name.replace(/\.md$/i, "");
     for (let index = 2; index < 100; index++) {
       const candidate = `${normalizedFolder}/${basename} ${index}.md`;
@@ -9513,8 +9488,8 @@ function formatToolTarget(toolName, toolArgs) {
   if (toolName === "bash") return STRINGS.activity.command;
   if (toolName === "grep") {
     const pattern = sanitizeActivityDetail(pickNestedString(toolArgs, ["pattern", "query"]));
-    const path6 = formatPathForActivity(pickNestedString(toolArgs, ["path", "directory", "dir"]));
-    return pattern && path6 ? `"${pattern}" in ${path6}` : pattern ? `"${pattern}"` : path6;
+    const path5 = formatPathForActivity(pickNestedString(toolArgs, ["path", "directory", "dir"]));
+    return pattern && path5 ? `"${pattern}" in ${path5}` : pattern ? `"${pattern}"` : path5;
   }
   if (toolName === "find") {
     return sanitizeActivityDetail(pickNestedString(toolArgs, ["glob", "pattern", "query", "path"]));
@@ -9536,8 +9511,8 @@ function formatToolTarget(toolName, toolArgs) {
   );
 }
 function formatPathForActivity(value) {
-  const path6 = sanitizeActivityDetail(value).replace(/\\/g, "/").replace(/\/$/, "");
-  return path6 ? path6.split("/").pop() || path6 : "";
+  const path5 = sanitizeActivityDetail(value).replace(/\\/g, "/").replace(/\/$/, "");
+  return path5 ? path5.split("/").pop() || path5 : "";
 }
 function sanitizeActivityDetail(value) {
   return value ? String(value).replace(/\s+/g, " ").trim() : "";
@@ -10352,23 +10327,23 @@ function getSuccessfulMarkdownMutationPath(event, vaultBasePath = "") {
     !["edit", "write"].includes(String(event.toolName || "").toLowerCase())
   )
     return void 0;
-  let path6 = typeof event.toolArgs?.path === "string" ? event.toolArgs.path.trim() : "";
-  if (!path6) return void 0;
-  path6 = path6.replaceAll("\\", "/");
+  let path5 = typeof event.toolArgs?.path === "string" ? event.toolArgs.path.trim() : "";
+  if (!path5) return void 0;
+  path5 = path5.replaceAll("\\", "/");
   const base = String(vaultBasePath || "")
     .replaceAll("\\", "/")
     .replace(/\/$/, "");
-  if (path6.startsWith("/") || /^[A-Za-z]:\//.test(path6)) {
-    const caseInsensitive = /^[A-Za-z]:\//.test(path6);
-    const comparablePath = caseInsensitive ? path6.toLowerCase() : path6;
+  if (path5.startsWith("/") || /^[A-Za-z]:\//.test(path5)) {
+    const caseInsensitive = /^[A-Za-z]:\//.test(path5);
+    const comparablePath = caseInsensitive ? path5.toLowerCase() : path5;
     const comparableBase = caseInsensitive ? base.toLowerCase() : base;
     if (!comparableBase || !comparablePath.startsWith(`${comparableBase}/`)) return void 0;
-    path6 = path6.slice(base.length + 1);
+    path5 = path5.slice(base.length + 1);
   }
-  const parts = path6.replace(/^\.\//, "").split("/");
+  const parts = path5.replace(/^\.\//, "").split("/");
   if (parts.some((part) => !part || part === "." || part === "..")) return void 0;
-  path6 = parts.join("/");
-  return path6.toLowerCase().endsWith(".md") ? path6 : void 0;
+  path5 = parts.join("/");
+  return path5.toLowerCase().endsWith(".md") ? path5 : void 0;
 }
 async function refreshOpenMarkdownViews(app, file) {
   if (!app?.vault?.read || !file?.path || file.extension !== "md") return 0;
@@ -11220,12 +11195,12 @@ var PiAgentView = class extends f4.ItemView {
       );
     });
   }
-  invalidateInFlightAnnotationPaths(path6) {
-    if (!path6) return;
+  invalidateInFlightAnnotationPaths(path5) {
+    if (!path5) return;
     this.forEachAnnotationSnapshot((snapshot) => {
-      if (snapshot.sourcePath === path6) snapshot.sourcePath = void 0;
+      if (snapshot.sourcePath === path5) snapshot.sourcePath = void 0;
       snapshot.annotations = snapshot.annotations.filter(
-        (annotation) => annotation?.path !== path6
+        (annotation) => annotation?.path !== path5
       );
     });
   }
@@ -11664,9 +11639,9 @@ var PiAgentView = class extends f4.ItemView {
     });
   }
   handleSuccessfulToolMutation(event, threadId) {
-    const path6 = getSuccessfulMarkdownMutationPath(event, this.plugin.getVaultBasePath());
-    if (!path6) return;
-    const file = this.plugin.app.vault.getAbstractFileByPath(path6);
+    const path5 = getSuccessfulMarkdownMutationPath(event, this.plugin.getVaultBasePath());
+    if (!path5) return;
+    const file = this.plugin.app.vault.getAbstractFileByPath(path5);
     if (!(file instanceof f4.TFile) || file.extension !== "md") return;
     this.plugin.completeAnnotationProcessingForPath(threadId, file.path);
     void refreshOpenMarkdownViews(this.plugin.app, file).catch((error) => {
@@ -11726,9 +11701,9 @@ var PiAgentView = class extends f4.ItemView {
     (0, f4.setIcon)(element, PI_AGENT_ICON_ID);
   }
 };
-function noteTitleFromPath(path6) {
+function noteTitleFromPath(path5) {
   const name =
-    String(path6 ?? "")
+    String(path5 ?? "")
       .split("/")
       .pop() ?? "";
   return name.replace(/\.md$/i, "") || name;
@@ -11782,329 +11757,6 @@ function sanitizeThreadHistory(history) {
     ? history.currentThreadId
     : threads[0]?.id;
   return { currentThreadId, threads };
-}
-
-// src/threads/chat-history-import.mjs
-var import_node_fs5 = __toESM(require("node:fs"), 1);
-var import_node_path5 = __toESM(require("node:path"), 1);
-var MARKDOWN_STORAGE_VERSION = 3;
-var JSON_STORAGE_VERSION = 2;
-var INDEXED_STORAGE_VERSION = 1;
-async function importVaultChatHistory(vaultBasePath, rawData = {}) {
-  if (!vaultBasePath) return void 0;
-  const basePath = import_node_path5.default.resolve(vaultBasePath);
-  const configuredFolder = normalizeVaultFolder2(rawData.chatHistoryFolder || "chats");
-  const version = Number(rawData.chatHistoryStorageVersion) || 0;
-  const sources = orderedSources(basePath, configuredFolder, version);
-  const threadsById = /* @__PURE__ */ new Map();
-  const managedFiles = /* @__PURE__ */ new Set();
-  const warnings = [];
-  let sourceCurrentThreadId;
-  for (const source of sources) {
-    const result = await source.load();
-    sourceCurrentThreadId ??= result.currentThreadId;
-    for (const warning of result.warnings) warnings.push(warning);
-    for (const filePath of result.managedFiles) managedFiles.add(filePath);
-    for (const thread of result.threads) {
-      const existing = threadsById.get(thread.id);
-      if (!existing || thread.updatedAt >= existing.updatedAt) threadsById.set(thread.id, thread);
-    }
-  }
-  const threads = [...threadsById.values()];
-  if (threads.length === 0) return warnings.length > 0 ? { warnings, managedFiles: [] } : void 0;
-  const preferredCurrentId =
-    rawData.currentChatId ?? sourceCurrentThreadId ?? rawData.chatHistory?.currentThreadId;
-  const currentThreadId = threads.some((thread) => thread.id === preferredCurrentId)
-    ? preferredCurrentId
-    : mostRecentThread(threads).id;
-  return {
-    history: { currentThreadId, threads },
-    managedFiles: [...managedFiles],
-    warnings
-  };
-}
-async function removeImportedVaultChatHistory(vaultBasePath, managedFiles, vault) {
-  const basePath = import_node_path5.default.resolve(vaultBasePath);
-  const directories = /* @__PURE__ */ new Set();
-  for (const filePath of managedFiles || []) {
-    const resolved = import_node_path5.default.resolve(filePath);
-    if (!isInside(basePath, resolved)) continue;
-    const vaultPath = import_node_path5.default
-      .relative(basePath, resolved)
-      .replaceAll(import_node_path5.default.sep, "/");
-    const abstractFile = vault?.getAbstractFileByPath?.(vaultPath);
-    if (abstractFile && abstractFile.extension === "md") await vault.delete(abstractFile, true);
-    else await import_node_fs5.default.promises.rm(resolved, { force: true });
-    directories.add(import_node_path5.default.dirname(resolved));
-  }
-  for (const directory of [...directories].sort((left, right) => right.length - left.length)) {
-    await removeEmptyDirectory(directory, basePath);
-  }
-}
-function orderedSources(basePath, configuredFolder, version) {
-  const markdownFolder = resolveVaultFolder(basePath, configuredFolder);
-  const directJsonFolder = resolveVaultFolder(basePath, "chats");
-  const indexedRoot = resolveVaultFolder(basePath, "pi_sessions");
-  const sources = {
-    markdown: { load: () => loadMarkdownThreads(markdownFolder) },
-    json: { load: () => loadJsonThreads(directJsonFolder) },
-    indexed: { load: () => loadIndexedThreads(indexedRoot) }
-  };
-  const preferred =
-    version === MARKDOWN_STORAGE_VERSION
-      ? "markdown"
-      : version === JSON_STORAGE_VERSION
-        ? "json"
-        : version === INDEXED_STORAGE_VERSION
-          ? "indexed"
-          : void 0;
-  return [
-    ...(preferred ? [sources[preferred]] : []),
-    ...Object.entries(sources)
-      .filter(([name]) => name !== preferred)
-      .map(([, source]) => source)
-  ];
-}
-async function loadMarkdownThreads(folder) {
-  const result = emptyResult();
-  for (const fileName of await listFiles(folder, ".md")) {
-    const filePath = import_node_path5.default.join(folder, fileName);
-    try {
-      const thread = parseMarkdownThread(
-        await import_node_fs5.default.promises.readFile(filePath, "utf8")
-      );
-      if (!thread) continue;
-      result.threads.push(thread);
-      result.managedFiles.push(filePath);
-    } catch (error) {
-      result.warnings.push(`${filePath}: ${errorMessage(error)}`);
-    }
-  }
-  for (const fileName of await listFiles(folder, ".json", true)) {
-    if (/^\.pi-agent-migration-backup-v\d+\.json$/.test(fileName)) {
-      result.managedFiles.push(import_node_path5.default.join(folder, fileName));
-    }
-  }
-  return result;
-}
-async function loadJsonThreads(folder) {
-  const result = emptyResult();
-  for (const fileName of await listFiles(folder, ".json")) {
-    if (fileName.startsWith(".")) continue;
-    const filePath = import_node_path5.default.join(folder, fileName);
-    try {
-      const thread = parseJsonThread(
-        JSON.parse(await import_node_fs5.default.promises.readFile(filePath, "utf8"))
-      );
-      result.threads.push(thread);
-      result.managedFiles.push(filePath);
-    } catch (error) {
-      result.warnings.push(`${filePath}: ${errorMessage(error)}`);
-    }
-  }
-  return result;
-}
-async function loadIndexedThreads(root) {
-  const result = await loadJsonThreads(import_node_path5.default.join(root, "chats"));
-  const indexPath = import_node_path5.default.join(root, "index.json");
-  if (await exists(indexPath)) {
-    result.managedFiles.push(indexPath);
-    try {
-      const index = JSON.parse(await import_node_fs5.default.promises.readFile(indexPath, "utf8"));
-      if (typeof index?.currentThreadId === "string")
-        result.currentThreadId = index.currentThreadId;
-    } catch (error) {
-      result.warnings.push(`${indexPath}: ${errorMessage(error)}`);
-    }
-  }
-  const backupPath = import_node_path5.default.join(root, "migration-backup-v0.json");
-  if (await exists(backupPath)) result.managedFiles.push(backupPath);
-  return result;
-}
-function parseMarkdownThread(content) {
-  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!frontmatterMatch) return void 0;
-  const frontmatter = parseFrontmatter(frontmatterMatch[1]);
-  if (frontmatter.pi_agent_chat !== true) return void 0;
-  if (frontmatter.pi_agent_schema !== 1) throw new Error(STRINGS.history.unsupportedSchema);
-  const thread = {
-    id: requiredString(frontmatter.id, "thread ID"),
-    title: requiredString(frontmatter.title, "title"),
-    messages: parseMarkdownMessages(content.slice(frontmatterMatch[0].length)),
-    createdAt: parseDate(frontmatter.created, "created"),
-    updatedAt: parseDate(frontmatter.updated, "updated"),
-    archived: frontmatter.archived === true,
-    favorite: frontmatter.favorite === true,
-    piSessionId:
-      typeof frontmatter.pi_session === "string" && frontmatter.pi_session.trim()
-        ? frontmatter.pi_session.trim()
-        : void 0
-  };
-  validateThread(thread);
-  return thread;
-}
-function parseMarkdownMessages(content) {
-  const messages = [];
-  const startPattern = /^<!-- pi-agent-message:start ([A-Za-z0-9_-]+) ([A-Za-z0-9_-]+) -->\r?$/gm;
-  let start;
-  while ((start = startPattern.exec(content)) !== null) {
-    const [, messageId, encodedMetadata] = start;
-    const endPattern = new RegExp(`^<!-- pi-agent-message:end ${messageId} -->\\r?$`, "gm");
-    endPattern.lastIndex = startPattern.lastIndex;
-    const end = endPattern.exec(content);
-    if (!end) throw new Error(`Missing end marker for message ${messageId}.`);
-    let contentStart = startPattern.lastIndex;
-    if (content.startsWith("\r\n", contentStart)) contentStart += 2;
-    else if (content.startsWith("\n", contentStart)) contentStart += 1;
-    let contentEnd = end.index;
-    if (content.slice(Math.max(contentStart, contentEnd - 2), contentEnd) === "\r\n") {
-      contentEnd -= 2;
-    } else if (contentEnd > contentStart && content[contentEnd - 1] === "\n") {
-      contentEnd -= 1;
-    }
-    let metadata;
-    try {
-      metadata = JSON.parse(Buffer.from(encodedMetadata, "base64url").toString("utf8"));
-    } catch {
-      throw new Error(`Invalid metadata for message ${messageId}.`);
-    }
-    const message = { ...metadata, content: content.slice(contentStart, contentEnd) };
-    validateMessage(message);
-    messages.push(JSON.parse(JSON.stringify(message)));
-    startPattern.lastIndex = endPattern.lastIndex;
-  }
-  return messages;
-}
-function parseJsonThread(document2) {
-  const thread = document2?.thread ?? document2;
-  validateThread(thread);
-  return JSON.parse(JSON.stringify(thread));
-}
-function validateThread(thread) {
-  if (
-    !thread ||
-    typeof thread !== "object" ||
-    Array.isArray(thread) ||
-    typeof thread.id !== "string" ||
-    !thread.id ||
-    typeof thread.title !== "string" ||
-    !Array.isArray(thread.messages) ||
-    typeof thread.createdAt !== "number" ||
-    !Number.isFinite(thread.createdAt) ||
-    typeof thread.updatedAt !== "number" ||
-    !Number.isFinite(thread.updatedAt)
-  ) {
-    throw new Error(STRINGS.history.invalidThread);
-  }
-  for (const message of thread.messages) validateMessage(message);
-}
-function validateMessage(message) {
-  if (
-    !message ||
-    typeof message !== "object" ||
-    Array.isArray(message) ||
-    !["user", "assistant", "system"].includes(message.role) ||
-    typeof message.content !== "string" ||
-    typeof message.createdAt !== "number" ||
-    !Number.isFinite(message.createdAt)
-  ) {
-    throw new Error(STRINGS.history.invalidMessage);
-  }
-}
-function parseFrontmatter(source) {
-  const result = {};
-  for (const line of source.split(/\r?\n/)) {
-    const match = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/);
-    if (!match) continue;
-    try {
-      result[match[1]] = JSON.parse(match[2]);
-    } catch {
-      result[match[1]] = match[2].trim();
-    }
-  }
-  return result;
-}
-function parseDate(value, field) {
-  const timestamp = typeof value === "string" ? Date.parse(value) : NaN;
-  if (!Number.isFinite(timestamp)) throw new Error(`Invalid ${field} timestamp.`);
-  return timestamp;
-}
-function requiredString(value, field) {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`Missing ${field}.`);
-  return value;
-}
-function normalizeVaultFolder2(value) {
-  const normalized = String(value || "chats")
-    .trim()
-    .replaceAll("\\", "/")
-    .replace(/^\/+|\/+$/g, "");
-  if (!normalized || normalized.split("/").some((part) => !part || part === "." || part === "..")) {
-    return "chats";
-  }
-  return normalized;
-}
-function resolveVaultFolder(basePath, folder) {
-  const resolved = import_node_path5.default.resolve(basePath, folder);
-  if (!isInside(basePath, resolved)) throw new Error(STRINGS.history.unsafeFolder);
-  return resolved;
-}
-function isInside(basePath, candidate) {
-  const relative = import_node_path5.default.relative(basePath, candidate);
-  return (
-    relative !== "" && !relative.startsWith("..") && !import_node_path5.default.isAbsolute(relative)
-  );
-}
-async function listFiles(folder, extension, includeHidden = false) {
-  try {
-    return (await import_node_fs5.default.promises.readdir(folder, { withFileTypes: true }))
-      .filter(
-        (entry) =>
-          entry.isFile() &&
-          entry.name.endsWith(extension) &&
-          (includeHidden || !entry.name.startsWith("."))
-      )
-      .map((entry) => entry.name)
-      .sort();
-  } catch (error) {
-    const code =
-      /** @type {NodeJS.ErrnoException} */
-      error?.code;
-    if (code === "ENOENT") return [];
-    throw error;
-  }
-}
-async function removeEmptyDirectory(directory, boundary) {
-  let current = directory;
-  while (isInside(boundary, current)) {
-    try {
-      await import_node_fs5.default.promises.rmdir(current);
-    } catch (error) {
-      const code =
-        /** @type {NodeJS.ErrnoException} */
-        error?.code;
-      if (code === "ENOENT") return;
-      if (code === "ENOTEMPTY" || code === "EEXIST") return;
-      throw error;
-    }
-    current = import_node_path5.default.dirname(current);
-  }
-}
-async function exists(filePath) {
-  try {
-    await import_node_fs5.default.promises.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function emptyResult() {
-  return { threads: [], managedFiles: [], warnings: [] };
-}
-function mostRecentThread(threads) {
-  return [...threads].sort((left, right) => right.updatedAt - left.updatedAt)[0];
-}
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // src/threads/thread-store.mjs
@@ -12709,30 +12361,10 @@ var PiAgentPlugin = class extends P.Plugin {
       localPromptQueue,
       localPromptSteering,
       annotationData,
-      currentChatId: _currentChatId,
-      chatHistoryFolder,
-      chatHistoryStorageVersion,
-      chatHistoryMigrationDismissed: _chatHistoryMigrationDismissed,
-      legacyIndexedHistoryFolder: _indexedHistoryFolder,
-      legacyJsonHistoryFolder: _jsonHistoryFolder,
       ...rawSettings
     } = rawData;
-    const shouldImportVaultHistory = [1, 2, 3].includes(chatHistoryStorageVersion);
-    let importedHistory;
-    if (shouldImportVaultHistory) {
-      try {
-        importedHistory = await importVaultChatHistory(this.getVaultBasePath(), rawData);
-      } catch (error) {
-        console.warn(STRINGS.plugin.historyImportFailed, error);
-      }
-      if (Array.isArray(rawSettings.ignoredFolders) && chatHistoryFolder) {
-        rawSettings.ignoredFolders = rawSettings.ignoredFolders.filter(
-          (folder) => folder !== chatHistoryFolder
-        );
-      }
-    }
-    let restoredHistory = importedHistory?.history;
-    if (!restoredHistory && isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
+    let restoredHistory;
+    if (isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
     if (!restoredHistory) {
       restoredHistory = await this.store.readBackupHistory();
       if (restoredHistory) new P.Notice(STRINGS.plugin.historyRecovered);
@@ -12761,24 +12393,6 @@ var PiAgentPlugin = class extends P.Plugin {
     if (this.settings.model && isLegacyBareModelId(this.settings.model)) {
       this.settings.customModel = `openai/${this.settings.model}`;
       this.settings.model = "__custom";
-    }
-    if (importedHistory?.history) {
-      await this.savePluginData();
-      const persisted = (await this.loadData())?.chatHistory;
-      if (!historiesMatch(persisted, this.threadHistory.toJSON())) {
-        throw new Error(STRINGS.plugin.verifyImportFailed);
-      }
-      await removeImportedVaultChatHistory(
-        this.getVaultBasePath(),
-        importedHistory.managedFiles,
-        this.app.vault
-      );
-      if (importedHistory.warnings.length > 0) {
-        console.warn(STRINGS.plugin.historyUnrecognizedFiles, importedHistory.warnings);
-        new P.Notice(STRINGS.plugin.historyRestoredPartially);
-      } else {
-        new P.Notice(STRINGS.plugin.historyRestored);
-      }
     }
   }
   async saveSettings() {
@@ -12988,11 +12602,11 @@ var PiAgentPlugin = class extends P.Plugin {
     this.promptQueue.migratePaths(oldPath, newPath);
     this.views.call("refreshLocalPromptQueue");
   }
-  invalidateQueuedAnnotationPaths(path6) {
-    if (!path6) return;
-    this.promptQueue.invalidatePaths(path6);
+  invalidateQueuedAnnotationPaths(path5) {
+    if (!path5) return;
+    this.promptQueue.invalidatePaths(path5);
     this.views.call("refreshLocalPromptQueue");
-    this.views.call("invalidateInFlightAnnotationPaths", path6);
+    this.views.call("invalidateInFlightAnnotationPaths", path5);
   }
   async inspectPiContext(prompt) {
     if (((!this.graph || !this.contextBuilder) && this.rebuildServices(), !this.contextBuilder))
@@ -13063,7 +12677,7 @@ var PiAgentPlugin = class extends P.Plugin {
       be,
       this.getVaultBasePath(),
       () => this.piCommands,
-      (path6) => this.getAnnotationsForContext(path6)
+      (path5) => this.getAnnotationsForContext(path5)
     );
     this.catalog = new PiModelCatalog(this.getPluginDirectory(), this.settings);
     this.commandCatalog = new PiCommandCatalog(
@@ -13092,17 +12706,17 @@ var PiAgentPlugin = class extends P.Plugin {
       if (annotations2.length > 0) this.annotationStore.deletePath(explicitFile.path);
       return annotations2;
     }
-    const path6 = this.getCurrentContextPath();
-    if (!path6) return [];
-    const annotations = await this.getAnnotationsForContext(path6);
-    if (annotations.length > 0) this.annotationStore.deletePath(path6);
+    const path5 = this.getCurrentContextPath();
+    if (!path5) return [];
+    const annotations = await this.getAnnotationsForContext(path5);
+    if (annotations.length > 0) this.annotationStore.deletePath(path5);
     return annotations;
   }
   beginAnnotationProcessing(threadId, annotations) {
     this.annotationController?.beginProcessing(threadId, annotations);
   }
-  completeAnnotationProcessingForPath(threadId, path6) {
-    this.annotationController?.completeProcessingForPath(threadId, path6);
+  completeAnnotationProcessingForPath(threadId, path5) {
+    this.annotationController?.completeProcessingForPath(threadId, path5);
   }
   endAnnotationProcessingForThread(threadId) {
     this.annotationController?.endProcessingForThread(threadId);
@@ -13116,12 +12730,12 @@ var PiAgentPlugin = class extends P.Plugin {
       byPath.set(annotation.path, items);
     }
     try {
-      for (const [path6, items] of byPath) {
-        const file = this.app.vault.getAbstractFileByPath(path6);
+      for (const [path5, items] of byPath) {
+        const file = this.app.vault.getAbstractFileByPath(path5);
         if (!(file instanceof P.TFile) || file.extension !== "md") continue;
-        const current = this.annotationStore.list(path6);
+        const current = this.annotationStore.list(path5);
         const ids = new Set(current.map((annotation) => annotation.id));
-        this.annotationStore.replacePath(path6, [
+        this.annotationStore.replacePath(path5, [
           ...current,
           ...items.filter((annotation) => !ids.has(annotation.id))
         ]);
@@ -13132,12 +12746,12 @@ var PiAgentPlugin = class extends P.Plugin {
       );
     }
   }
-  async getAnnotationsForContext(path6) {
-    const annotations = this.annotationStore.list(path6);
+  async getAnnotationsForContext(path5) {
+    const annotations = this.annotationStore.list(path5);
     if (annotations.length === 0) return annotations;
-    if (!this.vault.note(path6)) return annotations;
-    const content = this.editor.valueForOpenNote(path6) ?? (await this.vault.readFresh(path6));
-    return this.annotationStore.reanchorPath(path6, content);
+    if (!this.vault.note(path5)) return annotations;
+    const content = this.editor.valueForOpenNote(path5) ?? (await this.vault.readFresh(path5));
+    return this.annotationStore.reanchorPath(path5, content);
   }
   buildThreadService() {
     return new ThreadService({
@@ -13200,8 +12814,8 @@ var PiAgentPlugin = class extends P.Plugin {
   refreshCurrentContextPath() {
     this.setCurrentContextPath(this.workspace.activeNotePath());
   }
-  setCurrentContextPath(path6) {
-    this.currentContextPath = typeof path6 === "string" && path6 ? path6 : void 0;
+  setCurrentContextPath(path5) {
+    this.currentContextPath = typeof path5 === "string" && path5 ? path5 : void 0;
   }
   runWithActiveMarkdownNote(checking, action) {
     const activeFile = this.app.workspace.getActiveFile();
@@ -13224,8 +12838,8 @@ var PiAgentPlugin = class extends P.Plugin {
     }
     new P.Notice(STRINGS.plugin.couldNotOpenView);
   }
-  async runAnnotationsPrompt(path6) {
-    if (this.annotationStore.list(path6).length === 0) {
+  async runAnnotationsPrompt(path5) {
+    if (this.annotationStore.list(path5).length === 0) {
       new P.Notice(STRINGS.plugin.noAnnotationsToSend);
       return;
     }
@@ -13238,7 +12852,7 @@ var PiAgentPlugin = class extends P.Plugin {
     try {
       await view.runAnnotationPrompt(
         "Follow every annotation's user-authored request. Batch non-overlapping Change annotations for this note into one targeted edit call, and answer each Question annotation without modifying its target.",
-        path6
+        path5
       );
     } catch (error) {
       new P.Notice(error instanceof Error ? error.message : String(error));
@@ -13246,22 +12860,22 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   async suggestFrontmatterForCurrentNote() {
     this.graph || this.rebuildServices();
-    const path6 = this.graph?.getActivePath();
-    if (!path6) {
+    const path5 = this.graph?.getActivePath();
+    if (!path5) {
       new P.Notice(STRINGS.plugin.openMarkdownFirst);
       return;
     }
-    const content = await this.vault.read(path6);
+    const content = await this.vault.read(path5);
     const today = /* @__PURE__ */ new Date().toISOString().slice(0, 10);
     const after = previewSuggestedFrontmatter(content, {
       type: "note",
       status: "draft",
       updated: today,
-      tags: this.inferTags(path6, content)
+      tags: this.inferTags(path5, content)
     });
     const patch = {
-      id: `${Date.now()}-${path6}`,
-      path: path6,
+      id: `${Date.now()}-${path5}`,
+      path: path5,
       before: content,
       after,
       reason: "Add baseline Pi-suggested frontmatter",
@@ -13269,14 +12883,14 @@ var PiAgentPlugin = class extends P.Plugin {
         type: "note",
         status: "draft",
         updated: today,
-        tags: this.inferTags(path6, content)
+        tags: this.inferTags(path5, content)
       }
     };
     new ApprovalModal(this, patch, () => {}).open();
   }
-  inferTags(path6, content) {
+  inferTags(path5, content) {
     const tags = /* @__PURE__ */ new Set();
-    const folderPath = String(path6).split("/").slice(0, -1).join("/");
+    const folderPath = String(path5).split("/").slice(0, -1).join("/");
     if (folderPath) {
       const folderName = folderPath.split("/").pop();
       if (folderName) tags.add(folderName.toLowerCase().replace(/\s+/g, "-"));
@@ -13285,8 +12899,7 @@ var PiAgentPlugin = class extends P.Plugin {
     return [...tags].filter(Boolean).slice(0, 6);
   }
   getEditorSelection() {
-    const activeEditor = this.app.workspace.activeEditor;
-    return activeEditor?.editor?.getSelection() ?? "";
+    return this.workspace.activeSelection();
   }
   getVaultBasePath() {
     return this.vault.getBasePath();
@@ -13294,7 +12907,7 @@ var PiAgentPlugin = class extends P.Plugin {
   getPluginDirectory() {
     const basePath = this.getVaultBasePath();
     if (!basePath) return void 0;
-    const configDir = this.app.vault.configDir;
+    const configDir = this.vault.getConfigDir();
     const relativeDir = this.manifest.dir ?? `plugins/${this.manifest.id}`;
     const normalizedBase = basePath.replace(/\/+$/, "");
     const normalizedDir = relativeDir.replace(/^\/+/, "");
@@ -13315,12 +12928,6 @@ function isStoredChatHistory(history) {
     !Array.isArray(history) &&
     Array.isArray(history.threads) &&
     history.threads.length > 0
-  );
-}
-function historiesMatch(left, right) {
-  return (
-    isStoredChatHistory(left) &&
-    JSON.stringify(sanitizeThreadHistory(left)) === JSON.stringify(sanitizeThreadHistory(right))
   );
 }
 function isLegacyBareModelId(model) {

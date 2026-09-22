@@ -68,14 +68,10 @@ describe("VaultAdapter", () => {
     expect(vault.listNotes()).toEqual([{ path: "Notes/A.md", title: "A", mtime: 42 }]);
     expect(vault.note("Notes/A.md")).toMatchObject({ path: "Notes/A.md" });
     expect(vault.note("Missing.md")).toBeUndefined();
-    expect(vault.exists("Notes/A.md")).toBe(true);
     await expect(vault.read("Notes/A.md")).resolves.toBe("body-cached");
     await expect(vault.read("Notes/A.md", 2)).resolves.toBe("bo\n...[truncated]");
     await expect(vault.readFresh("Notes/A.md")).resolves.toBe("body");
     await expect(vault.read("Missing.md")).rejects.toThrow("File not found");
-    await expect(vault.delete("Missing.md")).rejects.toThrow("File not found");
-    await expect(vault.delete("Notes/A.md")).resolves.toBeUndefined();
-    expect(app.vault.delete).toHaveBeenCalledOnce();
   });
 
   it("normalizes metadata from the cache", () => {
@@ -141,14 +137,9 @@ describe("WorkspaceAdapter", () => {
     expect(workspace.activeSelection()).toBe("");
   });
 
-  it("opens a note and forwards workspace events", async () => {
-    const app = createApp({ files: { "Notes/A.md": new obsidian.TFile("Notes/A.md") } });
-    const workspace = new WorkspaceAdapter(app);
+  it("forwards workspace events", () => {
+    const workspace = new WorkspaceAdapter(createApp());
 
-    await workspace.openNote("Notes/A.md");
-
-    const leaf = app.workspace.getLeaf.mock.results[0].value;
-    expect(leaf.openFile).toHaveBeenCalledOnce();
     expect(workspace.on("file-open", () => {}).eventName).toBe("file-open");
   });
 });

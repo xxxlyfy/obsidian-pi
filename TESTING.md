@@ -49,7 +49,6 @@ Then open the vault, reload or disable/re-enable Pi Agent, and keep the develope
 
 - [ ] **Pending:** Create more than 40 chats, reload Obsidian, and confirm all chats, messages, titles, favorites, thinking disclosures, and current-chat selection survive in `.obsidian/plugins/pi-agent/data.json`.
 - [ ] **Pending:** Confirm `chat-history.backup.json` and `chat-history.backup.previous.json` are checksummed JSON snapshots in the plugin directory; temporarily remove `chatHistory` from `data.json`, reload, and confirm recovery from backup.
-- [ ] **Pending:** Starting from a development build that wrote chat files into the vault, reload this build and confirm every chat is verified in plugin data before only Pi-managed vault chat files are removed. Unrecognized or malformed files must remain untouched.
 - [ ] **Pending:** Send two prompts in one chat; confirm process reuse, conversation continuity, and no duplicated stable instructions/history in each prompt.
 - [ ] **Pending:** Use two chats and confirm isolated histories and Pi sessions.
 - [ ] **Pending:** Cancel a long response promptly, then send again successfully in the same chat.
