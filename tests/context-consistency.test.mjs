@@ -150,6 +150,91 @@ describe("context snapshot stability", () => {
   });
 });
 
+describe("context mutation isolation", () => {
+  it("keeps the tool catalog, search results, annotations, and links independent per build", async () => {
+    const { context, annotations } = createContext({
+      "A.md": { content: "Alpha body", tags: [{ tag: "#pi" }] },
+      "Linked.md": { content: "Linked body" }
+    });
+    annotations.create({
+      path: "A.md",
+      intent: "question",
+      context: "explain",
+      quote: "Alpha",
+      prefix: "",
+      suffix: "",
+      range: {
+        from: 0,
+        to: 5,
+        start: { line: 0, ch: 0 },
+        end: { line: 0, ch: 5 }
+      },
+      targetKind: "selection",
+      status: "attached"
+    });
+
+    const first = await context.build("see @Linked", "", { activeNotePath: "A.md" });
+    const second = await context.build("see @Linked", "", { activeNotePath: "A.md" });
+
+    // Mutating one snapshot must not leak into the next one.
+    first.toolCatalog.push("mutated");
+    first.activeNote.tags.push("#mutated");
+    first.activeNote.backlinks.push({ path: "mutated.md" });
+    first.searchResults.push({ path: "mutated.md" });
+    first.attachments.length = 0;
+    first.annotations.length = 0;
+
+    expect(second.toolCatalog).not.toContain("mutated");
+    expect(second.activeNote.tags).not.toContain("#mutated");
+    expect(second.activeNote.backlinks).toEqual([]);
+    expect(second.searchResults).toEqual([]);
+    expect(second.attachments).toHaveLength(1);
+    expect(second.annotations).toHaveLength(1);
+    expect(second).not.toBe(first);
+  });
+
+  it("follows annotation paths across rename and drops them on delete", async () => {
+    const { context, annotations, notes } = createContext({
+      "A.md": { content: "Alpha body" },
+      "B.md": { content: "Beta body" }
+    });
+    annotations.create({
+      path: "A.md",
+      intent: "change",
+      context: "tighten this",
+      quote: "Alpha",
+      prefix: "",
+      suffix: "",
+      range: {
+        from: 0,
+        to: 5,
+        start: { line: 0, ch: 0 },
+        end: { line: 0, ch: 5 }
+      },
+      targetKind: "selection",
+      status: "attached"
+    });
+
+    const before = await context.build("q", "", { activeNotePath: "A.md" });
+    expect(before.annotations.map((annotation) => annotation.path)).toEqual(["A.md"]);
+
+    expect(annotations.renamePath("A.md", "Renamed.md")).toBe(true);
+    const moved = notes.get("A.md");
+    notes.delete("A.md");
+    notes.set("Renamed.md", { ...moved, file: new obsidian.TFile("Renamed.md") });
+
+    const renamed = await context.build("q", "", { activeNotePath: "Renamed.md" });
+    expect(renamed.annotations.map((annotation) => annotation.path)).toEqual(["Renamed.md"]);
+
+    const other = await context.build("q", "", { activeNotePath: "B.md" });
+    expect(other.annotations).toEqual([]);
+
+    annotations.deletePath("Renamed.md");
+    const deleted = await context.build("q", "", { activeNotePath: "Renamed.md" });
+    expect(deleted.annotations).toEqual([]);
+  });
+});
+
 describe("search correctness", () => {
   function createSearchVault() {
     return createContext({

@@ -137,6 +137,60 @@ describe("ThreadService", () => {
     await expect(service.forkCurrentThread()).resolves.toBeUndefined();
   });
 
+  it("picks a safe fallback when the current thread is deleted", () => {
+    const { service } = createService();
+    const first = service.currentThreadId;
+    const second = service.startNewThread("Second");
+    service.switchThread(second.id);
+    service.addMessageToThread(second.id, { role: "user", content: "hi", createdAt: 1 });
+
+    expect(service.deleteThread(second.id)).toBe(true);
+
+    expect(service.getThread(second.id)).toBeUndefined();
+    expect(service.currentThreadId).not.toBe(second.id);
+    expect(service.getThread(service.currentThreadId)).toBeDefined();
+    expect(service.currentThreadId).toBe(first);
+  });
+
+  it("creates a replacement thread when the last thread is deleted", () => {
+    const { service } = createService();
+    const only = service.currentThreadId;
+
+    expect(service.deleteThread(only)).toBe(true);
+
+    expect(service.listThreads({ includeArchived: true })).toHaveLength(1);
+    expect(service.currentThreadId).not.toBe(only);
+    expect(service.currentThread.messages).toEqual([]);
+  });
+
+  it("keeps a fork isolated from its source thread", () => {
+    const { service } = createService();
+    const source = service.currentThreadId;
+    service.addMessageToThread(source, { role: "user", content: "original", createdAt: 1 });
+
+    const fork = service.store.forkCurrentThread();
+    expect(fork).toBeDefined();
+
+    // Mutating either thread must not touch the other.
+    service.addMessageToThread(fork.id, { role: "assistant", content: "fork only", createdAt: 2 });
+    service.renameThread(source, "Renamed source");
+    service.setThreadSessionId(source, "session-source");
+
+    const sourceThread = service.getThread(source);
+    const forkThread = service.getThread(fork.id);
+    expect(sourceThread.messages.map((message) => message.content)).toEqual(["original"]);
+    expect(forkThread.messages.map((message) => message.content)).toEqual([
+      "original",
+      "fork only"
+    ]);
+    expect(sourceThread.title).toBe("Renamed source");
+    expect(forkThread.piSessionId).toBeUndefined();
+
+    // Returned copies are detached from the stored threads.
+    forkThread.messages.push({ role: "user", content: "external", createdAt: 3 });
+    expect(service.getThread(fork.id).messages).toHaveLength(2);
+  });
+
   it("delegates session readers to the per-thread runner", async () => {
     const calls = [];
     const sessionRunner = {

@@ -220,6 +220,97 @@ describe("AgentRuntime", () => {
     expect(runtime.createCompactPrompt("  ")).toBe("/compact");
   });
 
+  it("survives a cancel request that throws and keeps the run cancellable", async () => {
+    let release;
+    const { runtime } = createRuntime(
+      async () =>
+        new Promise((resolve) => {
+          release = () => resolve({});
+        }),
+      {
+        cancelRunner: () => {
+          throw new Error("abort channel closed");
+        }
+      }
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pending = runtime.startPrompt({ threadId: "t1", prompt: "long" });
+    const run = runtime.getRun("t1");
+
+    expect(() => runtime.requestCancel(run)).not.toThrow();
+    expect(run).toMatchObject({ canceling: true, status: RUN_STATUS.cancelling });
+
+    // A second cancel is a no-op, and the run still settles normally.
+    expect(runtime.requestCancel(run)).toBe(false);
+    release();
+    await pending;
+
+    expect(runtime.getRun("t1")).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("ignores cancel requests for a finished or unknown run", async () => {
+    const { runtime } = createRuntime(async () => ({}));
+
+    expect(runtime.requestCancel(undefined)).toBe(false);
+    expect(runtime.requestCancel({ threadId: "t1", runId: "t1:99", generation: 99 })).toBe(false);
+
+    const { run } = await runtime.startPrompt({ threadId: "t1", prompt: "done" });
+    expect(runtime.requestCancel(run)).toBe(false);
+  });
+
+  it("releases a run whose cancellation never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminated = [];
+      const { runtime } = createRuntime(async () => new Promise(() => {}), {
+        cancelTimeoutMs: 5_000,
+        forceTerminate: (runner) => terminated.push(runner)
+      });
+      const started = runtime.startPrompt({ threadId: "t1", prompt: "stuck" });
+      const run = runtime.getRun("t1");
+
+      runtime.requestCancel(run);
+      expect(run.cancelWatchdog).toBeDefined();
+      expect(runtime.hasRun("t1")).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(terminated).toEqual([run.runner]);
+      expect(runtime.hasRun("t1")).toBe(false);
+      expect(run).toMatchObject({ status: RUN_STATUS.error });
+      expect(run.error).toContain("Cancellation timed out");
+
+      // The chat is usable again: the next prompt is not blocked.
+      const next = runtime.startPrompt({ threadId: "t1", prompt: "after stuck" });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(runtime.hasRun("t1")).toBe(true);
+      runtime.dispose();
+      await vi.advanceTimersByTimeAsync(5_000);
+      started.catch(() => {});
+      next.catch(() => {});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the cancel watchdog when the run settles normally", async () => {
+    let cancelledRun;
+    const { runtime } = createRuntime(async () => {
+      cancelledRun = runtime.getRun("t1");
+      runtime.requestCancel(cancelledRun);
+      throw new PiRunCanceledError();
+    });
+    const pending = runtime.startPrompt({ threadId: "t1", prompt: "cancel me" });
+    expect(cancelledRun?.cancelWatchdog).toBeDefined();
+
+    await expect(pending).rejects.toBeInstanceOf(PiRunCanceledError);
+
+    expect(runtime.getRun("t1")).toBeUndefined();
+    expect(cancelledRun.cancelWatchdog).toBeUndefined();
+  });
+
   it("refuses to start after dispose", async () => {
     const { runtime } = createRuntime(async () => ({}));
     runtime.dispose();

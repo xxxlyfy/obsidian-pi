@@ -93,6 +93,14 @@ function createVault() {
         unresolved[newPath] = unresolved[oldPath];
         delete unresolved[oldPath];
       }
+      // Obsidian rewrites every source link table that referenced the old path,
+      // without emitting a metadata change for each source.
+      for (const links of Object.values(resolved)) {
+        if (links[oldPath] === undefined) continue;
+        const count = links[oldPath];
+        delete links[oldPath];
+        links[newPath] = (links[newPath] ?? 0) + count;
+      }
       index.renamePath(oldPath, newPath);
       index.updatePath(newPath);
     },
@@ -178,6 +186,39 @@ describe("VaultIndex link consistency", () => {
     expect(vault.index.getBacklinkCounts("Target.md")).toEqual([]);
   });
 
+  it("follows a chain of renames for several sources at once", () => {
+    const vault = createVault();
+    vault.writeNote("A.md", { links: { "B.md": 1 } });
+    vault.writeNote("C.md", { links: { "B.md": 2 } });
+    vault.writeNote("B.md", {});
+
+    vault.renameNote("B.md", "D.md");
+
+    expect(vault.index.getBacklinkCounts("D.md")).toEqual([
+      { path: "C.md", count: 2 },
+      { path: "A.md", count: 1 }
+    ]);
+    expect(vault.index.getBacklinkCounts("B.md")).toEqual([]);
+    expect(vault.index.getMetadata("B.md")).toBeUndefined();
+    expect(vault.index.getOutgoingCounts("A.md")).toEqual([{ path: "D.md", count: 1 }]);
+  });
+
+  it("reuses a freed path without keeping stale entries", () => {
+    const vault = createVault();
+    vault.writeNote("A.md", {});
+    vault.writeNote("B.md", { links: { "A.md": 1 } });
+
+    vault.deleteNote("A.md");
+    vault.renameNote("B.md", "A.md");
+
+    expect(vault.index.getMetadata("A.md")).toMatchObject({ path: "A.md" });
+    expect(vault.index.getMetadata("B.md")).toBeUndefined();
+    // The renamed note now links to itself; self-links are never backlinks.
+    expect(vault.index.getBacklinkCounts("A.md")).toEqual([]);
+    expect(vault.index.getOutgoingCounts("A.md")).toEqual([{ path: "A.md", count: 1 }]);
+    expect(vault.index.getBacklinkCounts("B.md")).toEqual([]);
+  });
+
   it("keeps unresolved links and removes them when they resolve", () => {
     const vault = createVault();
     vault.writeNote("Note.md", { unresolvedLinks: { Missing: 1 } });
@@ -193,36 +234,41 @@ describe("VaultIndex link consistency", () => {
 });
 
 describe("VaultIndex equivalence: incremental vs full rebuild", () => {
-  it("matches a fresh full rebuild after a sequence of vault changes", () => {
-    const actions = [
-      (vault) => vault.writeNote("A.md", { tags: ["#one"], links: { "B.md": 1 } }),
-      (vault) => vault.writeNote("B.md", { headings: ["Heading"] }),
-      (vault) => vault.writeNote("C.md", { unresolvedLinks: { Missing: 1 } }),
-      (vault) => vault.writeNote("A.md", { tags: ["#two"], links: { "C.md": 2 } }),
-      (vault) => vault.renameNote("C.md", "Renamed.md"),
-      (vault) => vault.writeNote("D.md", { links: { "B.md": 1, "Renamed.md": 1 } }),
-      (vault) => vault.deleteNote("A.md"),
-      (vault) => vault.writeNote("B.md", { tags: ["#b"], headings: ["Renamed heading"] })
-    ];
+  const actions = [
+    ["create A", (vault) => vault.writeNote("A.md", { tags: ["#one"], links: { "B.md": 1 } })],
+    ["create B", (vault) => vault.writeNote("B.md", { headings: ["Heading"] })],
+    ["create C", (vault) => vault.writeNote("C.md", { unresolvedLinks: { Missing: 1 } })],
+    ["modify A", (vault) => vault.writeNote("A.md", { tags: ["#two"], links: { "C.md": 2 } })],
+    ["rename C", (vault) => vault.renameNote("C.md", "Renamed.md")],
+    ["create D", (vault) => vault.writeNote("D.md", { links: { "B.md": 1, "Renamed.md": 1 } })],
+    ["delete A", (vault) => vault.deleteNote("A.md")],
+    ["modify B", (vault) => vault.writeNote("B.md", { tags: ["#b"], headings: ["Renamed"] })],
+    ["rename B", (vault) => vault.renameNote("B.md", "B-renamed.md")],
+    ["delete D", (vault) => vault.deleteNote("D.md")]
+  ];
 
+  const snapshot = (index) => ({
+    metadata: [...index.metadata.entries()].sort(),
+    outgoing: [...index.outgoing.entries()].map(([k, v]) => [k, [...v.entries()].sort()]).sort(),
+    backlinks: [...index.backlinks.entries()].map(([k, v]) => [k, [...v.entries()].sort()]).sort(),
+    unresolved: [...index.unresolved.entries()].map(([k, v]) => [k, [...v.entries()].sort()]).sort()
+  });
+
+  it("matches a fresh full rebuild after every single step", () => {
     const incremental = createVault();
-    for (const action of actions) action(incremental);
-    const fresh = createVault();
-    for (const action of actions) action(fresh);
-    fresh.index.rebuild();
+    for (const [label, action] of actions) {
+      action(incremental);
 
-    const snapshot = (index) => ({
-      metadata: [...index.metadata.entries()].sort(),
-      outgoing: [...index.outgoing.entries()].map(([k, v]) => [k, [...v.entries()].sort()]).sort(),
-      backlinks: [...index.backlinks.entries()]
-        .map(([k, v]) => [k, [...v.entries()].sort()])
-        .sort(),
-      unresolved: [...index.unresolved.entries()]
-        .map(([k, v]) => [k, [...v.entries()].sort()])
-        .sort()
-    });
+      const fresh = createVault();
+      for (const [, replay] of actions.slice(
+        0,
+        actions.indexOf(actions.find(([l]) => l === label)) + 1
+      ))
+        replay(fresh);
+      fresh.index.rebuild();
 
-    expect(snapshot(incremental.index)).toEqual(snapshot(fresh.index));
+      expect(snapshot(incremental.index), `after ${label}`).toEqual(snapshot(fresh.index));
+    }
   });
 });
 

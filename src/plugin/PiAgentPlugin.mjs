@@ -149,6 +149,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.promptQueue = this.buildPromptQueueService();
     this.promptEnricher = undefined;
     this.persistenceFailureNotified = false;
+    this.persistenceBackupNotified = false;
     this.unloaded = false;
     /** @type {number | undefined} */
     this.setupCheckTimer = undefined;
@@ -591,6 +592,7 @@ export class PiAgentPlugin extends P.Plugin {
         ),
       createRunner: (threadId) => this.createPiRunner(threadId),
       cancelRunner: (runner) => this.cancelPiRun(runner),
+      forceTerminate: (runner) => runner?.rpcClient?.terminate?.(),
       now: () => Date.now()
     });
   }
@@ -747,8 +749,16 @@ export class PiAgentPlugin extends P.Plugin {
         this.persistenceFailureNotified = true;
         new P.Notice(STRINGS.plugin.historySaveFailed);
       },
+      onBackupError: (error) => {
+        console.warn(STRINGS.plugin.historyBackupFailed, error);
+        if (this.persistenceBackupNotified) return;
+        this.persistenceBackupNotified = true;
+        new P.Notice(STRINGS.plugin.historyBackupFailed);
+      },
       onSaved: () => {
         this.persistenceFailureNotified = false;
+        this.persistenceBackupNotified = false;
+        this.persistenceBackupNotified = false;
       }
     });
   }

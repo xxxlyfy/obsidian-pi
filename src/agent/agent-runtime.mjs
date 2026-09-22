@@ -1,6 +1,8 @@
 import { isPiRunCanceled } from "../pi/run-canceled.mjs";
 import { RUN_STATUS, RunStateStore } from "./run-state.mjs";
 
+const DEFAULT_CANCEL_TIMEOUT_MS = 10_000;
+
 /**
  * @typedef {object} PromptRunRequest
  * @property {string} threadId
@@ -30,8 +32,10 @@ import { RUN_STATUS, RunStateStore } from "./run-state.mjs";
  * @typedef {object} AgentRuntimePorts
  * @property {(request: PromptRunRequest, callbacks: RunCallbacks) => Promise<import("../pi/runner.mjs").RunResult>} runPrompt
  * @property {(threadId: string) => any} [createRunner]
- * @property {(runner: any) => void} [cancelRunner]
+ * @property {(runner: any) => void} [cancelRunner] Best-effort cancel request.
+ * @property {(runner: any) => void} [forceTerminate] Hard stop used by the cancel watchdog.
  * @property {() => number} [now]
+ * @property {number} [cancelTimeoutMs] How long a cancelling run may stay active.
  */
 
 /**
@@ -48,6 +52,7 @@ export class AgentRuntime {
     this.ports = ports;
     this.runStates = new RunStateStore({ now: ports.now });
     this.lastRequests = new Map();
+    this.cancelTimeoutMs = ports.cancelTimeoutMs ?? DEFAULT_CANCEL_TIMEOUT_MS;
     this.disposed = false;
   }
 
@@ -117,7 +122,41 @@ export class AgentRuntime {
   /** @param {import("./run-state.mjs").RunRecord | undefined} run */
   finishRun(run) {
     if (!run) return false;
+    this.clearCancelWatchdog(run);
     return this.runStates.end(run.threadId, run.runId);
+  }
+
+  /**
+   * A cancel that never settles must not block the chat forever: after
+   * `cancelTimeoutMs` the run is hard-terminated and the record is released, so
+   * the next prompt can start and the UI can recover.
+   *
+   * @param {import("./run-state.mjs").RunRecord} run
+   */
+  startCancelWatchdog(run) {
+    this.clearCancelWatchdog(run);
+    if (!this.cancelTimeoutMs || this.cancelTimeoutMs <= 0) return;
+    run.cancelWatchdog = setTimeout(() => {
+      run.cancelWatchdog = undefined;
+      if (!this.isCurrent(run)) return;
+      try {
+        if (this.ports.forceTerminate) this.ports.forceTerminate(run.runner);
+        else run.runner?.rpcClient?.terminate?.();
+      } catch (error) {
+        console.warn("Pi Agent: failed to force-terminate a cancelled run", error);
+      }
+      this.runStates.transition(run.threadId, RUN_STATUS.error, {
+        error: "Cancellation timed out; the agent process was stopped."
+      });
+      this.finishRun(run);
+    }, this.cancelTimeoutMs);
+  }
+
+  /** @param {import("./run-state.mjs").RunRecord} [run] */
+  clearCancelWatchdog(run) {
+    if (!run?.cancelWatchdog) return;
+    clearTimeout(run.cancelWatchdog);
+    run.cancelWatchdog = undefined;
   }
 
   /**
@@ -220,8 +259,15 @@ export class AgentRuntime {
     if (!run || !this.isCurrent(run) || run.canceling) return false;
     run.canceling = true;
     this.runStates.transition(run.threadId, RUN_STATUS.cancelling);
-    if (this.ports.cancelRunner) this.ports.cancelRunner(runner);
-    else runner?.cancelCurrentRun?.();
+    try {
+      if (this.ports.cancelRunner) this.ports.cancelRunner(runner);
+      else runner?.cancelCurrentRun?.();
+    } catch (error) {
+      // A failed cancel request must not escape to the caller or leave the run
+      // stuck in cancelling; the watchdog releases it if the runner never settles.
+      console.warn("Pi Agent: cancel request failed", error);
+    }
+    this.startCancelWatchdog(run);
     return true;
   }
 
@@ -261,6 +307,7 @@ export class AgentRuntime {
 
   dispose() {
     this.disposed = true;
+    for (const run of this.runStates.list()) this.clearCancelWatchdog(run);
     this.runStates.dispose();
     this.lastRequests.clear();
   }

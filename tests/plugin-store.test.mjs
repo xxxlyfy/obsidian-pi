@@ -210,6 +210,48 @@ describe("PluginStore", () => {
     expect(saved).toEqual(["saved", "error", "saved"]);
   });
 
+  it("keeps the save successful when only the chat-history backup fails", async () => {
+    const dir = await createTempDir();
+    const events = [];
+    const store = new PluginStore({
+      loadData: async () => ({}),
+      saveData: async () => events.push("data"),
+      getPluginDirectory: () => dir,
+      buildPayload: () => ({
+        value: 1,
+        chatHistory: { currentThreadId: "broken", threads: "nope" }
+      }),
+      onSaved: () => events.push("saved"),
+      onSaveError: () => events.push("save-error"),
+      onBackupError: () => events.push("backup-error")
+    });
+
+    await store.saveNow();
+
+    expect(events).toEqual(["data", "backup-error", "saved"]);
+  });
+
+  it("does not attempt the backup when data.json itself fails", async () => {
+    const dir = await createTempDir();
+    const events = [];
+    const store = new PluginStore({
+      loadData: async () => ({}),
+      saveData: async () => {
+        events.push("data");
+        throw new Error("disk full");
+      },
+      getPluginDirectory: () => dir,
+      buildPayload: () => ({ value: 1, chatHistory: history() }),
+      onSaved: () => events.push("saved"),
+      onBackupError: () => events.push("backup-error")
+    });
+
+    await expect(store.saveNow()).rejects.toThrow("disk full");
+
+    expect(events).toEqual(["data"]);
+    expect(await fs.promises.readdir(dir)).toEqual([]);
+  });
+
   it("does not write anything when nothing is pending", async () => {
     const dir = await createTempDir();
     const { store, writes } = createStore({ dir });

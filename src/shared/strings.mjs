@@ -301,6 +301,7 @@ export const STRINGS = {
     commandsFailed: "Pi Agent：刷新 Pi 命令失败",
     contextBuilderUnavailable: "Pi 上下文构建器不可用。",
     errorPrefix: "错误：",
+    historyBackupFailed: "Pi Agent：无法写入会话历史备份（data.json 已保存）。",
     historySaveFailed: "Pi Agent：无法保存会话历史",
     modelCatalogFailed: "Pi Agent：刷新模型目录失败",
     modelServiceNotReady: "Pi 模型服务尚未就绪。",

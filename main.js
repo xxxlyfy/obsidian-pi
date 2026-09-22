@@ -337,6 +337,7 @@ ${messages} 条消息 · ${entries} 个树节点 · ${tokens} tokens · $${cost}
     commandsFailed: "Pi Agent：刷新 Pi 命令失败",
     contextBuilderUnavailable: "Pi 上下文构建器不可用。",
     errorPrefix: "错误：",
+    historyBackupFailed: "Pi Agent：无法写入会话历史备份（data.json 已保存）。",
     historySaveFailed: "Pi Agent：无法保存会话历史",
     modelCatalogFailed: "Pi Agent：刷新模型目录失败",
     modelServiceNotReady: "Pi 模型服务尚未就绪。",
@@ -536,6 +537,7 @@ var RunStateStore = class {
 };
 
 // src/agent/agent-runtime.mjs
+var DEFAULT_CANCEL_TIMEOUT_MS = 1e4;
 var AgentRuntime = class {
   /** @param {AgentRuntimePorts} ports */
   constructor(
@@ -545,6 +547,7 @@ var AgentRuntime = class {
     this.ports = ports;
     this.runStates = new RunStateStore({ now: ports.now });
     this.lastRequests = /* @__PURE__ */ new Map();
+    this.cancelTimeoutMs = ports.cancelTimeoutMs ?? DEFAULT_CANCEL_TIMEOUT_MS;
     this.disposed = false;
   }
   /**
@@ -604,7 +607,39 @@ var AgentRuntime = class {
   /** @param {import("./run-state.mjs").RunRecord | undefined} run */
   finishRun(run) {
     if (!run) return false;
+    this.clearCancelWatchdog(run);
     return this.runStates.end(run.threadId, run.runId);
+  }
+  /**
+   * A cancel that never settles must not block the chat forever: after
+   * `cancelTimeoutMs` the run is hard-terminated and the record is released, so
+   * the next prompt can start and the UI can recover.
+   *
+   * @param {import("./run-state.mjs").RunRecord} run
+   */
+  startCancelWatchdog(run) {
+    this.clearCancelWatchdog(run);
+    if (!this.cancelTimeoutMs || this.cancelTimeoutMs <= 0) return;
+    run.cancelWatchdog = setTimeout(() => {
+      run.cancelWatchdog = void 0;
+      if (!this.isCurrent(run)) return;
+      try {
+        if (this.ports.forceTerminate) this.ports.forceTerminate(run.runner);
+        else run.runner?.rpcClient?.terminate?.();
+      } catch (error) {
+        console.warn("Pi Agent: failed to force-terminate a cancelled run", error);
+      }
+      this.runStates.transition(run.threadId, RUN_STATUS.error, {
+        error: "Cancellation timed out; the agent process was stopped."
+      });
+      this.finishRun(run);
+    }, this.cancelTimeoutMs);
+  }
+  /** @param {import("./run-state.mjs").RunRecord} [run] */
+  clearCancelWatchdog(run) {
+    if (!run?.cancelWatchdog) return;
+    clearTimeout(run.cancelWatchdog);
+    run.cancelWatchdog = void 0;
   }
   /**
    * @param {import("./run-state.mjs").RunRecord} run
@@ -699,8 +734,13 @@ var AgentRuntime = class {
     if (!run || !this.isCurrent(run) || run.canceling) return false;
     run.canceling = true;
     this.runStates.transition(run.threadId, RUN_STATUS.cancelling);
-    if (this.ports.cancelRunner) this.ports.cancelRunner(runner);
-    else runner?.cancelCurrentRun?.();
+    try {
+      if (this.ports.cancelRunner) this.ports.cancelRunner(runner);
+      else runner?.cancelCurrentRun?.();
+    } catch (error) {
+      console.warn("Pi Agent: cancel request failed", error);
+    }
+    this.startCancelWatchdog(run);
     return true;
   }
   /**
@@ -736,6 +776,7 @@ var AgentRuntime = class {
   }
   dispose() {
     this.disposed = true;
+    for (const run of this.runStates.list()) this.clearCancelWatchdog(run);
     this.runStates.dispose();
     this.lastRequests.clear();
   }
@@ -1137,6 +1178,7 @@ var PluginStore = class {
    * @param {() => PersistedData} options.buildPayload Builds the current snapshot to persist.
    * @param {(error: unknown) => void} [options.onSaveError] For scheduled/flushed writes.
    * @param {() => void} [options.onSaved] Called after every successful write.
+   * @param {(error: unknown) => void} [options.onBackupError] Backup failures are recoverable.
    * @param {number} [options.flushDelayMs]
    */
   constructor({
@@ -1146,6 +1188,7 @@ var PluginStore = class {
     buildPayload,
     onSaveError = () => {},
     onSaved = () => {},
+    onBackupError = () => {},
     flushDelayMs = DEFAULT_FLUSH_DELAY_MS
   }) {
     this.loadData = loadData;
@@ -1154,6 +1197,7 @@ var PluginStore = class {
     this.buildPayload = buildPayload;
     this.onSaveError = onSaveError;
     this.onSaved = onSaved;
+    this.onBackupError = onBackupError;
     this.flushDelayMs = flushDelayMs;
     this.timer = void 0;
     this.dirty = false;
@@ -1212,7 +1256,11 @@ var PluginStore = class {
         this.dirty = false;
         const payload = this.buildPayload();
         await this.saveData(payload);
-        await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
+        try {
+          await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
+        } catch (error) {
+          this.onBackupError(error);
+        }
         this.onSaved();
       }
     } finally {
@@ -12366,6 +12414,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.promptQueue = this.buildPromptQueueService();
     this.promptEnricher = void 0;
     this.persistenceFailureNotified = false;
+    this.persistenceBackupNotified = false;
     this.unloaded = false;
     this.setupCheckTimer = void 0;
     this.models = this.buildModelService();
@@ -12788,6 +12837,7 @@ var PiAgentPlugin = class extends P.Plugin {
         ),
       createRunner: (threadId) => this.createPiRunner(threadId),
       cancelRunner: (runner) => this.cancelPiRun(runner),
+      forceTerminate: (runner) => runner?.rpcClient?.terminate?.(),
       now: () => Date.now()
     });
   }
@@ -12941,8 +12991,16 @@ var PiAgentPlugin = class extends P.Plugin {
         this.persistenceFailureNotified = true;
         new P.Notice(STRINGS.plugin.historySaveFailed);
       },
+      onBackupError: (error) => {
+        console.warn(STRINGS.plugin.historyBackupFailed, error);
+        if (this.persistenceBackupNotified) return;
+        this.persistenceBackupNotified = true;
+        new P.Notice(STRINGS.plugin.historyBackupFailed);
+      },
       onSaved: () => {
         this.persistenceFailureNotified = false;
+        this.persistenceBackupNotified = false;
+        this.persistenceBackupNotified = false;
       }
     });
   }

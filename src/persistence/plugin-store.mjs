@@ -31,6 +31,7 @@ export class PluginStore {
    * @param {() => PersistedData} options.buildPayload Builds the current snapshot to persist.
    * @param {(error: unknown) => void} [options.onSaveError] For scheduled/flushed writes.
    * @param {() => void} [options.onSaved] Called after every successful write.
+   * @param {(error: unknown) => void} [options.onBackupError] Backup failures are recoverable.
    * @param {number} [options.flushDelayMs]
    */
   constructor({
@@ -40,6 +41,7 @@ export class PluginStore {
     buildPayload,
     onSaveError = () => {},
     onSaved = () => {},
+    onBackupError = () => {},
     flushDelayMs = DEFAULT_FLUSH_DELAY_MS
   }) {
     this.loadData = loadData;
@@ -48,6 +50,7 @@ export class PluginStore {
     this.buildPayload = buildPayload;
     this.onSaveError = onSaveError;
     this.onSaved = onSaved;
+    this.onBackupError = onBackupError;
     this.flushDelayMs = flushDelayMs;
     this.timer = undefined;
     this.dirty = false;
@@ -114,7 +117,13 @@ export class PluginStore {
         this.dirty = false;
         const payload = this.buildPayload();
         await this.saveData(payload);
-        await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
+        try {
+          await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
+        } catch (error) {
+          // data.json is already durable; a broken backup is recoverable and
+          // must not be reported as a failed save.
+          this.onBackupError(error);
+        }
         this.onSaved();
       }
     } finally {

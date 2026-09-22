@@ -311,6 +311,33 @@ describe("golden path 4: message -> persist -> reload", () => {
     }
   });
 
+  it("keeps data across a schedule -> unload -> reload cycle", async () => {
+    const dir = await createTempDir();
+    const first = createPluginDouble({ dir });
+    first.annotationController = { destroy: vi.fn() };
+    const threadId = first.threads.currentThreadId;
+    first.threads.setThreadSessionId(threadId, "session-roundtrip");
+    first.threads.addMessage({
+      role: "user",
+      content: "survives unload",
+      createdAt: 1_700_000_000_000
+    });
+    expect(first.store.hasPendingWrite).toBe(true);
+
+    // Unload immediately: the scheduled write must still land.
+    PiAgentPlugin.prototype.onunload.call(first);
+    await first.store.flush();
+    expect(first.store.hasPendingWrite).toBe(false);
+
+    const reloaded = createPluginDouble({ dir, data: first.saved });
+    await reloaded.loadSettings();
+
+    expect(reloaded.threads.getThread(threadId)).toMatchObject({
+      piSessionId: "session-roundtrip",
+      messages: [expect.objectContaining({ content: "survives unload" })]
+    });
+  });
+
   it("persists thread metadata changes through the plugin thread API", async () => {
     const dir = await createTempDir();
     const plugin = createPluginDouble({ dir });

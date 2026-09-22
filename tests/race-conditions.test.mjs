@@ -250,6 +250,72 @@ describe("race: view closed while a run is active", () => {
   });
 });
 
+describe("race: RPC process restarted", () => {
+  it("drops late events from the replaced process", async () => {
+    let staleCallbacks;
+    const staleRunner = createScriptedRunner(async ({ callbacks }) => {
+      staleCallbacks = callbacks;
+      callbacks.onTextDelta("old process");
+      throw new Error("Pi RPC process stopped.");
+    });
+    const plugin = createPluginDouble(staleRunner);
+    const threadId = plugin.threads.currentThreadId;
+    const view = createViewDouble(plugin);
+
+    await view.runPrompt("before restart", threadId);
+    expect(view.runtime.listRuns()).toHaveLength(0);
+
+    const restartedRunner = createScriptedRunner(async ({ callbacks }) => {
+      callbacks.onTextDelta("new process");
+      return result("new process", threadId);
+    });
+    plugin.createPiRunner = () => restartedRunner;
+    await view.runPrompt("after restart", threadId);
+
+    staleCallbacks.onTextDelta(" late from the old process");
+    staleCallbacks.onEvent({ type: "tool_start", toolCallId: "old", toolName: "read" });
+    staleCallbacks.onEvent({ type: "agent_end" });
+
+    expect(view.streamingAssistantContent).toBe("");
+    expect(view.activeToolCalls.size).toBe(0);
+    expect(plugin.threads.currentMessages().at(-1).content).toBe("new process");
+    expect(
+      plugin.threads.currentMessages().some((message) => message.content.includes("late from"))
+    ).toBe(false);
+  });
+
+  it("treats a prompt timeout as a settled error run and allows the next prompt", async () => {
+    const timeoutRunner = createScriptedRunner(async () => {
+      throw new Error(
+        "Pi RPC prompt timed out. The agent process was restarted to avoid overlapping runs."
+      );
+    });
+    const plugin = createPluginDouble(timeoutRunner);
+    const threadId = plugin.threads.currentThreadId;
+    const view = createViewDouble(plugin);
+
+    await view.runPrompt("slow", threadId);
+
+    expect(view.runtime.listRuns()).toHaveLength(0);
+    expect(view.running).toBe(false);
+    expect(view.canceling).toBe(false);
+    expect(plugin.threads.currentMessages().map((message) => message.role)).toEqual([
+      "user",
+      "assistant"
+    ]);
+    expect(plugin.threads.currentMessages().at(-1).content).toContain("运行失败");
+
+    const healthy = createScriptedRunner(async ({ callbacks }) => {
+      callbacks.onTextDelta("recovered");
+      return result("recovered", threadId);
+    });
+    plugin.createPiRunner = () => healthy;
+    await view.runPrompt("try again", threadId);
+
+    expect(plugin.threads.currentMessages().at(-1).content).toBe("recovered");
+  });
+});
+
 describe("race: runtime refuses overlapping runs", () => {
   it("rejects a second run for the same thread instead of interleaving state", async () => {
     let release;
