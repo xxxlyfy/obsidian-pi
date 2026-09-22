@@ -311,6 +311,69 @@ describe("AgentRuntime", () => {
     expect(cancelledRun.cancelWatchdog).toBeUndefined();
   });
 
+  it("ignores late events and refuses new work after dispose", async () => {
+    let lateCallbacks;
+    let release;
+    const { runtime } = createRuntime(
+      async (request, callbacks) =>
+        new Promise((resolve) => {
+          lateCallbacks = callbacks;
+          release = () => resolve({});
+        })
+    );
+    const deltas = [];
+    const pending = runtime.startPrompt(
+      { threadId: "t1", prompt: "long" },
+      { onTextDelta: (delta) => deltas.push(delta) }
+    );
+    await Promise.resolve();
+
+    runtime.dispose();
+    release();
+    await pending;
+
+    lateCallbacks.onTextDelta(" late");
+    lateCallbacks.onEvent({ type: "tool_start" });
+
+    expect(deltas).toEqual([]);
+    await expect(runtime.startPrompt({ threadId: "t1", prompt: "again" })).rejects.toThrow(
+      "runtime is disposed"
+    );
+    // dispose() also drops the retry source, so a retry can never resurrect it.
+    await expect(runtime.retryRun("t1")).rejects.toThrow("no previous prompt");
+    expect(runtime.getRun("t1")).toBeUndefined();
+    expect(runtime.lastRequests.size).toBe(0);
+  });
+
+  it("lets a forced-terminated run be retried with a fresh runner", async () => {
+    vi.useFakeTimers();
+    try {
+      const attempts = [];
+      const { runtime, runners } = createRuntime(
+        async (request) => {
+          attempts.push(request.runner);
+          if (attempts.length === 1) return new Promise(() => {});
+          return { finalResponse: "recovered" };
+        },
+        { cancelTimeoutMs: 5_000, forceTerminate: () => {} }
+      );
+      const started = runtime.startPrompt({ threadId: "t1", prompt: "stuck" });
+      runtime.requestCancel(runtime.getRun("t1"));
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(runtime.getRun("t1")).toBeUndefined();
+
+      const { result } = await runtime.retryRun("t1");
+      expect(result).toEqual({ finalResponse: "recovered" });
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1]).not.toBe(attempts[0]);
+      expect(runners).toHaveLength(2);
+      started.catch(() => {});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refuses to start after dispose", async () => {
     const { runtime } = createRuntime(async () => ({}));
     runtime.dispose();

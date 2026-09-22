@@ -1,11 +1,8 @@
-import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { getConfiguredSkillPaths } from "../context/skills.mjs";
 import { CUSTOM_MODEL_VALUE } from "../plugin/settings.mjs";
 import { createContextUsage } from "./token-usage.mjs";
-import { createPiCliError, formatPiCliFailure } from "./diagnostics.mjs";
-import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
 import { handlePiJsonEventLine } from "./events.mjs";
 import { PiRpcClient } from "./rpc-client.mjs";
 import { PiRunCanceledError } from "./run-canceled.mjs";
@@ -85,48 +82,22 @@ export class PiRunner {
 
   cancelCurrentRun() {
     this.cancelRequested = true;
-    if (this.rpcClient) {
-      this.rpcClient.abort();
-      return;
-    }
-    if (!this.activeChild) return;
-
-    const child = this.activeChild;
-    this.terminateActiveChild("SIGTERM");
-    window.setTimeout(() => {
-      if (this.activeChild === child) this.terminateActiveChild("SIGKILL");
-    }, 1500);
+    this.rpcClient?.abort();
   }
 
-  terminateActiveChild(signal) {
-    const child = this.activeChild;
-    if (!child) return;
-
-    try {
-      if (process.platform === "win32" && child.pid) {
-        execFile(
-          "taskkill",
-          ["/pid", String(child.pid), "/T", "/F"],
-          {
-            timeout: 2000,
-            windowsHide: true
-          },
-          () => {
-            // Fire-and-forget: taskkill failures are ignored.
-          }
-        );
-      } else if (child.pid) {
-        process.kill(-child.pid, signal);
-      } else {
-        child.kill(signal);
-      }
-    } catch {
-      try {
-        child.kill(signal);
-      } catch {
-        // Ignore process termination races.
-      }
-    }
+  /**
+   * Hard stop used by the runtime's cancel watchdog. The current RPC client is
+   * disposed and dropped so the next run cannot inherit a wedged process: it
+   * starts a fresh client instead. The runner itself stays in the registry and
+   * becomes reusable.
+   */
+  forceTerminate() {
+    const client = this.rpcClient;
+    this.rpcClient = undefined;
+    this.rpcSession = undefined;
+    client?.dispose?.();
+    this.cancelRequested = false;
+    this.isRunning = false;
   }
 
   async getOrCreateRpcClient(sessionReference) {
@@ -291,130 +262,6 @@ export class PiRunner {
       }
       throw error;
     }
-  }
-
-  runPiCli(prompt, sessionId, callbacks) {
-    if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
-
-    const session = this.resolveOrCreateSession(sessionId);
-    const args = this.buildPiArgs(session.path, "json");
-
-    return new Promise((resolve, reject) => {
-      this.cancelRequested = false;
-      const piExecutable = findPiExecutable(this.settings.piExecutablePath);
-      const invocation = buildPiProcessInvocation(piExecutable, args, {
-        cwd: this.workingDirectory ?? this.pluginDirectory,
-        detached: process.platform !== "win32"
-      });
-      const child = spawn(invocation.command, invocation.args, invocation.options);
-      this.activeChild = child;
-      callbacks?.onEvent?.({
-        type: "pi_start",
-        raw: {
-          args: args.slice(1),
-          cwd: this.workingDirectory ?? this.pluginDirectory
-        }
-      });
-
-      let stdoutBuffer = "";
-      let stderr = "";
-      let finalResponse = "";
-      let settled = false;
-      const events = [];
-      let runState;
-      const updateRunState = (nextRunState) => {
-        if (nextRunState) runState = { ...runState, ...nextRunState };
-      };
-      const failOnce = (error) => {
-        if (!settled) {
-          settled = true;
-          reject(error);
-        }
-      };
-      const flushStdoutBuffer = () => {
-        if (!stdoutBuffer.trim()) return;
-
-        handlePiJsonEventLine(
-          stdoutBuffer.trim(),
-          callbacks,
-          events,
-          (delta) => {
-            finalResponse += delta;
-          },
-          updateRunState
-        );
-        stdoutBuffer = "";
-      };
-      const getErrorText = () =>
-        runState?.errorMessage ?? stderr.trim() ?? runState?.fallbackText?.trim();
-
-      child.stdout.on("data", (chunk) => {
-        stdoutBuffer += chunk.toString("utf8");
-        const lines = stdoutBuffer.split(/\r?\n/);
-        stdoutBuffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          handlePiJsonEventLine(
-            line,
-            callbacks,
-            events,
-            (delta) => {
-              finalResponse += delta;
-            },
-            updateRunState
-          );
-        }
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.once("error", (error) => {
-        failOnce(createPiCliError({ error }));
-      });
-      child.once("close", (exitCode) => {
-        if (this.activeChild === child) this.activeChild = undefined;
-        if (settled) return;
-
-        if (this.cancelRequested) {
-          this.cancelRequested = false;
-          failOnce(new PiRunCanceledError());
-          return;
-        }
-
-        flushStdoutBuffer();
-        const errorText = getErrorText();
-        if (exitCode && exitCode !== 0) {
-          failOnce(
-            new Error(formatPiCliFailure({ context: "Pi run failed", stderr: errorText, exitCode }))
-          );
-          return;
-        }
-        if (runState?.errorMessage) {
-          failOnce(new Error(runState.errorMessage));
-          return;
-        }
-
-        settled = true;
-        resolve({
-          finalResponse: this.getFinalResponse(
-            finalResponse,
-            runState?.fallbackText,
-            events,
-            isPiCliCommandPrompt(prompt)
-          ),
-          sessionId: session.reference,
-          threadId: session.reference,
-          events,
-          contextUsage: this.getRunContextUsage(runState?.tokenUsage, events),
-          contextCompacted: this.didCompactContext(events),
-          tokenUsage: runState?.tokenUsage ?? undefined
-        });
-      });
-
-      child.stdin.write(prompt);
-      child.stdin.end();
-    });
   }
 
   async runPiRpcCompact(sessionId, customInstructions = "", callbacks) {

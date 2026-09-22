@@ -592,7 +592,7 @@ export class PiAgentPlugin extends P.Plugin {
         ),
       createRunner: (threadId) => this.createPiRunner(threadId),
       cancelRunner: (runner) => this.cancelPiRun(runner),
-      forceTerminate: (runner) => runner?.rpcClient?.terminate?.(),
+      forceTerminate: (runner) => runner?.forceTerminate?.(),
       now: () => Date.now()
     });
   }
