@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.45
+
+- Fixed a stuck-chat case after closing a view: a cancel watchdog was disarmed when the view released its runtime, so a run whose cancellation never settled could leave the thread runner wedged. That runner stayed in the registry reporting "already running", and the chat refused every later prompt until the plugin was reloaded. The watchdog now completes even after the runtime is gone, force-retires the wedged runner (which the registry replaces), and the chat is usable again within the cancel deadline.
+- Added an integration test that wires the real chain (thread runner registry, real runner, mocked RPC client, real agent runtime) and proves: a wedged cancellation retires the runner and the next run gets a fresh runner and a fresh Pi process; closing the view in that state releases the runner, keeps the queued prompts, and never starts them.
+- Removed a duplicated line in the persistence "save recovered" handler.
+
 ## 0.0.44
 
 - A force-stopped runner (cancel watchdog) is now retired instead of being reused: it is marked invalid, refuses every later run, and the thread runner registry disposes and replaces it. The replacement starts its own Pi process, so the previous run's late cleanup and late events can only touch the retired runner and can never disturb the chat that now owns it.
