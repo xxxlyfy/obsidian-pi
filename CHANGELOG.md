@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.0.40
+
+- Fixed a persistence data-loss path: a failed save used to clear the pending flag before writing, so the unsaved change was only retried if another edit happened later. The pending state now survives a failed write, the next flush retries it, and the newest state is what gets written.
+- Two views can no longer run the same chat at the same time. Each chat allows one active run, and a second send from another view is refused with a clear message instead of interleaving two streams on one Pi process. Different chats still run in parallel.
+- Closing a chat view now ends the run that view started (`requestCancel` plus runtime release) instead of leaving an unattached run behind. Canceled runs report the usual cancellation notice and no partial answer is stored. If you relied on closing the view and letting the answer finish in the background, this is the one behavior change in this release.
+- A failed chat-history backup is still reported separately from a successful `data.json` write, and a failed `data.json` write no longer attempts a backup.
+- `TESTING.md` no longer contains machine-local vault paths; the manual checklist refers to a generic test-vault path.
+- Internal: `docs/state-ownership.md` and `docs/identifiers.md` document run ownership, the one-run-per-thread lock, and the persistence revision counters.
+
 ## 0.0.39
 
 - Cancelling a run can no longer wedge a chat. A cancel request that fails is reported and retried by the UI path, and a run that stays in `cancelling` past a short deadline (10 s) is released instead of blocking the chat: the agent process is force-stopped, the run is reported as failed, and the next prompt can start immediately.
