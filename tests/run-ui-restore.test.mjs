@@ -158,7 +158,7 @@ describe("per-thread live run UI state", () => {
     const snapshotA = { annotations: [{ id: "a1", path: "A.md" }], sourcePath: "A.md" };
     const snapshotB = { annotations: [{ id: "b1", path: "B.md" }], sourcePath: "B.md" };
     const view = Object.create(PiAgentView.prototype);
-    view.pendingAnnotationSnapshots = new Set();
+    view.delivery = { forEachSnapshot: () => {} };
     view.runtime = {
       getRun: () => undefined,
       listRuns: () => [{ annotationSnapshot: snapshotA }, { annotationSnapshot: snapshotB }],
@@ -182,7 +182,7 @@ describe("per-thread live run UI state", () => {
       sourcePath: "A.md"
     };
     const view = Object.create(PiAgentView.prototype);
-    view.pendingAnnotationSnapshots = new Set();
+    view.delivery = { forEachSnapshot: () => {} };
     view.runtime = {
       getRun: () => undefined,
       listRuns: () => [{ annotationSnapshot: snapshot }],

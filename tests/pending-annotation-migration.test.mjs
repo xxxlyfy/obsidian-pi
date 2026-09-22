@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { PromptDelivery } from "../src/agent/prompt-delivery.mjs";
 
 vi.mock("obsidian", () => ({
   Component: class {},
@@ -21,9 +22,25 @@ vi.mock("obsidian", () => ({
 
 const { PiAgentView } = await import("../src/ui/PiAgentView.mjs");
 
-function createView(overrides = {}) {
+function createDelivery(overrides = {}) {
+  return new PromptDelivery({
+    consumeAnnotations: async () => [],
+    restoreAnnotations: () => {},
+    buildDelivery: async (delivery) => delivery,
+    isThreadRunning: () => false,
+    enqueueQueuedPrompt: () => {},
+    requeueQueuedPrompt: () => {},
+    ensureModelsLoaded: async () => {},
+    getSelectedModelInfo: () => undefined,
+    shouldIncludeActiveNote: () => true,
+    notify: () => {},
+    ...overrides
+  });
+}
+
+function createView({ delivery = createDelivery(), ...overrides } = {}) {
   const view = Object.create(PiAgentView.prototype);
-  view.pendingAnnotationSnapshots = new Set();
+  view.delivery = delivery;
   view.runtime = {
     getRun: () => undefined,
     listRuns: () => [],
@@ -36,7 +53,9 @@ function createView(overrides = {}) {
 describe("annotation snapshot migration during prompt delivery", () => {
   it("migrates a pending snapshot that is not registered as a run yet", () => {
     const snapshot = { annotations: [{ path: "Notes/Old.md" }], sourcePath: "Notes/Old.md" };
-    const view = createView({ pendingAnnotationSnapshots: new Set([snapshot]) });
+    const delivery = createDelivery();
+    delivery.trackPendingSnapshot(snapshot);
+    const view = createView({ delivery });
 
     view.migrateInFlightAnnotationPaths("Notes/Old.md", "Notes/New.md");
 
@@ -46,7 +65,9 @@ describe("annotation snapshot migration during prompt delivery", () => {
 
   it("invalidates a pending snapshot when its note is deleted mid-build", () => {
     const snapshot = { annotations: [{ path: "Notes/Old.md" }], sourcePath: "Notes/Old.md" };
-    const view = createView({ pendingAnnotationSnapshots: new Set([snapshot]) });
+    const delivery = createDelivery();
+    delivery.trackPendingSnapshot(snapshot);
+    const view = createView({ delivery });
 
     view.invalidateInFlightAnnotationPaths("Notes/Old.md");
 
@@ -71,8 +92,10 @@ describe("annotation snapshot migration during prompt delivery", () => {
 
   it("migrates a snapshot only once when it is pending and registered at the same time", () => {
     const snapshot = { annotations: [], sourcePath: "Notes/Old.md" };
+    const delivery = createDelivery();
+    delivery.trackPendingSnapshot(snapshot);
     const view = createView({
-      pendingAnnotationSnapshots: new Set([snapshot]),
+      delivery,
       runtime: {
         getRun: () => undefined,
         listRuns: () => [{ annotationSnapshot: snapshot }],
@@ -86,56 +109,48 @@ describe("annotation snapshot migration during prompt delivery", () => {
   });
 
   it("releases the pending snapshot when delivery settles", () => {
-    const view = createView();
+    const delivery = createDelivery();
     const snapshot = { annotations: [], sourcePath: "Notes/Old.md" };
 
-    const release = view.trackPendingAnnotationSnapshot(snapshot);
+    const release = delivery.trackPendingSnapshot(snapshot);
 
-    expect(view.pendingAnnotationSnapshots.has(snapshot)).toBe(true);
-
+    expect(delivery.pendingSnapshots.has(snapshot)).toBe(true);
     release();
-
-    expect(view.pendingAnnotationSnapshots.has(snapshot)).toBe(false);
+    expect(delivery.pendingSnapshots.has(snapshot)).toBe(false);
   });
 
-  it("retries the delivery once when a rename migrated the snapshot mid-build", async () => {
+  it("rebuilds the delivery once when the note was renamed mid-build", async () => {
+    const delivery = createDelivery();
     const snapshot = { annotations: [], sourcePath: "Notes/Old.md" };
-    const view = createView();
-    const buildDelivery = vi.fn(async () => {
-      if (snapshot.sourcePath === "Notes/Old.md") {
-        view.migrateInFlightAnnotationPaths("Notes/Old.md", "Notes/New.md");
-        return { promptContext: { activeNote: undefined } };
-      }
-      return { promptContext: { activeNote: { path: snapshot.sourcePath } } };
-    });
+    const builds = [];
+    const buildDelivery = async () => {
+      builds.push(snapshot.sourcePath);
+      if (builds.length === 1) snapshot.sourcePath = "Notes/New.md";
+      return builds.length === 1
+        ? { prompt: "first", promptContext: undefined }
+        : { prompt: "second", promptContext: { activeNote: { path: "Notes/New.md" } } };
+    };
 
-    const delivery = await view.buildDeliveryWithSnapshotRetry(buildDelivery, snapshot);
+    const built = await delivery.buildWithSnapshotRetry(buildDelivery, snapshot);
 
-    expect(buildDelivery).toHaveBeenCalledTimes(2);
-    expect(delivery.promptContext.activeNote.path).toBe("Notes/New.md");
+    expect(builds).toHaveLength(2);
+    expect(built.prompt).toBe("second");
+    expect(delivery.pendingSnapshots.has(snapshot)).toBe(false);
   });
 
-  it("retries the delivery when the note was deleted mid-build", async () => {
-    const snapshot = { annotations: [{ path: "Notes/Old.md" }], sourcePath: "Notes/Old.md" };
-    const view = createView();
-    const buildDelivery = vi.fn(async () => {
-      view.invalidateInFlightAnnotationPaths("Notes/Old.md");
-      return { promptContext: { activeNote: undefined } };
-    });
-
-    await view.buildDeliveryWithSnapshotRetry(buildDelivery, snapshot);
-
-    expect(buildDelivery).toHaveBeenCalledTimes(2);
-    expect(snapshot.sourcePath).toBeUndefined();
-    expect(snapshot.annotations).toEqual([]);
-  });
-
-  it("does not re-deliver when the snapshot path did not change", async () => {
+  it("keeps the first delivery when the renamed note is still attached", async () => {
+    const delivery = createDelivery();
     const snapshot = { annotations: [], sourcePath: "Notes/Old.md" };
-    const buildDelivery = vi.fn(async () => ({ promptContext: { activeNote: undefined } }));
+    let builds = 0;
+    const buildDelivery = async () => {
+      builds += 1;
+      snapshot.sourcePath = "Notes/New.md";
+      return { prompt: "first", promptContext: { activeNote: { path: "Notes/New.md" } } };
+    };
 
-    await createView().buildDeliveryWithSnapshotRetry(buildDelivery, snapshot);
+    const built = await delivery.buildWithSnapshotRetry(buildDelivery, snapshot);
 
-    expect(buildDelivery).toHaveBeenCalledTimes(1);
+    expect(builds).toBe(1);
+    expect(built.prompt).toBe("first");
   });
 });

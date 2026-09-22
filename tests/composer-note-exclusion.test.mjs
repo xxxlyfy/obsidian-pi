@@ -171,7 +171,7 @@ describe("composer current-note exclusion", () => {
     expect(viewSource).toContain(
       "const includeActiveNote = this.resolveActiveNoteInclusion(contextFilePath);"
     );
-    expect(viewSource).toContain(
+    expect(fs.readFileSync("src/agent/prompt-delivery.mjs", "utf8")).toContain(
       "if (includeActiveNote === undefined) includeActiveNote = this.shouldIncludeActiveNote();"
     );
     expect(viewSource).toContain(

@@ -83,10 +83,7 @@ export function renderThreadListRow(listEl, thread, isCurrent) {
     (0, f.setIcon)(runningEl, "loader");
   }
   titleEl.createSpan({ text: thread.title });
-  row.addEventListener("click", () => {
-    this.plugin.threads.switchThread(thread.id);
-    this.renderChatView();
-  });
+  row.addEventListener("click", () => this.onThreadSelect(thread.id));
   info.createDiv({
     cls: "pi-agent-thread-list-meta",
     text: this.formatThreadMeta(thread, isCurrent)
@@ -169,10 +166,7 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
       .setTitle(isCurrent ? STRINGS.threads.currentChat : STRINGS.threads.open)
       .setIcon(isCurrent ? "check" : "arrow-right")
       .setDisabled(isCurrent)
-      .onClick(() => {
-        this.plugin.threads.switchThread(thread.id);
-        this.renderChatView();
-      })
+      .onClick(() => this.onThreadSelect(thread.id))
   );
   menu.addItem((item) =>
     item

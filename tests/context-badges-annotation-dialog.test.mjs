@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const viewSource = fs.readFileSync("src/ui/PiAgentView.mjs", "utf8");
 const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
+const deliverySource = fs.readFileSync("src/agent/prompt-delivery.mjs", "utf8");
 const controllerSource = fs.readFileSync(
   "src/annotations/markdown-annotations-controller.mjs",
   "utf8"
@@ -41,7 +42,7 @@ describe("pending context badges", () => {
     );
     expect(viewSource).toContain("(item) => item.id !== attachment.id");
     expect(viewSource).toContain("this.plugin.annotationStore.deletePath(contextFilePath)");
-    expect(viewSource).toContain("contextFilePath: annotationSnapshot.sourcePath");
+    expect(deliverySource).toContain("contextFilePath: annotationSnapshot.sourcePath");
     expect(pluginSource).toContain("this.refreshAnnotationBadges()");
     expect(pluginSource).toContain("Follow every annotation's user-authored request");
   });

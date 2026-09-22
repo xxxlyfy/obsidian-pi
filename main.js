@@ -8731,10 +8731,7 @@ function renderThreadListRow(listEl, thread, isCurrent) {
     (0, f2.setIcon)(runningEl, "loader");
   }
   titleEl.createSpan({ text: thread.title });
-  row.addEventListener("click", () => {
-    this.plugin.threads.switchThread(thread.id);
-    this.renderChatView();
-  });
+  row.addEventListener("click", () => this.onThreadSelect(thread.id));
   info.createDiv({
     cls: "pi-agent-thread-list-meta",
     text: this.formatThreadMeta(thread, isCurrent)
@@ -8811,10 +8808,7 @@ function showThreadRowMenu(event, thread, isCurrent, titleEl) {
       .setTitle(isCurrent ? STRINGS.threads.currentChat : STRINGS.threads.open)
       .setIcon(isCurrent ? "check" : "arrow-right")
       .setDisabled(isCurrent)
-      .onClick(() => {
-        this.plugin.threads.switchThread(thread.id);
-        this.renderChatView();
-      })
+      .onClick(() => this.onThreadSelect(thread.id))
   );
   menu.addItem((item) =>
     item
@@ -9808,6 +9802,206 @@ function formatActiveToolStatus() {
   };
 }
 
+// src/agent/prompt-delivery.mjs
+var PromptDelivery = class {
+  /**
+   * @param {object} options
+   * @param {(sourcePath: string | undefined) => Promise<any[]>} options.consumeAnnotations
+   * @param {(annotations: any[]) => void} options.restoreAnnotations
+   * @param {(delivery: any, context: any) => Promise<any>} options.buildDelivery
+   * @param {(threadId: string) => boolean} options.isThreadRunning
+   * @param {(item: any) => void} options.enqueueQueuedPrompt
+   * @param {(queuedId: string) => void} options.requeueQueuedPrompt
+   * @param {() => Promise<void>} options.ensureModelsLoaded
+   * @param {() => any} options.getSelectedModelInfo
+   * @param {() => boolean} options.shouldIncludeActiveNote
+   * @param {(message: string) => void} options.notify
+   */
+  constructor({
+    consumeAnnotations,
+    restoreAnnotations,
+    buildDelivery,
+    isThreadRunning,
+    enqueueQueuedPrompt,
+    requeueQueuedPrompt,
+    ensureModelsLoaded,
+    getSelectedModelInfo: getSelectedModelInfo2,
+    shouldIncludeActiveNote,
+    notify
+  }) {
+    this.consumeAnnotations = consumeAnnotations;
+    this.restoreAnnotations = restoreAnnotations;
+    this.buildDelivery = buildDelivery;
+    this.isThreadRunning = isThreadRunning;
+    this.enqueueQueuedPrompt = enqueueQueuedPrompt;
+    this.requeueQueuedPrompt = requeueQueuedPrompt;
+    this.ensureModelsLoaded = ensureModelsLoaded;
+    this.getSelectedModelInfo = getSelectedModelInfo2;
+    this.shouldIncludeActiveNote = shouldIncludeActiveNote;
+    this.notify = notify;
+    this.pendingSnapshots = /* @__PURE__ */ new Set();
+  }
+  /**
+   * @param {any} snapshot
+   * @returns {() => void} release
+   */
+  trackPendingSnapshot(snapshot) {
+    this.pendingSnapshots.add(snapshot);
+    return () => this.pendingSnapshots.delete(snapshot);
+  }
+  /**
+   * Snapshots of prompts that are still being prepared are not attached to a
+   * run yet, but a rename or delete during delivery still has to reach them.
+   *
+   * @param {(snapshot: any) => void} callback
+   */
+  forEachSnapshot(callback) {
+    for (const snapshot of this.pendingSnapshots) callback(snapshot);
+  }
+  /**
+   * @param {string} oldPath
+   * @param {string} newPath
+   */
+  migrateSnapshotPaths(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    this.forEachSnapshot((snapshot) => {
+      if (snapshot.sourcePath === oldPath) snapshot.sourcePath = newPath;
+      snapshot.annotations = snapshot.annotations.map((annotation) =>
+        annotation?.path === oldPath ? { ...annotation, path: newPath } : annotation
+      );
+    });
+  }
+  /** @param {string} path */
+  invalidateSnapshotPaths(path5) {
+    if (!path5) return;
+    this.forEachSnapshot((snapshot) => {
+      if (snapshot.sourcePath === path5) snapshot.sourcePath = void 0;
+      snapshot.annotations = snapshot.annotations.filter(
+        (annotation) => annotation?.path !== path5
+      );
+    });
+  }
+  /**
+   * A rename or delete can migrate the annotation snapshot while the context is
+   * still being built. Rebuild the delivery once so the prompt keeps its note.
+   *
+   * @param {() => Promise<any>} buildDelivery
+   * @param {any} annotationSnapshot
+   */
+  async buildWithSnapshotRetry(buildDelivery, annotationSnapshot) {
+    const releasePendingSnapshot = this.trackPendingSnapshot(annotationSnapshot);
+    try {
+      const deliverySourcePath = annotationSnapshot.sourcePath;
+      const delivery = await buildDelivery();
+      if (
+        annotationSnapshot.sourcePath !== deliverySourcePath &&
+        !delivery.promptContext?.activeNote
+      )
+        return buildDelivery();
+      return delivery;
+    } finally {
+      releasePendingSnapshot();
+    }
+  }
+  /**
+   * @param {any} request
+   * @returns {Promise<{ ok: true, prepared: any } | { ok: false }>}
+   */
+  async prepare(request) {
+    let prompt = request.prompt;
+    let images = request.images || [];
+    let attachments = request.attachments || [];
+    const threadId = request.threadId;
+    const queuedId = request.queuedId;
+    const annotationSourcePath = request.annotationSourcePath;
+    let annotations = request.annotations;
+    let includeActiveNote = request.includeActiveNote;
+    if (includeActiveNote === void 0) includeActiveNote = this.shouldIncludeActiveNote();
+    if (annotations === void 0) {
+      try {
+        annotations = await this.consumeAnnotations(annotationSourcePath);
+      } catch (error) {
+        this.notify(error instanceof Error ? error.message : String(error));
+        return { ok: false };
+      }
+    }
+    const annotationSnapshot = { annotations, sourcePath: annotationSourcePath };
+    const restoreUnsentAnnotations = () => {
+      const unsent = annotationSnapshot.annotations;
+      if (!queuedId && unsent.length > 0) this.restoreAnnotations(unsent);
+    };
+    const settleWithoutRunning = (notice) => {
+      if (queuedId) this.requeueQueuedPrompt(queuedId);
+      else restoreUnsentAnnotations();
+      if (notice) this.notify(notice);
+      return { ok: false };
+    };
+    const enqueueWhileRunning = () =>
+      this.enqueueQueuedPrompt({
+        prompt,
+        threadId,
+        images,
+        attachments,
+        annotations: annotationSnapshot.annotations,
+        annotationSourcePath: annotationSnapshot.sourcePath,
+        includeActiveNote
+      });
+    if (this.isThreadRunning(threadId)) {
+      if (queuedId) this.requeueQueuedPrompt(queuedId);
+      else enqueueWhileRunning();
+      return { ok: false };
+    }
+    let delivery;
+    try {
+      delivery = await this.buildWithSnapshotRetry(
+        () =>
+          this.buildDelivery(
+            {
+              prompt,
+              images,
+              attachments,
+              annotations: annotationSnapshot.annotations,
+              contextFilePath: annotationSnapshot.sourcePath,
+              includeActiveNote
+            },
+            { mode: "prompt", threadId }
+          ),
+        annotationSnapshot
+      );
+    } catch (error) {
+      return settleWithoutRunning(error instanceof Error ? error.message : String(error));
+    }
+    prompt = String(delivery.prompt || "").trim();
+    images = delivery.images || [];
+    attachments = delivery.attachments || [];
+    if (delivery.promptContext && attachments.length > 0)
+      delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
+    if (!prompt && images.length === 0 && attachments.length === 0)
+      return settleWithoutRunning(queuedId ? STRINGS.view.queuedEmpty : void 0);
+    if (images.length > 0) await this.ensureModelsLoaded();
+    if (images.length > 0 && !modelSupportsImages(this.getSelectedModelInfo()))
+      return settleWithoutRunning(STRINGS.view.modelNoImage);
+    if (this.isThreadRunning(threadId)) {
+      if (queuedId) this.requeueQueuedPrompt(queuedId);
+      else enqueueWhileRunning();
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      prepared: {
+        prompt,
+        threadId,
+        images,
+        attachments,
+        queuedId,
+        annotationSnapshot,
+        restoreUnsentAnnotations,
+        delivery
+      }
+    };
+  }
+};
+
 // src/ui/run-settings.mjs
 var import_obsidian15 = require("obsidian");
 
@@ -10402,7 +10596,6 @@ var PiAgentView = class extends f4.ItemView {
     this.composerImages = [];
     this.composerAttachments = [];
     this.excludedContextPath = void 0;
-    this.pendingAnnotationSnapshots = /* @__PURE__ */ new Set();
     this.nativePiQueue = void 0;
     this.steeringPromptIds = /* @__PURE__ */ new Set();
     this.streamingThinkingContent = "";
@@ -10412,6 +10605,27 @@ var PiAgentView = class extends f4.ItemView {
     this.messageRenderComponents = [];
     this.messageRenderComponentByElement = /* @__PURE__ */ new WeakMap();
     this.runtime = this.plugin.createAgentRuntime();
+    this.delivery = new PromptDelivery({
+      consumeAnnotations: (sourcePath) => this.plugin.consumeAnnotationsForPrompt(sourcePath),
+      restoreAnnotations: (annotations) => this.plugin.restoreConsumedAnnotations(annotations),
+      buildDelivery: (delivery, context) => this.plugin.enrichPromptDelivery(delivery, context),
+      isThreadRunning: (threadId) => this.isThreadRunning(threadId),
+      enqueueQueuedPrompt: (item) =>
+        this.enqueuePrompt(
+          item.prompt,
+          item.threadId,
+          item.images,
+          item.attachments,
+          item.annotations,
+          item.annotationSourcePath,
+          item.includeActiveNote
+        ),
+      requeueQueuedPrompt: (queuedId) => this.requeueQueuedPrompt(queuedId),
+      ensureModelsLoaded: () => this.plugin.models.ensureLoaded(),
+      getSelectedModelInfo: () => this.plugin.models.getSelectedInfo(),
+      shouldIncludeActiveNote: () => this.shouldIncludeActiveNote(),
+      notify: (message) => new f4.Notice(message)
+    });
     this.desktopNotificationRunIds = /* @__PURE__ */ new Set();
     this.nextDesktopNotificationRunId = 1;
     this.stickToBottom = true;
@@ -10432,7 +10646,7 @@ var PiAgentView = class extends f4.ItemView {
       this.syncCurrentRunFlags();
       if (event.key === "Escape" && this.running) {
         event.preventDefault();
-        this.cancelCurrentRun();
+        this.onCancelClick();
       }
     });
     this.registerEvent(
@@ -10633,7 +10847,7 @@ var PiAgentView = class extends f4.ItemView {
     (0, f4.setIcon)(sendButton, "send");
     sendButton.createSpan({ cls: "pi-agent-control-label", text: STRINGS.view.send });
     this.sendButtonEl = sendButton;
-    sendButton.addEventListener("click", () => this.handleSendButtonClick());
+    sendButton.addEventListener("click", () => this.onSendClick());
     this.observeComposerBar(composerBar);
     this.restoreActiveRunUiState();
     this.renderMessages();
@@ -10648,7 +10862,6 @@ var PiAgentView = class extends f4.ItemView {
     this.composerImages = [];
     this.composerAttachments = [];
     this.excludedContextPath = void 0;
-    this.pendingAnnotationSnapshots.clear();
     this.imageInputEl = void 0;
     this.sendButtonEl = void 0;
     this.composerBarEl = void 0;
@@ -10898,7 +11111,7 @@ var PiAgentView = class extends f4.ItemView {
     );
     this.setRunningState(this.running);
   }
-  handleSendButtonClick() {
+  onSendClick() {
     this.syncCurrentRunFlags();
     if (
       this.running &&
@@ -10906,10 +11119,18 @@ var PiAgentView = class extends f4.ItemView {
       this.composerImages.length === 0 &&
       this.composerAttachments.length === 0
     ) {
-      this.cancelCurrentRun();
+      this.onCancelClick();
       return;
     }
     this.submitInput();
+  }
+  onCancelClick() {
+    this.cancelCurrentRun();
+  }
+  onThreadSelect(threadId) {
+    if (!this.plugin.threads.switchThread(threadId)) return false;
+    this.renderChatView();
+    return true;
   }
   cancelCurrentRun() {
     this.syncCurrentRunFlags();
@@ -11160,14 +11381,6 @@ var PiAgentView = class extends f4.ItemView {
     this.setRunningState(this.running);
   }
   /**
-   * @param {any} snapshot
-   * @returns {() => void}
-   */
-  trackPendingAnnotationSnapshot(snapshot) {
-    this.pendingAnnotationSnapshots.add(snapshot);
-    return () => this.pendingAnnotationSnapshots.delete(snapshot);
-  }
-  /**
    * Snapshots of prompts that are still being prepared are not attached to a run
    * yet, but a rename or delete during delivery still has to reach them.
    *
@@ -11175,11 +11388,11 @@ var PiAgentView = class extends f4.ItemView {
    */
   forEachAnnotationSnapshot(callback) {
     const seen = /* @__PURE__ */ new Set();
-    for (const snapshot of this.pendingAnnotationSnapshots) {
-      if (seen.has(snapshot)) continue;
+    this.delivery.forEachSnapshot((snapshot) => {
+      if (seen.has(snapshot)) return;
       seen.add(snapshot);
       callback(snapshot);
-    }
+    });
     for (const run of this.runtime.listRuns()) {
       const snapshot = run.annotationSnapshot;
       if (!snapshot || seen.has(snapshot)) continue;
@@ -11204,28 +11417,6 @@ var PiAgentView = class extends f4.ItemView {
         (annotation) => annotation?.path !== path5
       );
     });
-  }
-  /**
-   * A rename or delete can migrate the annotation snapshot while the context is
-   * still being built. Rebuild the delivery once so the prompt keeps its note.
-   *
-   * @param {() => Promise<any>} buildDelivery
-   * @param {any} annotationSnapshot
-   */
-  async buildDeliveryWithSnapshotRetry(buildDelivery, annotationSnapshot) {
-    const releasePendingSnapshot = this.trackPendingAnnotationSnapshot(annotationSnapshot);
-    try {
-      const deliverySourcePath = annotationSnapshot.sourcePath;
-      const delivery = await buildDelivery();
-      if (
-        annotationSnapshot.sourcePath !== deliverySourcePath &&
-        !delivery.promptContext?.activeNote
-      )
-        return buildDelivery();
-      return delivery;
-    } finally {
-      releasePendingSnapshot();
-    }
   }
   /**
    * Returns a failed queued delivery to the pending queue so it can run again.
@@ -11302,107 +11493,13 @@ var PiAgentView = class extends f4.ItemView {
    * @param {any} request
    * @returns {Promise<any>}
    */
+  /**
+   * @param {any} request
+   * @returns {Promise<any>}
+   */
   async preparePromptPayload(request) {
-    let prompt = request.prompt;
-    let images = request.images || [];
-    let attachments = request.attachments || [];
-    const threadId = request.threadId;
-    const queuedId = request.queuedId;
-    const annotationSourcePath = request.annotationSourcePath;
-    let annotations = request.annotations;
-    let includeActiveNote = request.includeActiveNote;
-    if (includeActiveNote === void 0) includeActiveNote = this.shouldIncludeActiveNote();
-    if (annotations === void 0) {
-      try {
-        annotations = await this.plugin.consumeAnnotationsForPrompt(annotationSourcePath);
-      } catch (error) {
-        new f4.Notice(error instanceof Error ? error.message : String(error));
-        return void 0;
-      }
-    }
-    const annotationSnapshot = { annotations, sourcePath: annotationSourcePath };
-    const restoreUnsentAnnotations = () => {
-      const unsent = annotationSnapshot.annotations;
-      if (!queuedId && unsent.length > 0) this.plugin.restoreConsumedAnnotations(unsent);
-    };
-    const enqueueWhileRunning = () =>
-      this.enqueuePrompt(
-        prompt,
-        threadId,
-        images,
-        attachments,
-        annotationSnapshot.annotations,
-        annotationSnapshot.sourcePath,
-        includeActiveNote
-      );
-    if (this.isThreadRunning(threadId)) {
-      if (queuedId) {
-        this.requeueQueuedPrompt(queuedId);
-      } else {
-        enqueueWhileRunning();
-      }
-      return void 0;
-    }
-    const buildDelivery = () =>
-      this.plugin.enrichPromptDelivery(
-        {
-          prompt,
-          images,
-          attachments,
-          annotations: annotationSnapshot.annotations,
-          contextFilePath: annotationSnapshot.sourcePath,
-          includeActiveNote
-        },
-        { mode: "prompt", threadId }
-      );
-    let delivery;
-    try {
-      delivery = await this.buildDeliveryWithSnapshotRetry(buildDelivery, annotationSnapshot);
-    } catch (error) {
-      if (queuedId) {
-        this.requeueQueuedPrompt(queuedId);
-      } else restoreUnsentAnnotations();
-      new f4.Notice(error instanceof Error ? error.message : String(error));
-      return void 0;
-    }
-    prompt = String(delivery.prompt || "").trim();
-    images = delivery.images || [];
-    attachments = delivery.attachments || [];
-    if (delivery.promptContext && attachments.length > 0)
-      delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
-    if (!prompt && images.length === 0 && attachments.length === 0) {
-      if (queuedId) {
-        this.requeueQueuedPrompt(queuedId);
-        new f4.Notice(STRINGS.view.queuedEmpty);
-      } else restoreUnsentAnnotations();
-      return void 0;
-    }
-    if (images.length > 0) await this.plugin.models.ensureLoaded();
-    if (images.length > 0 && !modelSupportsImages(this.plugin.models.getSelectedInfo())) {
-      if (queuedId) {
-        this.requeueQueuedPrompt(queuedId);
-      } else restoreUnsentAnnotations();
-      new f4.Notice(STRINGS.view.modelNoImage);
-      return void 0;
-    }
-    if (this.isThreadRunning(threadId)) {
-      if (queuedId) {
-        this.requeueQueuedPrompt(queuedId);
-      } else {
-        enqueueWhileRunning();
-      }
-      return void 0;
-    }
-    return {
-      prompt,
-      threadId,
-      images,
-      attachments,
-      queuedId,
-      annotationSnapshot,
-      restoreUnsentAnnotations,
-      delivery
-    };
+    const result = await this.delivery.prepare(request);
+    return result.ok ? result.prepared : void 0;
   }
   /**
    * Streams one prepared prompt through Pi and settles the run.

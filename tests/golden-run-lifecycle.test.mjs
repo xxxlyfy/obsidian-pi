@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentRuntime } from "../src/agent/agent-runtime.mjs";
+import { PromptDelivery } from "../src/agent/prompt-delivery.mjs";
 import { STRINGS } from "../src/shared/strings.mjs";
 
 const notices = vi.hoisted(() => ({ messages: [] }));
@@ -119,6 +120,18 @@ function createViewDouble(plugin) {
   Object.assign(view, {
     plugin,
     runtime: plugin.createAgentRuntime(),
+    delivery: new PromptDelivery({
+      consumeAnnotations: (sourcePath) => plugin.consumeAnnotationsForPrompt(sourcePath),
+      restoreAnnotations: (annotations) => plugin.restoreConsumedAnnotations(annotations),
+      buildDelivery: (delivery, context) => plugin.enrichPromptDelivery(delivery, context),
+      isThreadRunning: (threadId) => view.runtime.hasRun(threadId),
+      enqueueQueuedPrompt: () => {},
+      requeueQueuedPrompt: () => {},
+      ensureModelsLoaded: async () => {},
+      getSelectedModelInfo: () => undefined,
+      shouldIncludeActiveNote: () => true,
+      notify: (message) => notices.messages.push(String(message))
+    }),
     running: false,
     canceling: false,
     activityText: "",
@@ -135,7 +148,6 @@ function createViewDouble(plugin) {
     composerImages: [],
     composerAttachments: [],
     excludedContextPath: undefined,
-    pendingAnnotationSnapshots: new Set(),
     nativePiQueue: undefined,
     steeringPromptIds: new Set(),
     streamingThinkingContent: "",

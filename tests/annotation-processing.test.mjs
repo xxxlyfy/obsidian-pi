@@ -11,6 +11,7 @@ const controllerSource = fs.readFileSync(
 );
 const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
 const viewSource = fs.readFileSync("src/ui/PiAgentView.mjs", "utf8");
+const deliverySource = fs.readFileSync("src/agent/prompt-delivery.mjs", "utf8");
 const queueSource = fs.readFileSync("src/ui/prompt-queue.mjs", "utf8");
 const styles = fs.readFileSync("styles.css", "utf8");
 
@@ -104,9 +105,9 @@ describe("annotation processing UX", () => {
 
   it("restores unsent annotations from the run snapshot instead of stale local paths", () => {
     expect(viewSource).toContain("run.annotationSnapshot");
-    expect(viewSource).toContain("const unsent = annotationSnapshot.annotations;");
-    expect(viewSource).toContain("contextFilePath: annotationSnapshot.sourcePath");
-    expect(viewSource).toContain("const buildDelivery = () =>");
-    expect(viewSource).toContain("annotationSnapshot.sourcePath !== deliverySourcePath");
+    expect(deliverySource).toContain("const unsent = annotationSnapshot.annotations;");
+    expect(deliverySource).toContain("contextFilePath: annotationSnapshot.sourcePath");
+    expect(deliverySource).toContain("annotationSnapshot.sourcePath !== deliverySourcePath");
+    expect(deliverySource).toContain("this.restoreAnnotations(unsent)");
   });
 });
