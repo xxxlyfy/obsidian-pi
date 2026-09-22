@@ -622,13 +622,14 @@ var AgentRuntime = class {
     if (!this.cancelTimeoutMs || this.cancelTimeoutMs <= 0) return;
     run.cancelWatchdog = setTimeout(() => {
       run.cancelWatchdog = void 0;
-      if (!this.isCurrent(run)) return;
+      if (!run.canceling) return;
       try {
         if (this.ports.forceTerminate) this.ports.forceTerminate(run.runner);
-        else run.runner?.rpcClient?.terminate?.();
+        else run.runner?.forceTerminate?.() ?? run.runner?.rpcClient?.terminate?.();
       } catch (error) {
         console.warn("Pi Agent: failed to force-terminate a cancelled run", error);
       }
+      if (!this.isCurrent(run)) return;
       this.runStates.transition(run.threadId, RUN_STATUS.error, {
         error: "Cancellation timed out; the agent process was stopped."
       });
@@ -776,7 +777,6 @@ var AgentRuntime = class {
   }
   dispose() {
     this.disposed = true;
-    for (const run of this.runStates.list()) this.clearCancelWatchdog(run);
     this.runStates.dispose();
     this.lastRequests.clear();
   }
@@ -12883,7 +12883,6 @@ var PiAgentPlugin = class extends P.Plugin {
       },
       onSaved: () => {
         this.persistenceFailureNotified = false;
-        this.persistenceBackupNotified = false;
         this.persistenceBackupNotified = false;
       }
     });

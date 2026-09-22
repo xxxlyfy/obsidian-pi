@@ -758,7 +758,6 @@ export class PiAgentPlugin extends P.Plugin {
       onSaved: () => {
         this.persistenceFailureNotified = false;
         this.persistenceBackupNotified = false;
-        this.persistenceBackupNotified = false;
       }
     });
   }

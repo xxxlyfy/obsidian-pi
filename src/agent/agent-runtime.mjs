@@ -138,13 +138,16 @@ export class AgentRuntime {
     if (!this.cancelTimeoutMs || this.cancelTimeoutMs <= 0) return;
     run.cancelWatchdog = setTimeout(() => {
       run.cancelWatchdog = undefined;
-      if (!this.isCurrent(run)) return;
+      if (!run.canceling) return;
       try {
+        // Force termination does not depend on the runtime still owning the run:
+        // a disposed runtime (closed view) must not leave the runner wedged.
         if (this.ports.forceTerminate) this.ports.forceTerminate(run.runner);
-        else run.runner?.rpcClient?.terminate?.();
+        else run.runner?.forceTerminate?.() ?? run.runner?.rpcClient?.terminate?.();
       } catch (error) {
         console.warn("Pi Agent: failed to force-terminate a cancelled run", error);
       }
+      if (!this.isCurrent(run)) return;
       this.runStates.transition(run.threadId, RUN_STATUS.error, {
         error: "Cancellation timed out; the agent process was stopped."
       });
@@ -307,7 +310,9 @@ export class AgentRuntime {
 
   dispose() {
     this.disposed = true;
-    for (const run of this.runStates.list()) this.clearCancelWatchdog(run);
+    // Cancel watchdogs keep running on purpose: a view can close while a run is
+    // still cancelling, and a run that never settles must still release its
+    // runner instead of leaving a zombie behind.
     this.runStates.dispose();
     this.lastRequests.clear();
   }
