@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.43
+
+- Closing a chat view no longer starts work it can no longer show: the view stops draining its prompt queue, and the two remaining asynchronous continuations are guarded too (a prompt whose context was still being prepared is dropped instead of starting a run, and a queued "Steer now" no longer pushes a steering prompt into the agent). Queued prompts stay stored and are available again when that chat is reopened.
+- Strengthened the lifecycle regression coverage for the force-termination path: the late-finalizer race now runs through the real thread runner registry and proves both runs share the same runner object while the second one keeps ownership, a dedicated test replaces the RPC client class to prove the next run builds a different client instance, and the compaction path got the same race test.
+
 ## 0.0.42
 
 - Fixed a runner reuse race: a run that was force-terminated (cancel watchdog) and settled late could reset the runner state of the run that had already replaced it, making the runner look idle while it was still streaming and allowing a third run to overlap on the same Pi process. Each run now carries an execution token, and only the current execution may clear the runner state.
