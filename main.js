@@ -12366,6 +12366,8 @@ var PiAgentPlugin = class extends P.Plugin {
     this.promptQueue = this.buildPromptQueueService();
     this.promptEnricher = void 0;
     this.persistenceFailureNotified = false;
+    this.unloaded = false;
+    this.setupCheckTimer = void 0;
     this.models = this.buildModelService();
   }
   async onload() {
@@ -12487,6 +12489,11 @@ var PiAgentPlugin = class extends P.Plugin {
     this.addSettingTab(this.settingsTab);
   }
   onunload() {
+    this.unloaded = true;
+    if (this.setupCheckTimer !== void 0) {
+      window.clearTimeout(this.setupCheckTimer);
+      this.setupCheckTimer = void 0;
+    }
     this.annotationController?.destroy();
     this.cancelPiRun();
     this.threadRunners.disposeAll();
@@ -12560,8 +12567,10 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   showPiSetupIfNeeded() {
     if (this.settings.dismissedPiSetup) return;
-    window.setTimeout(() => {
-      if (!this.settings.dismissedPiSetup) void this.checkPiInstallation(false);
+    this.setupCheckTimer = window.setTimeout(() => {
+      this.setupCheckTimer = void 0;
+      if (this.unloaded || this.settings.dismissedPiSetup) return;
+      void this.checkPiInstallation(false);
     }, 800);
   }
   checkPiInstallation(showSuccess) {

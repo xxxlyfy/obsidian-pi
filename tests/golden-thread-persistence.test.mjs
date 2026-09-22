@@ -6,6 +6,11 @@ import { STRINGS } from "../src/shared/strings.mjs";
 
 const notices = vi.hoisted(() => ({ messages: [] }));
 
+globalThis.window ??= {
+  setTimeout: (callback, delay) => setTimeout(callback, delay),
+  clearTimeout: (timer) => clearTimeout(timer)
+};
+
 vi.mock("obsidian", () => ({
   Component: class {},
   FuzzySuggestModal: class {},
@@ -268,6 +273,42 @@ describe("golden path 4: message -> persist -> reload", () => {
 
     expect(plugin.saved.chatHistory.threads[0].messages.at(-1).content).toBe("pending write");
     expect(plugin.store.hasPendingWrite).toBe(false);
+  });
+
+  it("does not run the deferred Pi setup check after unload", async () => {
+    vi.useFakeTimers();
+    try {
+      const dir = await createTempDir();
+      const plugin = createPluginDouble({ dir });
+      plugin.checkPiInstallation = vi.fn(async () => ({ ok: true }));
+
+      plugin.showPiSetupIfNeeded();
+      expect(plugin.setupCheckTimer).toBeDefined();
+
+      PiAgentPlugin.prototype.onunload.call(plugin);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(plugin.checkPiInstallation).not.toHaveBeenCalled();
+      expect(plugin.setupCheckTimer).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still runs the deferred Pi setup check while the plugin is loaded", async () => {
+    vi.useFakeTimers();
+    try {
+      const dir = await createTempDir();
+      const plugin = createPluginDouble({ dir });
+      plugin.checkPiInstallation = vi.fn(async () => ({ ok: true }));
+
+      plugin.showPiSetupIfNeeded();
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(plugin.checkPiInstallation).toHaveBeenCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("persists thread metadata changes through the plugin thread API", async () => {

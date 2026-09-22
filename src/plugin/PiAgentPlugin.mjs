@@ -149,6 +149,9 @@ export class PiAgentPlugin extends P.Plugin {
     this.promptQueue = this.buildPromptQueueService();
     this.promptEnricher = undefined;
     this.persistenceFailureNotified = false;
+    this.unloaded = false;
+    /** @type {number | undefined} */
+    this.setupCheckTimer = undefined;
     this.models = this.buildModelService();
   }
   async onload() {
@@ -278,6 +281,11 @@ export class PiAgentPlugin extends P.Plugin {
     this.addSettingTab(this.settingsTab);
   }
   onunload() {
+    this.unloaded = true;
+    if (this.setupCheckTimer !== undefined) {
+      window.clearTimeout(this.setupCheckTimer);
+      this.setupCheckTimer = undefined;
+    }
     this.annotationController?.destroy();
     this.cancelPiRun();
     this.threadRunners.disposeAll();
@@ -357,8 +365,11 @@ export class PiAgentPlugin extends P.Plugin {
   showPiSetupIfNeeded() {
     if (this.settings.dismissedPiSetup) return;
 
-    window.setTimeout(() => {
-      if (!this.settings.dismissedPiSetup) void this.checkPiInstallation(false);
+    // Tracked so an unloaded plugin cannot spawn a check (or open a modal) later.
+    this.setupCheckTimer = window.setTimeout(() => {
+      this.setupCheckTimer = undefined;
+      if (this.unloaded || this.settings.dismissedPiSetup) return;
+      void this.checkPiInstallation(false);
     }, 800);
   }
   checkPiInstallation(showSuccess) {
