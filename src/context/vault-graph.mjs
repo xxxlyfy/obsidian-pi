@@ -5,6 +5,7 @@ import {
   scoreSearchResult,
   tokenizeQuery
 } from "../shared/text.mjs";
+import { SEARCH_CANDIDATE_LIMIT, VaultIndex } from "./vault-index.mjs";
 
 // Internal context budgets keep pre-attached prompts bounded without exposing
 // low-level numeric controls in the settings UI.
@@ -12,10 +13,22 @@ export const CONTEXT_RESULT_LIMIT = 8;
 export const NOTE_CONTEXT_CHAR_LIMIT = 12_000;
 
 export class VaultGraph {
-  constructor(app, settings, getCurrentContextFile) {
+  /**
+   * @param {any} app
+   * @param {any} settings
+   * @param {() => any} getCurrentContextFile
+   * @param {VaultIndex} [index] Shared metadata/link index. Created lazily when omitted.
+   */
+  constructor(app, settings, getCurrentContextFile, index = undefined) {
     this.app = app;
     this.settings = settings;
     this.getCurrentContextFile = getCurrentContextFile;
+    this.index = index;
+  }
+
+  getIndex() {
+    if (!this.index) this.index = new VaultIndex({ app: this.app }).ensureBuilt();
+    return this.index;
   }
 
   getMarkdownFiles() {
@@ -27,20 +40,25 @@ export class VaultGraph {
     if (terms.length === 0) return [];
 
     const limit = options.limit ?? CONTEXT_RESULT_LIMIT;
-    const files = this.getMarkdownFiles().filter(
-      (file) => !options.folder || file.path.startsWith(options.folder)
-    );
+    const isCandidatePath = (path) =>
+      this.isPathAllowed(path) && (!options.folder || path.startsWith(options.folder));
+    // Stage 1 reads no content: metadata matches first, then the most recent
+    // notes, capped at SEARCH_CANDIDATE_LIMIT regardless of vault size.
+    const candidates = this.getIndex().candidatesForTerms(terms, {
+      limit: SEARCH_CANDIDATE_LIMIT,
+      isPathAllowed: isCandidatePath
+    });
     const results = [];
 
-    for (const file of files) {
+    for (const candidate of candidates) {
+      const file = this.app.vault.getAbstractFileByPath(candidate.path);
+      if (!(file instanceof TFile)) continue;
       const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
-      const score = scoreSearchResult(file.path, content, terms);
       const cache = this.app.metadataCache.getFileCache(file);
-
       results.push({
         path: file.path,
         title: file.basename,
-        score,
+        score: scoreSearchResult(file.path, content, terms),
         excerpt: createExcerpt(content, terms),
         tags: this.getTags(cache)
       });
@@ -82,15 +100,20 @@ export class VaultGraph {
   }
 
   async findReferences(query) {
-    const titleMatches = this.getMarkdownFiles()
-      .filter((file) => file.basename.toLowerCase().includes(query.toLowerCase()))
-      .map((file) => ({
-        path: file.path,
-        title: file.basename,
-        score: 20,
-        excerpt: "Title match",
-        tags: this.getTags(this.app.metadataCache.getFileCache(file))
-      }));
+    const titleMatches = this.getIndex()
+      .matchTitleOrAlias(query, { isPathAllowed: (path) => this.isPathAllowed(path) })
+      .map((path) => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile)) return undefined;
+        return {
+          path: file.path,
+          title: file.basename,
+          score: 20,
+          excerpt: "Title match",
+          tags: this.getTags(this.app.metadataCache.getFileCache(file))
+        };
+      })
+      .filter(Boolean);
     const searchMatches = await this.searchNotes(query, { limit: CONTEXT_RESULT_LIMIT });
 
     return rankSearchResults([...titleMatches, ...searchMatches], CONTEXT_RESULT_LIMIT);
@@ -119,22 +142,23 @@ export class VaultGraph {
 
   async getNotesByTag(tag) {
     const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
+    const paths = this.getIndex()
+      .pathsWithTag(normalizedTag)
+      .filter((path) => this.isPathAllowed(path))
+      .slice(0, CONTEXT_RESULT_LIMIT);
     const results = [];
 
-    for (const file of this.getMarkdownFiles()) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      const tags = this.getTags(cache);
-      if (!tags.includes(normalizedTag) && !tags.includes(normalizedTag.slice(1))) continue;
-
+    for (const path of paths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) continue;
       const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
         path: file.path,
         title: file.basename,
         score: 1,
         excerpt: createExcerpt(content, tokenizeQuery(normalizedTag), 260),
-        tags
+        tags: this.getTags(this.app.metadataCache.getFileCache(file))
       });
-      if (results.length >= CONTEXT_RESULT_LIMIT) break;
     }
 
     return results;
@@ -163,13 +187,9 @@ export class VaultGraph {
   }
 
   async getBacklinks(filePath) {
-    const backlinkEntries = Object.entries(this.app.metadataCache.resolvedLinks)
-      .map(([path, links]) => ({ path, count: links[filePath] || 0 }))
-      .filter(
-        (backlink) =>
-          backlink.path !== filePath && backlink.count > 0 && this.isPathAllowed(backlink.path)
-      )
-      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path))
+    const backlinkEntries = this.getIndex()
+      .getBacklinkCounts(filePath)
+      .filter((backlink) => backlink.path !== filePath && this.isPathAllowed(backlink.path))
       .slice(0, CONTEXT_RESULT_LIMIT);
     const backlinks = [];
 
@@ -193,38 +213,34 @@ export class VaultGraph {
   }
 
   getOutgoingLinks(filePath) {
-    const links = this.app.metadataCache.resolvedLinks[filePath] ?? {};
-
-    return Object.entries(links)
-      .filter(([path]) => this.isPathAllowed(path))
-      .map(([path, count]) => ({
-        path,
-        display: path.replace(/\.md$/i, ""),
-        count
-      }))
-      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+    return this.getIndex()
+      .getOutgoingCounts(filePath)
+      .filter((link) => this.isPathAllowed(link.path))
+      .map((link) => ({
+        path: link.path,
+        display: link.path.replace(/\.md$/i, ""),
+        count: link.count
+      }));
   }
 
   getUnresolvedLinks(filePath) {
-    const links = this.app.metadataCache.unresolvedLinks[filePath] ?? {};
-
-    return Object.entries(links)
-      .map(([path, count]) => ({ path, display: path, count }))
-      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+    return this.getIndex()
+      .getUnresolvedCounts(filePath)
+      .map((link) => ({ path: link.path, display: link.path, count: link.count }));
   }
 
   async getLinkedNeighborhood(filePath, depth = 1) {
+    const index = this.getIndex();
     const seen = new Set([filePath]);
     let frontier = [filePath];
     const notes = [];
 
-    for (let index = 0; index < depth; index++) {
+    for (let level = 0; level < depth; level++) {
       const nextFrontier = new Set();
 
       for (const path of frontier) {
-        const outgoingLinks = this.getOutgoingLinks(path);
-        const backlinks = await this.getBacklinks(path);
-        for (const link of [...outgoingLinks, ...backlinks]) {
+        const links = [...index.getOutgoingCounts(path), ...index.getBacklinkCounts(path)];
+        for (const link of links) {
           if (!seen.has(link.path) && link.path.endsWith(".md")) {
             seen.add(link.path);
             nextFrontier.add(link.path);

@@ -3812,14 +3812,326 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// src/context/vault-index.mjs
+var SEARCH_CANDIDATE_LIMIT = 128;
+var VaultIndex = class {
+  /**
+   * @param {object} options
+   * @param {any} options.app Obsidian app (vault + metadataCache).
+   */
+  constructor({ app }) {
+    this.app = app;
+    this.metadata = /* @__PURE__ */ new Map();
+    this.outgoing = /* @__PURE__ */ new Map();
+    this.backlinks = /* @__PURE__ */ new Map();
+    this.unresolved = /* @__PURE__ */ new Map();
+    this.built = false;
+  }
+  get size() {
+    return this.metadata.size;
+  }
+  /**
+   * Attaches incremental updates. `register` should be Obsidian's
+   * `Plugin.registerEvent` so everything is torn down with the plugin.
+   *
+   * @param {(eventRef: any) => void} [register]
+   */
+  start(register = () => {}) {
+    this.ensureBuilt();
+    const cache = this.app.metadataCache;
+    register(cache.on("changed", (file) => this.updateFile(file)));
+    register(cache.on("resolved", () => this.rebuild()));
+    const vault = this.app.vault;
+    register(vault.on("create", (file) => this.updateFile(file)));
+    register(vault.on("modify", (file) => this.updateFile(file)));
+    register(vault.on("delete", (file) => this.removePath(file?.path)));
+    register(
+      vault.on("rename", (file, oldPath) => {
+        this.renamePath(oldPath, file?.path);
+        this.updateFile(file);
+      })
+    );
+  }
+  ensureBuilt() {
+    if (!this.built) this.rebuild();
+    return this;
+  }
+  rebuild() {
+    this.metadata.clear();
+    this.outgoing.clear();
+    this.backlinks.clear();
+    this.unresolved.clear();
+    for (const file of this.app.vault.getMarkdownFiles()) this.indexFileMetadata(file);
+    const resolvedLinks = this.app.metadataCache.resolvedLinks ?? {};
+    for (const [source, links] of Object.entries(resolvedLinks)) {
+      const counts = toCountMap(links);
+      if (counts.size > 0) this.setOutgoing(source, counts);
+    }
+    const unresolvedLinks = this.app.metadataCache.unresolvedLinks ?? {};
+    for (const [source, links] of Object.entries(unresolvedLinks)) {
+      const counts = toCountMap(links);
+      if (counts.size > 0) this.unresolved.set(source, counts);
+    }
+    this.built = true;
+  }
+  /** @param {any} file */
+  updateFile(file) {
+    if (!file?.path) return;
+    this.ensureBuilt();
+    this.indexFileMetadata(file);
+    const links =
+      /** @type {Record<string, number>} */
+      this.app.metadataCache.resolvedLinks?.[file.path] ?? {};
+    this.setOutgoing(file.path, toCountMap(links));
+    const unresolved =
+      /** @type {Record<string, number>} */
+      this.app.metadataCache.unresolvedLinks?.[file.path] ?? {};
+    if (unresolved && Object.keys(unresolved).length > 0)
+      this.unresolved.set(file.path, toCountMap(unresolved));
+    else this.unresolved.delete(file.path);
+  }
+  /** @param {string} path */
+  removePath(path6) {
+    if (!path6) return;
+    this.metadata.delete(path6);
+    this.setOutgoing(path6, /* @__PURE__ */ new Map());
+    this.unresolved.delete(path6);
+  }
+  /**
+   * @param {string} oldPath
+   * @param {string} newPath
+   */
+  renamePath(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    const entry = this.metadata.get(oldPath);
+    this.removePath(oldPath);
+    if (entry) this.metadata.set(newPath, { ...entry, path: newPath });
+  }
+  /** @param {any} file */
+  indexFileMetadata(file) {
+    const cache = this.app.metadataCache.getFileCache(file);
+    const entry = {
+      path: file.path,
+      title: String(file.basename ?? ""),
+      aliases: readAliases(cache),
+      tags: readTags(cache),
+      headings: readHeadings(cache),
+      mtime: Number(file.stat?.mtime ?? 0)
+    };
+    if (entry.path) this.metadata.set(entry.path, entry);
+    return entry;
+  }
+  /**
+   * @param {string} source
+   * @param {Map<string, number>} targets
+   */
+  setOutgoing(source, targets) {
+    const previous = this.outgoing.get(source);
+    if (previous) {
+      for (const target of previous.keys()) {
+        if (targets.has(target) && targets.get(target) === previous.get(target)) continue;
+        this.removeBacklink(target, source);
+      }
+    }
+    if (targets.size === 0) {
+      this.outgoing.delete(source);
+      return;
+    }
+    this.outgoing.set(source, targets);
+    for (const [target, count] of targets) this.addBacklink(target, source, count);
+  }
+  /**
+   * @param {string} target
+   * @param {string} source
+   * @param {number} count
+   */
+  addBacklink(target, source, count) {
+    if (!target || target === source) return;
+    let sources = this.backlinks.get(target);
+    if (!sources) {
+      sources = /* @__PURE__ */ new Map();
+      this.backlinks.set(target, sources);
+    }
+    sources.set(source, count);
+  }
+  /**
+   * @param {string} target
+   * @param {string} source
+   */
+  removeBacklink(target, source) {
+    const sources = this.backlinks.get(target);
+    if (!sources) return;
+    sources.delete(source);
+    if (sources.size === 0) this.backlinks.delete(target);
+  }
+  /** @param {string} path */
+  getMetadata(path6) {
+    this.ensureBuilt();
+    return this.metadata.get(path6);
+  }
+  /** @returns {Array<{ path: string, count: number }>} */
+  getBacklinkCounts(targetPath) {
+    this.ensureBuilt();
+    const sources = this.backlinks.get(targetPath);
+    if (!sources) return [];
+    return [...sources.entries()]
+      .map(([path6, count]) => ({ path: path6, count }))
+      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+  }
+  /** @returns {Array<{ path: string, count: number }>} */
+  getOutgoingCounts(sourcePath) {
+    this.ensureBuilt();
+    const targets = this.outgoing.get(sourcePath);
+    if (!targets) return [];
+    return [...targets.entries()]
+      .map(([path6, count]) => ({ path: path6, count }))
+      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+  }
+  /** @returns {Array<{ path: string, count: number }>} */
+  getUnresolvedCounts(sourcePath) {
+    this.ensureBuilt();
+    const links = this.unresolved.get(sourcePath);
+    if (!links) return [];
+    return [...links.entries()]
+      .map(([path6, count]) => ({ path: path6, count }))
+      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+  }
+  /** @param {string} tag */
+  pathsWithTag(tag) {
+    this.ensureBuilt();
+    const normalized = String(tag ?? "").toLowerCase();
+    if (!normalized) return [];
+    const withHash = normalized.startsWith("#") ? normalized : `#${normalized}`;
+    return [...this.metadata.values()]
+      .filter((entry) =>
+        entry.tags.some((candidate) => {
+          const value = candidate.toLowerCase();
+          return value === withHash || value === withHash.slice(1);
+        })
+      )
+      .map((entry) => entry.path);
+  }
+  /**
+   * Stage 1 of search: metadata-only scoring plus a bounded recent-note top-up,
+   * so a query never reads the whole vault.
+   *
+   * @param {string[]} terms
+   * @param {{ limit?: number, isPathAllowed?: (path: string) => boolean }} [options]
+   * @returns {Array<{ path: string, score: number }>}
+   */
+  candidatesForTerms(terms, options = {}) {
+    this.ensureBuilt();
+    const limit = options.limit ?? SEARCH_CANDIDATE_LIMIT;
+    const isPathAllowed = options.isPathAllowed ?? (() => true);
+    const scored = [];
+    const rest = [];
+    for (const entry of this.metadata.values()) {
+      if (!isPathAllowed(entry.path)) continue;
+      const score = scoreMetadataEntry(entry, terms);
+      if (score > 0) scored.push({ path: entry.path, score, mtime: entry.mtime });
+      else rest.push({ path: entry.path, score: 0, mtime: entry.mtime });
+    }
+    scored.sort(
+      (left, right) =>
+        right.score - left.score || right.mtime - left.mtime || left.path.localeCompare(right.path)
+    );
+    if (scored.length >= limit) return scored.slice(0, limit).map(stripMtime);
+    const byRecency = (left, right) =>
+      right.mtime - left.mtime || left.path.localeCompare(right.path);
+    rest.sort(byRecency);
+    const remaining = limit - scored.length;
+    return [...scored, ...rest.slice(0, Math.max(0, remaining))].map(stripMtime);
+  }
+  /**
+   * @param {string} query
+   * @param {{ limit?: number, isPathAllowed?: (path: string) => boolean }} [options]
+   */
+  matchTitleOrAlias(query, options = {}) {
+    this.ensureBuilt();
+    const needle = String(query ?? "").toLowerCase();
+    if (!needle) return [];
+    const isPathAllowed = options.isPathAllowed ?? (() => true);
+    const limit = options.limit ?? SEARCH_CANDIDATE_LIMIT;
+    return [...this.metadata.values()]
+      .filter(
+        (entry) =>
+          isPathAllowed(entry.path) &&
+          (entry.title.toLowerCase().includes(needle) ||
+            entry.aliases.some((alias) => alias.toLowerCase().includes(needle)))
+      )
+      .slice(0, limit)
+      .map((entry) => entry.path);
+  }
+};
+function stripMtime(candidate) {
+  return { path: candidate.path, score: candidate.score };
+}
+function scoreMetadataEntry(entry, terms) {
+  const title = entry.title.toLowerCase();
+  const path6 = entry.path.toLowerCase();
+  const aliases = entry.aliases.map((alias) => alias.toLowerCase());
+  const tags = entry.tags.map((tag) => tag.toLowerCase());
+  const headings = entry.headings.map((heading) => heading.toLowerCase());
+  let score = 0;
+  for (const term of terms) {
+    if (title.includes(term)) score += 12;
+    if (path6.includes(term)) score += 4;
+    if (
+      aliases.some((value) => value.includes(term)) ||
+      tags.some((value) => value.includes(term)) ||
+      headings.some((value) => value.includes(term))
+    )
+      score += 8;
+  }
+  return score;
+}
+function toCountMap(links) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const [path6, count] of Object.entries(links ?? {})) {
+    if (!path6) continue;
+    counts.set(path6, Number(count) || 1);
+  }
+  return counts;
+}
+function readAliases(cache) {
+  const aliases = cache?.frontmatter?.aliases;
+  if (Array.isArray(aliases)) return aliases.map(String);
+  return typeof aliases === "string" ? [aliases] : [];
+}
+function readTags(cache) {
+  const tags = /* @__PURE__ */ new Set();
+  for (const tag of cache?.tags ?? []) if (tag?.tag) tags.add(String(tag.tag));
+  const frontmatterTags = cache?.frontmatter?.tags;
+  if (Array.isArray(frontmatterTags)) for (const tag of frontmatterTags) tags.add(String(tag));
+  else if (typeof frontmatterTags === "string") tags.add(frontmatterTags);
+  return [...tags];
+}
+function readHeadings(cache) {
+  return (cache?.headings ?? [])
+    .map((heading) => heading?.heading)
+    .filter(Boolean)
+    .map(String);
+}
+
 // src/context/vault-graph.mjs
 var CONTEXT_RESULT_LIMIT = 8;
 var NOTE_CONTEXT_CHAR_LIMIT = 12e3;
 var VaultGraph = class {
-  constructor(app, settings, getCurrentContextFile) {
+  /**
+   * @param {any} app
+   * @param {any} settings
+   * @param {() => any} getCurrentContextFile
+   * @param {VaultIndex} [index] Shared metadata/link index. Created lazily when omitted.
+   */
+  constructor(app, settings, getCurrentContextFile, index = void 0) {
     this.app = app;
     this.settings = settings;
     this.getCurrentContextFile = getCurrentContextFile;
+    this.index = index;
+  }
+  getIndex() {
+    if (!this.index) this.index = new VaultIndex({ app: this.app }).ensureBuilt();
+    return this.index;
   }
   getMarkdownFiles() {
     return this.app.vault.getMarkdownFiles().filter((file) => this.isPathAllowed(file.path));
@@ -3828,18 +4140,22 @@ var VaultGraph = class {
     const terms = tokenizeQuery(query);
     if (terms.length === 0) return [];
     const limit = options.limit ?? CONTEXT_RESULT_LIMIT;
-    const files = this.getMarkdownFiles().filter(
-      (file) => !options.folder || file.path.startsWith(options.folder)
-    );
+    const isCandidatePath = (path6) =>
+      this.isPathAllowed(path6) && (!options.folder || path6.startsWith(options.folder));
+    const candidates = this.getIndex().candidatesForTerms(terms, {
+      limit: SEARCH_CANDIDATE_LIMIT,
+      isPathAllowed: isCandidatePath
+    });
     const results = [];
-    for (const file of files) {
+    for (const candidate of candidates) {
+      const file = this.app.vault.getAbstractFileByPath(candidate.path);
+      if (!(file instanceof import_obsidian3.TFile)) continue;
       const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
-      const score = scoreSearchResult(file.path, content, terms);
       const cache = this.app.metadataCache.getFileCache(file);
       results.push({
         path: file.path,
         title: file.basename,
-        score,
+        score: scoreSearchResult(file.path, content, terms),
         excerpt: createExcerpt(content, terms),
         tags: this.getTags(cache)
       });
@@ -3875,15 +4191,20 @@ var VaultGraph = class {
     };
   }
   async findReferences(query) {
-    const titleMatches = this.getMarkdownFiles()
-      .filter((file) => file.basename.toLowerCase().includes(query.toLowerCase()))
-      .map((file) => ({
-        path: file.path,
-        title: file.basename,
-        score: 20,
-        excerpt: "Title match",
-        tags: this.getTags(this.app.metadataCache.getFileCache(file))
-      }));
+    const titleMatches = this.getIndex()
+      .matchTitleOrAlias(query, { isPathAllowed: (path6) => this.isPathAllowed(path6) })
+      .map((path6) => {
+        const file = this.app.vault.getAbstractFileByPath(path6);
+        if (!(file instanceof import_obsidian3.TFile)) return void 0;
+        return {
+          path: file.path,
+          title: file.basename,
+          score: 20,
+          excerpt: "Title match",
+          tags: this.getTags(this.app.metadataCache.getFileCache(file))
+        };
+      })
+      .filter(Boolean);
     const searchMatches = await this.searchNotes(query, { limit: CONTEXT_RESULT_LIMIT });
     return rankSearchResults([...titleMatches, ...searchMatches], CONTEXT_RESULT_LIMIT);
   }
@@ -3907,20 +4228,22 @@ var VaultGraph = class {
   }
   async getNotesByTag(tag) {
     const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
+    const paths = this.getIndex()
+      .pathsWithTag(normalizedTag)
+      .filter((path6) => this.isPathAllowed(path6))
+      .slice(0, CONTEXT_RESULT_LIMIT);
     const results = [];
-    for (const file of this.getMarkdownFiles()) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      const tags = this.getTags(cache);
-      if (!tags.includes(normalizedTag) && !tags.includes(normalizedTag.slice(1))) continue;
+    for (const path6 of paths) {
+      const file = this.app.vault.getAbstractFileByPath(path6);
+      if (!(file instanceof import_obsidian3.TFile)) continue;
       const content = await this.readFile(file, NOTE_CONTEXT_CHAR_LIMIT);
       results.push({
         path: file.path,
         title: file.basename,
         score: 1,
         excerpt: createExcerpt(content, tokenizeQuery(normalizedTag), 260),
-        tags
+        tags: this.getTags(this.app.metadataCache.getFileCache(file))
       });
-      if (results.length >= CONTEXT_RESULT_LIMIT) break;
     }
     return results;
   }
@@ -3944,13 +4267,9 @@ var VaultGraph = class {
     return void 0;
   }
   async getBacklinks(filePath) {
-    const backlinkEntries = Object.entries(this.app.metadataCache.resolvedLinks)
-      .map(([path6, links]) => ({ path: path6, count: links[filePath] || 0 }))
-      .filter(
-        (backlink) =>
-          backlink.path !== filePath && backlink.count > 0 && this.isPathAllowed(backlink.path)
-      )
-      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path))
+    const backlinkEntries = this.getIndex()
+      .getBacklinkCounts(filePath)
+      .filter((backlink) => backlink.path !== filePath && this.isPathAllowed(backlink.path))
       .slice(0, CONTEXT_RESULT_LIMIT);
     const backlinks = [];
     for (const backlink of backlinkEntries) {
@@ -3970,32 +4289,30 @@ var VaultGraph = class {
     return backlinks;
   }
   getOutgoingLinks(filePath) {
-    const links = this.app.metadataCache.resolvedLinks[filePath] ?? {};
-    return Object.entries(links)
-      .filter(([path6]) => this.isPathAllowed(path6))
-      .map(([path6, count]) => ({
-        path: path6,
-        display: path6.replace(/\.md$/i, ""),
-        count
-      }))
-      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+    return this.getIndex()
+      .getOutgoingCounts(filePath)
+      .filter((link) => this.isPathAllowed(link.path))
+      .map((link) => ({
+        path: link.path,
+        display: link.path.replace(/\.md$/i, ""),
+        count: link.count
+      }));
   }
   getUnresolvedLinks(filePath) {
-    const links = this.app.metadataCache.unresolvedLinks[filePath] ?? {};
-    return Object.entries(links)
-      .map(([path6, count]) => ({ path: path6, display: path6, count }))
-      .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
+    return this.getIndex()
+      .getUnresolvedCounts(filePath)
+      .map((link) => ({ path: link.path, display: link.path, count: link.count }));
   }
   async getLinkedNeighborhood(filePath, depth = 1) {
+    const index = this.getIndex();
     const seen = /* @__PURE__ */ new Set([filePath]);
     let frontier = [filePath];
     const notes = [];
-    for (let index = 0; index < depth; index++) {
+    for (let level = 0; level < depth; level++) {
       const nextFrontier = /* @__PURE__ */ new Set();
       for (const path6 of frontier) {
-        const outgoingLinks = this.getOutgoingLinks(path6);
-        const backlinks = await this.getBacklinks(path6);
-        for (const link of [...outgoingLinks, ...backlinks]) {
+        const links = [...index.getOutgoingCounts(path6), ...index.getBacklinkCounts(path6)];
+        for (const link of links) {
           if (!seen.has(link.path) && link.path.endsWith(".md")) {
             seen.add(link.path);
             nextFrontier.add(link.path);
@@ -11827,6 +12144,8 @@ var PiAgentPlugin = class extends P.Plugin {
       void requestDesktopNotificationPermission().catch(() => {});
     (0, P.addIcon)(PI_AGENT_ICON_ID, PI_AGENT_ICON_SVG);
     this.extensionStatusEl = this.addStatusBarItem();
+    this.vaultIndex = new VaultIndex({ app: this.app });
+    this.vaultIndex.start((eventRef) => this.registerEvent(eventRef));
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
     this.annotationController.start();
@@ -12473,7 +12792,12 @@ var PiAgentPlugin = class extends P.Plugin {
     this.threadRunners.disposeAll();
     this.piCommands = [];
     this.commandCatalogLoaded = false;
-    this.graph = new VaultGraph(this.app, this.settings, () => this.getCurrentContextFile());
+    this.graph = new VaultGraph(
+      this.app,
+      this.settings,
+      () => this.getCurrentContextFile(),
+      this.vaultIndex
+    );
     this.contextBuilder = new ContextBuilder(
       this.graph,
       this.settings,

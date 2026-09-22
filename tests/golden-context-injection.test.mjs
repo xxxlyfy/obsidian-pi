@@ -234,8 +234,8 @@ describe("context search characterization", () => {
       tags: ["#pi", "pi"],
       excerpt: expect.stringContaining("Alpha introduction paragraph.")
     });
-    // Full-vault read is the pre-refactor baseline. Phase 5 must only read the
-    // metadata-filtered candidates instead of every markdown file.
+    // Phase 5: content is read only for metadata/recency candidates, capped at
+    // SEARCH_CANDIDATE_LIMIT. This fixture has 5 notes, so all of them qualify.
     expect(Object.keys(readCounts).sort()).toEqual([
       "Active.md",
       "Back.md",

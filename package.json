@@ -12,6 +12,7 @@
     "lint:obsidian": "eslint --config eslint.obsidian.config.mjs src package.json",
     "lint:obsidian:errors": "npm run lint:obsidian -- --quiet",
     "test": "vitest run",
+    "bench:search": "vitest run tests/perf/search-bench.test.mjs --reporter=verbose",
     "test:pi": "node scripts/pi-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:src": "tsc -p tsconfig.check.json --noEmit",

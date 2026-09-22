@@ -9,6 +9,7 @@ import { ContextBuilder } from "../context/context-builder.mjs";
 import { formatContextShowResponse, isContextShowPrompt } from "../context/context-show.mjs";
 import { normalizeSkillFolderList } from "../context/skills.mjs";
 import { VaultGraph } from "../context/vault-graph.mjs";
+import { VaultIndex } from "../context/vault-index.mjs";
 import { checkPiInstallation, warmupPiCli } from "../pi/health.mjs";
 import { PiRunCanceledError } from "../pi/run-canceled.mjs";
 import { PiCommandCatalog } from "../pi/command-catalog.mjs";
@@ -171,6 +172,8 @@ export class PiAgentPlugin extends P.Plugin {
 
     (0, P.addIcon)(PI_AGENT_ICON_ID, PI_AGENT_ICON_SVG);
     this.extensionStatusEl = this.addStatusBarItem();
+    this.vaultIndex = new VaultIndex({ app: this.app });
+    this.vaultIndex.start((eventRef) => this.registerEvent(eventRef));
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
     this.annotationController.start();
@@ -831,7 +834,12 @@ export class PiAgentPlugin extends P.Plugin {
     this.threadRunners.disposeAll();
     this.piCommands = [];
     this.commandCatalogLoaded = false;
-    this.graph = new VaultGraph(this.app, this.settings, () => this.getCurrentContextFile());
+    this.graph = new VaultGraph(
+      this.app,
+      this.settings,
+      () => this.getCurrentContextFile(),
+      this.vaultIndex
+    );
     this.contextBuilder = new ContextBuilder(
       this.graph,
       this.settings,
