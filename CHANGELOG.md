@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.42
+
+- Fixed a runner reuse race: a run that was force-terminated (cancel watchdog) and settled late could reset the runner state of the run that had already replaced it, making the runner look idle while it was still streaming and allowing a third run to overlap on the same Pi process. Each run now carries an execution token, and only the current execution may clear the runner state.
+- A closed chat view no longer starts queued prompts. Closing a view cancels its own run and releases its runtime, and the settling run's continuation now also skips the queue drain. Queued prompts are kept in the stored queue and are still available when that chat is opened again.
+- Regression tests cover both paths with the real runner/registry lifecycle: force-terminate then reuse with a late settle, and close-with-queue (including the unchanged normal drain behavior).
+- `docs/state-ownership.md` documents the execution token and the closed-view queue rule.
+
 ## 0.0.41
 
 - Compaction (`/compact`) now claims the chat while it runs, like any other run. Previously a compaction could stream while another run was already active on the same chat, letting two streams interleave on one Pi process.
