@@ -23,10 +23,6 @@ import { toRpcImages } from "../shared/prompt-payload.mjs";
  * }} RunResult
  */
 
-export function isPiCliCommandPrompt(prompt) {
-  return /^\/(compact)(?:\s|$)/i.test(prompt.trim());
-}
-
 export function getCompactInstructions(prompt) {
   const match = prompt.trim().match(/^\/compact(?:\s+([\s\S]+))?$/i);
   return match ? (match[1] ?? "").trim() : undefined;
