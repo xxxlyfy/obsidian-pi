@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.0.38
+
+- Fixed vault index drift after vault changes: deleting a note now removes its reverse backlink entry (previously it stayed forever, so backlink lookups could return links to a note that no longer exists and the index grew without bound), and renaming a note resyncs the link index so backlinks and outgoing links follow the new path even when Obsidian does not report a metadata change for every affected source.
+- Prompt context snapshots now detach the note frontmatter from Obsidian's metadata cache. A later cache change can no longer silently alter a prompt that was already built and displayed.
+- `retryRun()` no longer keeps a successful prompt replayable, so retrying can no longer resend the same prompt; failed and cancelled runs stay replayable, and the stored request is released on dispose.
+- A failed save now shows a notice once per failure streak instead of only writing to the console, and the warning clears after the next successful write.
+- The deferred Pi setup check is cancelled when the plugin unloads, so an unloaded plugin can no longer spawn a version check or open the setup modal.
+- Long-lived views bound their per-message UI caches instead of growing with every finished run.
+- Added regression coverage for cancel, retry, thread-switch, view-close, and overlapping-run races; vault index consistency (incremental index equals a full rebuild); context snapshot stability; annotation and queue rename/delete handling; corrupted persisted data; unload flushing; and coalesced persistence. The benchmark now reports search p50/p95 plus incremental modify/rename/delete latency.
+- Internal: the agent and Pi layers no longer import from `src/ui` (prompt payload and queue helpers moved to `src/shared`, runtime model catalog helpers to `src/pi`), and core domain shapes have JSDoc typedefs (`RunRecord`, `RunCallbacks`, `RunHooks`, `RunResult`, `PromptDeliveryRequest`, `SearchResult`, `BacklinkEntry`).
+
 ## 0.0.37
 
 - Agent runs now have a single owner: `AgentRuntime` keeps one `RunState` record per chat, and start, cancel, retry, steer, compaction, and event routing go through it. RPC events that arrive after a run was cancelled or already finished are dropped instead of leaking into the chat view.

@@ -1,6 +1,6 @@
 # Pi Agent compatibility and pre-release checklist
 
-**Status: 0.0.37 was published from a passing automated gate plus a personal-vault smoke test; the full manual checklist below has not been re-run for it.** Keep this checklist current for every release. Do not publish a release until every applicable manual item below passes in the validation vault:
+**Status: 0.0.38 was published from a passing automated gate (71 test files / 450 tests) plus a personal-vault smoke test of 0.0.37; the full manual checklist below has not been re-run.** Keep this checklist current for every release. Do not publish a release until every applicable manual item below passes in the validation vault:
 
 ```text
 C:\Users\zcooo\OneDrive\Obsidian
@@ -162,7 +162,7 @@ Use non-sensitive PNG, JPEG, and WebP files.
 ## Release gate
 
 - [ ] `git status` contains only intended source, tests, docs, generated bundle, and styles.
-- [ ] `npm ci` and `npm run ci` pass for the release candidate (currently 68 test files / 422 tests).
+- [ ] `npm ci` and `npm run ci` pass for the release candidate (currently 71 test files / 450 tests).
 - [ ] The complete manual checklist above passes in the validation vault.
 - [ ] Open issues are updated with actual validation results.
 - [ ] `manifest.json`, `package.json`, and `versions.json` are aligned on the release version, and `CHANGELOG.md` has a non-empty section for it.
@@ -175,3 +175,5 @@ Use non-sensitive PNG, JPEG, and WebP files.
 | 2026-09-20 | 0.0.31  | Windows · Pi 0.86.0                    | `npm run test:pi` (offline RPC smoke)                                                    | Passed (2 models, 9 commands)                      |
 | 2026-09-23 | 0.0.37  | Windows · Obsidian desktop · Pi 0.87.0 | Automated gates (`npm run ci`, `npm run test:pi`, `npm run bench:search`)                | Passed                                             |
 | 2026-09-23 | 0.0.37  | Windows · personal vault               | Refactor smoke test: send/stream a chat, save + backup rotation, threads, model controls | Passed, no issues found; full checklist not re-run |
+| 2026-09-23 | 0.0.38  | Windows · Pi 0.87.0                    | Automated gates (`npm run ci`, `npm run test:pi`, `npm run bench:search`)                | Passed                                             |
+| 2026-09-23 | 0.0.38  | Windows · personal vault               | Stabilization fixes installed (vault index, snapshot, retry, save notice)                | Installed; manual re-check pending                 |
