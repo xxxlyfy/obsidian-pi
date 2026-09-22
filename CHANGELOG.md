@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.39
+
+- Cancelling a run can no longer wedge a chat. A cancel request that fails is reported and retried by the UI path, and a run that stays in `cancelling` past a short deadline (10 s) is released instead of blocking the chat: the agent process is force-stopped, the run is reported as failed, and the next prompt can start immediately.
+- A chat-history backup write that fails no longer reports the whole save as failed. `data.json` is written first and stays authoritative, the backup failure surfaces as its own notice, and no backup is attempted when `data.json` itself failed.
+- Added regression coverage for the remaining correctness scenarios from this phase: cancel failures (throwing cancel, repeated cancel, cancel after completion, cancellation that never settles), RPC process restarts with late events from the replaced process, prompt timeouts, `mutation -> schedule -> unload -> reload` round trips, vault index rename chains and freed-path reuse, per-step equivalence between the incremental index and a full rebuild, thread deletion fallback and fork isolation, context snapshot mutation isolation, and annotation rename/delete consistency.
+- Internal: cancel, persistence-failure, and backup-failure paths are documented in `docs/state-ownership.md`, and the runtime exposes a `forceTerminate` port used only by the cancel watchdog.
+
 ## 0.0.38
 
 - Fixed vault index drift after vault changes: deleting a note now removes its reverse backlink entry (previously it stayed forever, so backlink lookups could return links to a note that no longer exists and the index grew without bound), and renaming a note resyncs the link index so backlinks and outgoing links follow the new path even when Obsidian does not report a metadata change for every affected source.

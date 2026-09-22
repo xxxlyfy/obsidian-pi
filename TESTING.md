@@ -1,6 +1,6 @@
 # Pi Agent compatibility and pre-release checklist
 
-**Status: 0.0.38 was published from a passing automated gate (71 test files / 450 tests) plus a personal-vault smoke test of 0.0.37; the full manual checklist below has not been re-run.** Keep this checklist current for every release. Do not publish a release until every applicable manual item below passes in the validation vault:
+**Status: 0.0.39 was published from a passing automated gate (71 test files / 466 tests); the full manual checklist below has not been re-run since 0.0.31.** Keep this checklist current for every release. Do not publish a release until every applicable manual item below passes in the validation vault:
 
 ```text
 C:\Users\zcooo\OneDrive\Obsidian
@@ -162,7 +162,7 @@ Use non-sensitive PNG, JPEG, and WebP files.
 ## Release gate
 
 - [ ] `git status` contains only intended source, tests, docs, generated bundle, and styles.
-- [ ] `npm ci` and `npm run ci` pass for the release candidate (currently 71 test files / 450 tests).
+- [ ] `npm ci` and `npm run ci` pass for the release candidate (currently 71 test files / 466 tests).
 - [ ] The complete manual checklist above passes in the validation vault.
 - [ ] Open issues are updated with actual validation results.
 - [ ] `manifest.json`, `package.json`, and `versions.json` are aligned on the release version, and `CHANGELOG.md` has a non-empty section for it.
