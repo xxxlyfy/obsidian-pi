@@ -15,8 +15,8 @@ export function showThreadList() {
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function renderThreadList() {
   let root = this.containerEl.children[1],
-    threads = this.plugin.listThreads({ includeArchived: true }),
-    currentThread = this.plugin.getCurrentThread();
+    threads = this.plugin.threads.listThreads({ includeArchived: true }),
+    currentThread = this.plugin.threads.currentThread;
   this.suggestions?.close();
   this.cleanupComposerBarObserver();
   this.messagesEl = undefined;
@@ -54,7 +54,7 @@ export function renderThreadList() {
   });
   (0, f.setIcon)(newChatButton, "plus");
   newChatButton.addEventListener("click", () => {
-    this.plugin.startNewThread();
+    this.plugin.threads.startNewThread();
     this.renderChatView();
   });
   let listEl = root.createDiv({ cls: "pi-agent-thread-list" });
@@ -84,7 +84,7 @@ export function renderThreadListRow(listEl, thread, isCurrent) {
   }
   titleEl.createSpan({ text: thread.title });
   row.addEventListener("click", () => {
-    this.plugin.switchThread(thread.id);
+    this.plugin.threads.switchThread(thread.id);
     this.renderChatView();
   });
   info.createDiv({
@@ -132,7 +132,7 @@ export function renderThreadListRow(listEl, thread, isCurrent) {
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export async function deleteChats() {
-  const threads = this.plugin.listThreads({ includeArchived: true });
+  const threads = this.plugin.threads.listThreads({ includeArchived: true });
   const plan = planBulkThreadDeletion(threads, this.runtime.activeThreadIds());
   if (plan.all.deleteCount === 0) {
     new f.Notice(
@@ -150,7 +150,7 @@ export async function deleteChats() {
 
   const newlyRunningIds = scope.deleteIds.filter((threadId) => this.isThreadRunning(threadId));
   const safeDeleteIds = scope.deleteIds.filter((threadId) => !this.isThreadRunning(threadId));
-  const result = this.plugin.deleteThreads(safeDeleteIds);
+  const result = this.plugin.threads.deleteThreads(safeDeleteIds);
   new f.Notice(
     formatBulkDeleteResult({
       deletedCount: result.deletedCount,
@@ -170,7 +170,7 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
       .setIcon(isCurrent ? "check" : "arrow-right")
       .setDisabled(isCurrent)
       .onClick(() => {
-        this.plugin.switchThread(thread.id);
+        this.plugin.threads.switchThread(thread.id);
         this.renderChatView();
       })
   );
@@ -194,8 +194,8 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
         .onClick(async () => {
           try {
             const [stats, tree] = await Promise.all([
-              this.plugin.getThreadSessionStats(thread.id),
-              this.plugin.getThreadSessionTree(thread.id)
+              this.plugin.threads.getThreadSessionStats(thread.id),
+              this.plugin.threads.getThreadSessionTree(thread.id)
             ]);
             const entryCount = countSessionEntries(tree?.tree ?? []);
             new f.Notice(
@@ -220,7 +220,7 @@ export function showThreadRowMenu(event, thread, isCurrent, titleEl) {
         .setIcon("download")
         .onClick(async () => {
           try {
-            const result = await this.plugin.exportThreadSession(thread.id);
+            const result = await this.plugin.threads.exportThreadSession(thread.id);
             new f.Notice(
               result?.path ? STRINGS.threads.exportTo(result.path) : STRINGS.threads.exportFailed
             );
@@ -250,7 +250,8 @@ export function startThreadListRename(thread, titleEl) {
   titleEl.replaceWith(input);
   let commit = (event) => {
     let title = input.value.trim();
-    if (event && title && title !== thread.title) this.plugin.renameThread(thread.id, title);
+    if (event && title && title !== thread.title)
+      this.plugin.threads.renameThread(thread.id, title);
     this.renderThreadList();
   };
   input.addEventListener("click", (event) => event.stopPropagation());
@@ -270,7 +271,7 @@ export function startThreadListRename(thread, titleEl) {
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function toggleThreadFavorite(thread) {
-  this.plugin.toggleThreadFavorite(thread.id)
+  this.plugin.threads.toggleThreadFavorite(thread.id)
     ? this.renderThreadList()
     : new f.Notice(STRINGS.threads.threadNotFound);
 }
@@ -283,7 +284,7 @@ export async function deleteThreadFromList(thread) {
   }
   const choice = await chooseThreadDeletion(this.plugin.app, thread);
   if (choice === "cancel") return;
-  if (this.plugin.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
+  if (this.plugin.threads.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
     new f.Notice(
       choice === "both" ? STRINGS.threads.deletedChatAndSession : STRINGS.threads.deletedChat
     );
@@ -295,8 +296,8 @@ export async function deleteThreadFromList(thread) {
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function formatThreadMeta(thread, isCurrent) {
-  let messageCount = this.plugin.getThreadDisplayMessageCount
-      ? this.plugin.getThreadDisplayMessageCount(thread)
+  let messageCount = this.plugin.threads.getThreadDisplayMessageCount
+      ? this.plugin.threads.getThreadDisplayMessageCount(thread)
       : thread.messages.length,
     meta = `${STRINGS.threads.messageCount(messageCount)} • ${STRINGS.threads.updatedAt(
       this.formatThreadDate(thread.updatedAt)

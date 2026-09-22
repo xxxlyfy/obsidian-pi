@@ -23,7 +23,7 @@ export function enqueuePrompt(
   contextFilePath,
   includeActiveNote
 ) {
-  const targetThreadId = threadId ?? this.plugin.getCurrentThread().id;
+  const targetThreadId = threadId ?? this.plugin.threads.currentThreadId;
   const item = this.plugin.enqueueLocalPrompt({
     prompt,
     images,

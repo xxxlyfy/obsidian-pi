@@ -1,7 +1,7 @@
-import fs from "node:fs";
 import { STRINGS } from "../shared/strings.mjs";
 import * as P from "obsidian";
 import { AgentRuntime } from "../agent/agent-runtime.mjs";
+import { ThreadService } from "../threads/thread-service.mjs";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
 import { ContextBuilder } from "../context/context-builder.mjs";
@@ -134,11 +134,11 @@ export class PiAgentPlugin extends P.Plugin {
   constructor(app, manifest) {
     super(app, manifest);
     this.settings = DEFAULT_SETTINGS;
-    this.messages = [];
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = new ThreadRunnerRegistry(() => this.buildPiRunner());
+    this.threads = this.buildThreadService();
     /** @type {any} */
     this.extensionUiHandler = undefined;
     /** @type {Map<string, { mtimeMs: number, size: number, count: number }> | undefined} */
@@ -339,12 +339,12 @@ export class PiAgentPlugin extends P.Plugin {
       messages,
       sessionId != null ? sessionId : threadId
     );
+    this.threads = this.buildThreadService();
     this.annotationStore = new AnnotationStore(annotationData, () => {
       this.saveAnnotations();
       this.annotationController?.refresh();
       this.refreshAnnotationBadges();
     });
-    this.syncCurrentThreadState();
     if (this.settings.model && isLegacyBareModelId(this.settings.model)) {
       this.settings.customModel = `openai/${this.settings.model}`;
       this.settings.model = "__custom";
@@ -518,235 +518,6 @@ export class PiAgentPlugin extends P.Plugin {
   getPiCommands() {
     return this.piCommands;
   }
-  addMessage(message) {
-    return this.addMessageToThread(this.threadHistory.currentThreadId, message);
-  }
-  addMessageToThread(threadId, message) {
-    let added = this.threadHistory.addMessageToThread(threadId, message);
-    return added ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true) : false;
-  }
-  startNewThread(title) {
-    let thread = this.threadHistory.startNewThread(title);
-    return (this.syncCurrentThreadState(), this.saveThreadHistory(), thread);
-  }
-  async forkCurrentThread() {
-    const current = this.getCurrentThread();
-    if (current.messages.length === 0) return undefined;
-
-    let clonedSession;
-    if (current.piSessionId) {
-      const runner = this.createPiRunner(current.id);
-      try {
-        clonedSession = await runner.cloneSession(current.piSessionId);
-        if (clonedSession) {
-          await runner
-            .setSessionName(clonedSession, `${current.title} (fork)`)
-            .catch((error) => console.warn(STRINGS.plugin.sessionCloneFailed, error));
-        }
-      } finally {
-        this.threadRunners.dispose(current.id);
-      }
-      if (!clonedSession) return undefined;
-    }
-
-    const fork = this.threadHistory.forkCurrentThread(clonedSession);
-    return fork ? (this.syncCurrentThreadState(), this.saveThreadHistory(), fork) : undefined;
-  }
-  getCurrentThread() {
-    return this.threadHistory.getCurrentThread();
-  }
-  listThreads(options) {
-    return this.threadHistory.listThreads(options);
-  }
-  async getThreadSessionStats(threadId) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return undefined;
-    return this.withSessionRunner(threadId, (runner) => runner.getSessionStats(thread.piSessionId));
-  }
-  async exportThreadSession(threadId) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return undefined;
-    return this.withSessionRunner(threadId, (runner) => runner.exportSession(thread.piSessionId));
-  }
-  async getThreadSessionTree(threadId) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return undefined;
-    return this.withSessionRunner(threadId, (runner) => runner.getSessionTree(thread.piSessionId));
-  }
-  async getThreadSessionEntries(threadId, since) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return undefined;
-    return this.withSessionRunner(threadId, (runner) =>
-      runner.getSessionEntries(thread.piSessionId, since)
-    );
-  }
-  getThreadDisplayMessageCount(thread) {
-    const messageCount = Array.isArray(thread?.messages) ? thread.messages.length : 0;
-    const sessionMessageCount = this.countPiSessionChatMessages(thread?.piSessionId);
-    return Math.max(messageCount, sessionMessageCount);
-  }
-  countPiSessionChatMessages(sessionReference) {
-    const sessionPath = this.pi?.resolveSessionPath(sessionReference);
-    if (!sessionPath) return 0;
-
-    let stat;
-    try {
-      stat = fs.statSync(sessionPath);
-    } catch {
-      this.piSessionCountCache?.delete(sessionPath);
-      return 0;
-    }
-
-    const cached = this.piSessionCountCache?.get(sessionPath);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-      return cached.count;
-    }
-
-    try {
-      const count = fs
-        .readFileSync(sessionPath, "utf8")
-        .split(/\r?\n/)
-        .reduce((total, line) => {
-          if (!line.trim()) return total;
-          try {
-            const parsed = JSON.parse(line);
-            const message = parsed?.message;
-            return parsed.type === "message" &&
-              (message?.role === "user" || message?.role === "assistant")
-              ? total + 1
-              : total;
-          } catch {
-            return total;
-          }
-        }, 0);
-      this.piSessionCountCache ??= new Map();
-      this.piSessionCountCache.set(sessionPath, {
-        mtimeMs: stat.mtimeMs,
-        size: stat.size,
-        count
-      });
-      return count;
-    } catch {
-      return 0;
-    }
-  }
-  switchThread(threadId) {
-    return this.threadHistory.switchThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  archiveThread(threadId = this.threadHistory.currentThreadId) {
-    return this.threadHistory.archiveThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  unarchiveThread(threadId) {
-    return this.threadHistory.unarchiveThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  archiveThreads(threadIds) {
-    const archivedIds = this.threadHistory.archiveThreads(threadIds);
-    if (archivedIds.length > 0) {
-      this.syncCurrentThreadState();
-      this.saveThreadHistory();
-    }
-    return { archivedIds, archivedCount: archivedIds.length };
-  }
-  deleteThread(threadId, options = {}) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread) return false;
-
-    const runner = this.threadRunners.get(threadId);
-    if (runner?.isRunning) return false;
-
-    let sessionPath;
-    if (options.deletePiSession && thread.piSessionId) {
-      const resolver = runner ?? this.pi;
-      sessionPath = resolver?.resolveSessionPath(thread.piSessionId);
-      if (!sessionPath || !fs.existsSync(sessionPath)) return false;
-
-      const sessionIsShared = this.threadHistory
-        .listThreads({ includeArchived: true })
-        .some(
-          (other) =>
-            other.id !== threadId &&
-            other.piSessionId &&
-            resolver.resolveSessionPath(other.piSessionId) === sessionPath
-        );
-      if (sessionIsShared) return false;
-    }
-
-    this.threadRunners.dispose(threadId);
-    if (sessionPath) {
-      try {
-        fs.unlinkSync(sessionPath);
-      } catch (error) {
-        console.warn(STRINGS.plugin.sessionDeleteFailed, error);
-        return false;
-      }
-    }
-
-    return this.threadHistory.deleteThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  deleteThreads(threadIds) {
-    const requested = new Set(threadIds);
-    const threads = this.threadHistory
-      .listThreads({ includeArchived: true })
-      .filter((thread) => requested.has(thread.id));
-    const skippedIds = threads
-      .filter((thread) => this.threadRunners.get(thread.id)?.isRunning)
-      .map((thread) => thread.id);
-    const skipped = new Set(skippedIds);
-    const deleteIds = threads
-      .filter((thread) => !skipped.has(thread.id))
-      .map((thread) => thread.id);
-
-    for (const threadId of deleteIds) {
-      this.threadRunners.dispose(threadId);
-    }
-
-    const result = this.threadHistory.deleteThreads(deleteIds);
-    if (result.deletedIds.length > 0) {
-      this.syncCurrentThreadState();
-      this.saveThreadHistory();
-    }
-    return {
-      deletedIds: result.deletedIds,
-      deletedCount: result.deletedIds.length,
-      skippedIds,
-      skippedCount: skippedIds.length,
-      createdThreadId: result.createdThreadId
-    };
-  }
-  clearArchivedThreads() {
-    let clearedCount = this.threadHistory.clearArchivedThreads();
-    return clearedCount === 0
-      ? 0
-      : (this.syncCurrentThreadState(), this.saveThreadHistory(), clearedCount);
-  }
-  renameThread(threadId, title) {
-    const thread = this.threadHistory.getThread(threadId);
-    const renamed = this.threadHistory.renameThread(threadId, title);
-    if (!renamed) return false;
-
-    this.syncCurrentThreadState();
-    this.saveThreadHistory();
-    if (thread?.piSessionId) {
-      const sessionName = this.threadHistory.getThread(threadId)?.title ?? title;
-      void this.withSessionRunner(threadId, (runner) =>
-        runner.setSessionName(thread.piSessionId, sessionName)
-      ).catch((error) => console.warn(STRINGS.plugin.sessionRenameFailed, error));
-    }
-    return true;
-  }
-  toggleThreadFavorite(threadId) {
-    return this.threadHistory.toggleThreadFavorite(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
   getExtensionUiHandler() {
     this.extensionUiHandler ??= createExtensionUiHandler({
       select: (request) => showExtensionUiDialog(this.app, request),
@@ -853,9 +624,7 @@ export class PiAgentPlugin extends P.Plugin {
         tokenUsage: undefined
       };
     }
-    const thread = threadId
-      ? this.threadHistory.getThread(threadId)
-      : this.threadHistory.getCurrentThread();
+    const thread = threadId ? this.threads.getThread(threadId) : this.threads.currentThread;
     if (!thread) throw new Error(STRINGS.plugin.threadGone);
     if (!runner) throw new Error(STRINGS.plugin.runnerUnavailable);
     const history = getPriorThreadHistory(thread.messages, prompt);
@@ -878,11 +647,7 @@ export class PiAgentPlugin extends P.Plugin {
       callbacks,
       images
     );
-    if (result.sessionId) {
-      this.threadHistory.setThreadPiSessionId(thread.id, result.sessionId);
-      this.syncCurrentThreadState();
-      this.saveThreadHistory();
-    }
+    if (result.sessionId) this.threads.setThreadSessionId(thread.id, result.sessionId);
     return result;
   }
   setPromptEnricher(callback) {
@@ -1039,7 +804,7 @@ export class PiAgentPlugin extends P.Plugin {
       now: () => Date.now()
     });
   }
-  createPiRunner(threadId = this.getCurrentThread().id) {
+  createPiRunner(threadId = this.threads.currentThreadId) {
     return this.threadRunners.create(threadId);
   }
   buildPiRunner() {
@@ -1161,8 +926,14 @@ export class PiAgentPlugin extends P.Plugin {
     if (typeof content !== "string") content = await this.app.vault.read(file);
     return this.annotationStore.reanchorPath(path, content);
   }
-  syncCurrentThreadState() {
-    this.messages = this.threadHistory.getCurrentMessages();
+  buildThreadService() {
+    return new ThreadService({
+      store: this.threadHistory,
+      runners: this.threadRunners,
+      createRunner: (threadId) => this.createPiRunner(threadId),
+      getDefaultRunner: () => this.pi,
+      persist: () => this.saveThreadHistory()
+    });
   }
   saveThreadHistory() {
     this.savePluginData().catch((error) => {

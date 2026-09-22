@@ -8,7 +8,7 @@ export class ThreadActions {
   }
 
   startNewChat() {
-    this.plugin.startNewThread();
+    this.plugin.threads.startNewThread();
     this.callbacks.resetThreadUiState?.();
     this.callbacks.renderThreadTitle();
     this.callbacks.renderMessages();
@@ -17,7 +17,7 @@ export class ThreadActions {
 
   async forkChat() {
     try {
-      const fork = await this.plugin.forkCurrentThread();
+      const fork = await this.plugin.threads.forkCurrentThread();
       if (fork) {
         this.callbacks.resetThreadUiState?.();
         this.callbacks.renderThreadTitle();

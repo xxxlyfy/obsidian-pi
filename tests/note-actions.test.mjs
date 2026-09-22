@@ -15,7 +15,7 @@ beforeAll(async () => {
 function createActions() {
   return new NoteActions(
     {
-      messages: [{ role: "user", content: "Previous", createdAt: 1 }],
+      threads: { currentMessages: () => [{ role: "user", content: "Previous", createdAt: 1 }] },
       app: { vault: {}, workspace: {} }
     },
     {

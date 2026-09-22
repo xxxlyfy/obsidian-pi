@@ -65,7 +65,8 @@ function createPluginDouble({ dir, data, history, annotationData } = {}) {
       dispose: vi.fn(),
       get: () => undefined,
       disposeAll: vi.fn(),
-      hasActive: () => false
+      hasActive: () => false,
+      withRunner: async (threadId, action) => action({ setSessionName: async () => {} })
     },
     saveData: async (saveData) => {
       plugin.saved = JSON.parse(JSON.stringify(saveData));
@@ -75,6 +76,7 @@ function createPluginDouble({ dir, data, history, annotationData } = {}) {
     getVaultBasePath: () => undefined,
     withSessionRunner: async () => undefined
   });
+  plugin.threads = plugin.buildThreadService();
   return plugin;
 }
 
@@ -109,12 +111,12 @@ describe("golden path 4: message -> persist -> reload", () => {
     first.threadHistory.renameThread(threadId, "Renamed chat");
     first.threadHistory.setThreadPiSessionId(threadId, "session-1");
     first.threadHistory.toggleThreadFavorite(threadId);
-    first.addMessageToThread(threadId, {
+    first.threads.addMessageToThread(threadId, {
       role: "user",
       content: "hello",
       createdAt: 1_700_000_000_000
     });
-    first.addMessageToThread(threadId, {
+    first.threads.addMessageToThread(threadId, {
       role: "assistant",
       content: "world",
       createdAt: 1_700_000_000_001,
@@ -173,7 +175,7 @@ describe("golden path 4: message -> persist -> reload", () => {
     );
     expect(reloaded.annotationStore.toJSON()).toEqual(first.annotationStore.toJSON());
     expect(reloaded.threadHistory.currentThreadId).toBe(threadId);
-    expect(reloaded.messages).toEqual(first.threadHistory.getCurrentMessages());
+    expect(reloaded.threads.currentMessages()).toEqual(first.threadHistory.getCurrentMessages());
     expect(reloaded.settings).toMatchObject({
       sandboxMode: "read-only",
       desktopNotifications: true
@@ -185,7 +187,7 @@ describe("golden path 4: message -> persist -> reload", () => {
     const dir = await createTempDir();
     const first = createPluginDouble({ dir });
     const createdAt = Date.now();
-    first.addMessage({ role: "user", content: "backup me", createdAt });
+    first.threads.addMessage({ role: "user", content: "backup me", createdAt });
     await first.savePluginData();
 
     const damagedData = { ...first.saved };
@@ -205,7 +207,7 @@ describe("golden path 4: message -> persist -> reload", () => {
     // plugin reloads. Phase 3 (Persistence) must not make this worse.
     const dir = await createTempDir();
     const first = createPluginDouble({ dir });
-    first.addMessage({ role: "user", content: "no timestamp" });
+    first.threads.addMessage({ role: "user", content: "no timestamp" });
 
     expect(first.threadHistory.getCurrentMessages()).toEqual([
       expect.objectContaining({ content: "no timestamp" })
@@ -222,12 +224,12 @@ describe("golden path 4: message -> persist -> reload", () => {
     const dir = await createTempDir();
     const plugin = createPluginDouble({ dir });
     const currentId = plugin.threadHistory.currentThreadId;
-    const newThread = plugin.startNewThread("Work log");
+    const newThread = plugin.threads.startNewThread("Work log");
 
-    plugin.renameThread(newThread.id, "Renamed log");
-    plugin.toggleThreadFavorite(newThread.id);
-    plugin.archiveThread(newThread.id);
-    expect(plugin.switchThread(currentId)).toBe(true);
+    plugin.threads.renameThread(newThread.id, "Renamed log");
+    plugin.threads.toggleThreadFavorite(newThread.id);
+    plugin.threads.archiveThread(newThread.id);
+    expect(plugin.threads.switchThread(currentId)).toBe(true);
 
     await plugin.dataSaveChain;
 
@@ -235,7 +237,7 @@ describe("golden path 4: message -> persist -> reload", () => {
     expect(persisted).toMatchObject({ title: "Renamed log", favorite: true, archived: true });
     expect(plugin.saved.chatHistory.currentThreadId).toBe(currentId);
 
-    expect(plugin.deleteThread(newThread.id)).toBe(true);
+    expect(plugin.threads.deleteThread(newThread.id)).toBe(true);
     await plugin.dataSaveChain;
     expect(plugin.saved.chatHistory.threads.some((thread) => thread.id === newThread.id)).toBe(
       false

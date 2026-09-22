@@ -191,7 +191,7 @@ export class PiAgentView extends f.ItemView {
     (0, f.setIcon)(forkButton, "split");
     forkButton.addEventListener("click", (event) => {
       event.preventDefault();
-      if (this.isThreadRunning(this.plugin.getCurrentThread().id)) {
+      if (this.isThreadRunning(this.plugin.threads.currentThreadId)) {
         new f.Notice(STRINGS.view.forkBusy);
         return;
       }
@@ -450,7 +450,7 @@ export class PiAgentView extends f.ItemView {
   }
   getDisplayedContextUsage() {
     if (this.currentRunContextUsage) return this.currentRunContextUsage;
-    const thread = this.plugin.getCurrentThread();
+    const thread = this.plugin.threads.currentThread;
     if (this.invalidatedContextThreadIds.has(thread.id))
       return { compacted: true, contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow };
     const messages = thread.messages ?? [];
@@ -462,14 +462,14 @@ export class PiAgentView extends f.ItemView {
   }
   renderThreadTitle() {
     if (!this.threadTitleEl) return;
-    let thread = this.plugin.getCurrentThread();
+    let thread = this.plugin.threads.currentThread;
     this.threadTitleEl.empty();
     this.threadTitleEl.createSpan({ text: thread.title });
     this.renderThreadFavorite();
   }
   renderThreadFavorite() {
     if (!this.threadFavoriteEl) return;
-    const favorite = this.plugin.getCurrentThread().favorite === true;
+    const favorite = this.plugin.threads.currentThread.favorite === true;
     this.threadFavoriteEl.toggleClass("is-favorite", favorite);
     this.threadFavoriteEl.setAttr("aria-pressed", String(favorite));
     const favoriteLabel = favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite;
@@ -477,8 +477,8 @@ export class PiAgentView extends f.ItemView {
     this.threadFavoriteEl.setAttr("title", favoriteLabel);
   }
   toggleCurrentThreadFavorite() {
-    const thread = this.plugin.getCurrentThread();
-    if (!this.plugin.toggleThreadFavorite(thread.id)) {
+    const thread = this.plugin.threads.currentThread;
+    if (!this.plugin.threads.toggleThreadFavorite(thread.id)) {
       new f.Notice(STRINGS.view.threadNotFound);
       return;
     }
@@ -487,7 +487,7 @@ export class PiAgentView extends f.ItemView {
   }
   startThreadTitleRename() {
     if (!this.threadTitleEl?.isConnected) return;
-    const thread = this.plugin.getCurrentThread();
+    const thread = this.plugin.threads.currentThread;
     this.threadTitleEl.empty();
     this.threadTitleEl.addClass("is-editing");
     const input = this.threadTitleEl.createEl("input", {
@@ -497,7 +497,8 @@ export class PiAgentView extends f.ItemView {
     const commit = (save) => {
       const title = input.value.trim();
       this.threadTitleEl?.removeClass("is-editing");
-      if (save && title && title !== thread.title) this.plugin.renameThread(thread.id, title);
+      if (save && title && title !== thread.title)
+        this.plugin.threads.renameThread(thread.id, title);
       this.renderThreadTitle();
     };
     const stopPropagation = (event) => {
@@ -776,7 +777,7 @@ export class PiAgentView extends f.ItemView {
     });
   }
   getCurrentThreadId() {
-    return this.plugin.getCurrentThread()?.id;
+    return this.plugin.threads.currentThreadId;
   }
   isCurrentThread(threadId) {
     return this.getCurrentThreadId() === threadId;
@@ -930,7 +931,7 @@ export class PiAgentView extends f.ItemView {
   }
   async runPrompt(
     prompt,
-    threadId = this.plugin.getCurrentThread().id,
+    threadId = this.plugin.threads.currentThreadId,
     images = [],
     queuedId,
     attachments = [],
@@ -1091,7 +1092,7 @@ export class PiAgentView extends f.ItemView {
     const addUserMessage = () => {
       if (run.userMessageAdded) return;
       run.userMessageAdded = true;
-      this.plugin.addMessageToThread(threadId, {
+      this.plugin.threads.addMessageToThread(threadId, {
         role: "user",
         content: prompt || conciseAttachmentSummary(images, attachments),
         createdAt: Date.now()
@@ -1140,7 +1141,7 @@ export class PiAgentView extends f.ItemView {
       this.streamingThinkingContent = "";
       this.streamingItemEl = undefined;
       this.streamingTextEl = undefined;
-      this.plugin.addMessageToThread(threadId, {
+      this.plugin.threads.addMessageToThread(threadId, {
         role: "assistant",
         content: result.finalResponse,
         createdAt,
@@ -1176,7 +1177,7 @@ export class PiAgentView extends f.ItemView {
         `${threadId}:${createdAt}`,
         run.thinkingUserSet ? run.thinkingExpanded : false
       );
-      this.plugin.addMessageToThread(threadId, {
+      this.plugin.threads.addMessageToThread(threadId, {
         role: "assistant",
         content: `${STRINGS.view.runFailed}：${message}`,
         createdAt,
@@ -1193,7 +1194,7 @@ export class PiAgentView extends f.ItemView {
     } finally {
       if (run) {
         this.syncCurrentRunFlags();
-        this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
+        this.running = this.isThreadRunning(this.plugin.threads.currentThreadId);
         this.canceling = this.getCurrentThreadRun()?.canceling === true;
         this.streamingAssistantContent = "";
         this.streamingThinkingContent = "";

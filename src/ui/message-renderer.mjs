@@ -20,7 +20,7 @@ export function renderMessages() {
   try {
     this.unloadMessageRenderComponents();
     messagesEl.empty();
-    let messages = this.plugin.messages;
+    let messages = this.plugin.threads.currentMessages();
     if (messages.length === 0) {
       this.renderEmptyState();
       return;

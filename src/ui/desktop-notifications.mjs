@@ -22,7 +22,7 @@ export async function requestDesktopNotificationPermission(NotificationApi) {
 }
 
 export async function openNotificationThread(plugin, threadId, viewType) {
-  if (!plugin?.switchThread?.(threadId)) return false;
+  if (!plugin?.threads?.switchThread?.(threadId)) return false;
   await plugin.activateView?.();
   const leaf = plugin.app?.workspace?.getLeavesOfType?.(viewType)?.[0];
   leaf?.view?.renderChatView?.();

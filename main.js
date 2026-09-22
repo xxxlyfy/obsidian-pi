@@ -41,9 +41,6 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 
-// src/plugin/PiAgentPlugin.mjs
-var import_node_fs5 = __toESM(require("node:fs"), 1);
-
 // src/shared/strings.mjs
 var STRINGS = {
   common: {
@@ -743,6 +740,290 @@ var AgentRuntime = class {
     this.disposed = true;
     this.runStates.dispose();
     this.lastRequests.clear();
+  }
+};
+
+// src/threads/thread-service.mjs
+var import_node_fs = __toESM(require("node:fs"), 1);
+var ThreadService = class {
+  /**
+   * @param {object} options
+   * @param {any} options.store              ThreadStore instance.
+   * @param {any} options.runners            ThreadRunnerRegistry instance.
+   * @param {(threadId: string) => any} options.createRunner
+   * @param {() => any} [options.getDefaultRunner] Fallback runner for session paths.
+   * @param {() => void} [options.persist]   Called after every mutation.
+   */
+  constructor({ store, runners, createRunner, getDefaultRunner, persist }) {
+    this.store = store;
+    this.runners = runners;
+    this.createRunner = createRunner;
+    this.getDefaultRunner = getDefaultRunner ?? (() => void 0);
+    this.persist = persist ?? (() => {});
+    this.sessionCountCache = /* @__PURE__ */ new Map();
+  }
+  get currentThread() {
+    return this.store.getCurrentThread();
+  }
+  get currentThreadId() {
+    return this.store.currentThreadId;
+  }
+  /** @returns {any[]} */
+  currentMessages() {
+    return this.store.getCurrentMessages();
+  }
+  /** @param {string} threadId */
+  getThread(threadId) {
+    return this.store.getThread(threadId);
+  }
+  /** @param {any} [options] */
+  listThreads(options) {
+    return this.store.listThreads(options);
+  }
+  /**
+   * Stores the Pi session that a thread is bound to.
+   *
+   * @param {string} threadId
+   * @param {string} piSessionId
+   */
+  setThreadSessionId(threadId, piSessionId) {
+    const updated = this.store.setThreadPiSessionId(threadId, piSessionId);
+    this.persist();
+    return updated;
+  }
+  /** @param {any} message */
+  addMessage(message) {
+    return this.addMessageToThread(this.store.currentThreadId, message);
+  }
+  /**
+   * @param {string} threadId
+   * @param {any} message
+   */
+  addMessageToThread(threadId, message) {
+    const added = this.store.addMessageToThread(threadId, message);
+    if (!added) return false;
+    this.persist();
+    return true;
+  }
+  /** @param {string} [title] */
+  startNewThread(title) {
+    const thread = this.store.startNewThread(title);
+    this.persist();
+    return thread;
+  }
+  async forkCurrentThread() {
+    const current = this.currentThread;
+    if (current.messages.length === 0) return void 0;
+    let clonedSession;
+    if (current.piSessionId) {
+      const runner = this.createRunner(current.id);
+      try {
+        clonedSession = await runner.cloneSession(current.piSessionId);
+        if (clonedSession) {
+          await runner
+            .setSessionName(clonedSession, `${current.title} (fork)`)
+            .catch((error) => console.warn(STRINGS.plugin.sessionCloneFailed, error));
+        }
+      } finally {
+        this.runners.dispose(current.id);
+      }
+      if (!clonedSession) return void 0;
+    }
+    const fork = this.store.forkCurrentThread(clonedSession);
+    if (!fork) return void 0;
+    this.persist();
+    return fork;
+  }
+  /** @param {string} threadId */
+  switchThread(threadId) {
+    if (!this.store.switchThread(threadId)) return false;
+    this.persist();
+    return true;
+  }
+  /** @param {string} [threadId] */
+  archiveThread(threadId = this.store.currentThreadId) {
+    if (!this.store.archiveThread(threadId)) return false;
+    this.persist();
+    return true;
+  }
+  /** @param {string} threadId */
+  unarchiveThread(threadId) {
+    if (!this.store.unarchiveThread(threadId)) return false;
+    this.persist();
+    return true;
+  }
+  /** @param {string[]} threadIds */
+  archiveThreads(threadIds) {
+    const archivedIds = this.store.archiveThreads(threadIds);
+    if (archivedIds.length > 0) this.persist();
+    return { archivedIds, archivedCount: archivedIds.length };
+  }
+  /**
+   * @param {string} threadId
+   * @param {{ deletePiSession?: boolean }} [options]
+   */
+  deleteThread(threadId, options = {}) {
+    const thread = this.store.getThread(threadId);
+    if (!thread) return false;
+    const runner = this.runners.get(threadId);
+    if (runner?.isRunning) return false;
+    let sessionPath;
+    if (options.deletePiSession && thread.piSessionId) {
+      const resolver = runner ?? this.getDefaultRunner();
+      sessionPath = resolver?.resolveSessionPath(thread.piSessionId);
+      if (!sessionPath || !import_node_fs.default.existsSync(sessionPath)) return false;
+      const sessionIsShared = this.store
+        .listThreads({ includeArchived: true })
+        .some(
+          (other) =>
+            other.id !== threadId &&
+            other.piSessionId &&
+            resolver.resolveSessionPath(other.piSessionId) === sessionPath
+        );
+      if (sessionIsShared) return false;
+    }
+    this.runners.dispose(threadId);
+    if (sessionPath) {
+      try {
+        import_node_fs.default.unlinkSync(sessionPath);
+      } catch (error) {
+        console.warn(STRINGS.plugin.sessionDeleteFailed, error);
+        return false;
+      }
+    }
+    if (!this.store.deleteThread(threadId)) return false;
+    this.persist();
+    return true;
+  }
+  /** @param {string[]} threadIds */
+  deleteThreads(threadIds) {
+    const requested = new Set(threadIds);
+    const threads = this.store
+      .listThreads({ includeArchived: true })
+      .filter((thread) => requested.has(thread.id));
+    const skippedIds = threads
+      .filter((thread) => this.runners.get(thread.id)?.isRunning)
+      .map((thread) => thread.id);
+    const skipped = new Set(skippedIds);
+    const deleteIds = threads
+      .filter((thread) => !skipped.has(thread.id))
+      .map((thread) => thread.id);
+    for (const threadId of deleteIds) this.runners.dispose(threadId);
+    const result = this.store.deleteThreads(deleteIds);
+    if (result.deletedIds.length > 0) this.persist();
+    return {
+      deletedIds: result.deletedIds,
+      deletedCount: result.deletedIds.length,
+      skippedIds,
+      skippedCount: skippedIds.length,
+      createdThreadId: result.createdThreadId
+    };
+  }
+  clearArchivedThreads() {
+    const clearedCount = this.store.clearArchivedThreads();
+    if (clearedCount === 0) return 0;
+    this.persist();
+    return clearedCount;
+  }
+  /**
+   * @param {string} threadId
+   * @param {string} title
+   */
+  renameThread(threadId, title) {
+    const thread = this.store.getThread(threadId);
+    if (!this.store.renameThread(threadId, title)) return false;
+    this.persist();
+    if (thread?.piSessionId) {
+      const sessionName = this.store.getThread(threadId)?.title ?? title;
+      void this.withSessionRunner(threadId, (runner) =>
+        runner.setSessionName(thread.piSessionId, sessionName)
+      ).catch((error) => console.warn(STRINGS.plugin.sessionRenameFailed, error));
+    }
+    return true;
+  }
+  /** @param {string} threadId */
+  toggleThreadFavorite(threadId) {
+    if (!this.store.toggleThreadFavorite(threadId)) return false;
+    this.persist();
+    return true;
+  }
+  /** @param {any} thread */
+  getThreadDisplayMessageCount(thread) {
+    const messageCount = Array.isArray(thread?.messages) ? thread.messages.length : 0;
+    const sessionMessageCount = this.countSessionChatMessages(thread?.piSessionId);
+    return Math.max(messageCount, sessionMessageCount);
+  }
+  /** @param {string | undefined} sessionReference */
+  countSessionChatMessages(sessionReference) {
+    const sessionPath = this.getDefaultRunner()?.resolveSessionPath(sessionReference);
+    if (!sessionPath) return 0;
+    let stat;
+    try {
+      stat = import_node_fs.default.statSync(sessionPath);
+    } catch {
+      this.sessionCountCache.delete(sessionPath);
+      return 0;
+    }
+    const cached = this.sessionCountCache.get(sessionPath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.count;
+    try {
+      const count = import_node_fs.default
+        .readFileSync(sessionPath, "utf8")
+        .split(/\r?\n/)
+        .reduce((total, line) => {
+          if (!line.trim()) return total;
+          try {
+            const parsed = JSON.parse(line);
+            const message = parsed?.message;
+            return parsed.type === "message" &&
+              (message?.role === "user" || message?.role === "assistant")
+              ? total + 1
+              : total;
+          } catch {
+            return total;
+          }
+        }, 0);
+      this.sessionCountCache.set(sessionPath, { mtimeMs: stat.mtimeMs, size: stat.size, count });
+      return count;
+    } catch {
+      return 0;
+    }
+  }
+  /** @param {string} threadId */
+  async getThreadSessionStats(threadId) {
+    const thread = this.store.getThread(threadId);
+    if (!thread?.piSessionId) return void 0;
+    return this.withSessionRunner(threadId, (runner) => runner.getSessionStats(thread.piSessionId));
+  }
+  /** @param {string} threadId */
+  async exportThreadSession(threadId) {
+    const thread = this.store.getThread(threadId);
+    if (!thread?.piSessionId) return void 0;
+    return this.withSessionRunner(threadId, (runner) => runner.exportSession(thread.piSessionId));
+  }
+  /** @param {string} threadId */
+  async getThreadSessionTree(threadId) {
+    const thread = this.store.getThread(threadId);
+    if (!thread?.piSessionId) return void 0;
+    return this.withSessionRunner(threadId, (runner) => runner.getSessionTree(thread.piSessionId));
+  }
+  /**
+   * @param {string} threadId
+   * @param {any} since
+   */
+  async getThreadSessionEntries(threadId, since) {
+    const thread = this.store.getThread(threadId);
+    if (!thread?.piSessionId) return void 0;
+    return this.withSessionRunner(threadId, (runner) =>
+      runner.getSessionEntries(thread.piSessionId, since)
+    );
+  }
+  /**
+   * @param {string} threadId
+   * @param {(runner: any) => Promise<any>} action
+   */
+  async withSessionRunner(threadId, action) {
+    return this.runners.withRunner(threadId, action);
   }
 };
 
@@ -3640,7 +3921,7 @@ function getErrorMessage(error) {
 }
 
 // src/pi/environment.mjs
-var import_node_fs = __toESM(require("node:fs"), 1);
+var import_node_fs2 = __toESM(require("node:fs"), 1);
 var import_node_path2 = __toESM(require("node:path"), 1);
 var POSIX_PI_CANDIDATES = ["/opt/homebrew/bin/pi", "/usr/local/bin/pi", "/usr/bin/pi"];
 var WINDOWS_PI_CANDIDATES = ["pi.cmd", "pi.exe", "pi"];
@@ -3657,7 +3938,7 @@ function findPiExecutable(configuredPath = "") {
   if (configuredExecutable) return configuredExecutable;
   if (process.platform === "win32") return WINDOWS_PI_CANDIDATES[0];
   for (const candidate of POSIX_PI_CANDIDATES) {
-    if (import_node_fs.default.existsSync(candidate)) return candidate;
+    if (import_node_fs2.default.existsSync(candidate)) return candidate;
   }
   const piNode = findPiNodeExecutable();
   if (piNode) return piNode;
@@ -3687,13 +3968,13 @@ function findPiNodeExecutable() {
   if (!home) return null;
   const root = import_node_path2.default.join(home, ".local", "share", "pi-node");
   try {
-    const versions = import_node_fs.default
+    const versions = import_node_fs2.default
       .readdirSync(root, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => import_node_path2.default.join(root, d.name));
     for (const v of versions) {
       const candidate = import_node_path2.default.join(v, "bin", "pi");
-      if (import_node_fs.default.existsSync(candidate)) return candidate;
+      if (import_node_fs2.default.existsSync(candidate)) return candidate;
     }
   } catch {
     return null;
@@ -3751,7 +4032,7 @@ function getPiNodePaths() {
   if (!home) return [];
   const root = import_node_path2.default.join(home, ".local", "share", "pi-node");
   try {
-    return import_node_fs.default
+    return import_node_fs2.default
       .readdirSync(root, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => import_node_path2.default.join(root, d.name, "bin"));
@@ -3789,7 +4070,7 @@ function getFnmNodeBinDirectories(root) {
 }
 function getChildDirectories(root) {
   try {
-    return import_node_fs.default
+    return import_node_fs2.default
       .readdirSync(root, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => import_node_path2.default.join(root, entry.name));
@@ -3800,7 +4081,7 @@ function getChildDirectories(root) {
 function uniqueExistingDirectories(directories) {
   const seen = /* @__PURE__ */ new Set();
   return directories.filter((directory) => {
-    if (!directory || seen.has(directory) || !import_node_fs.default.existsSync(directory))
+    if (!directory || seen.has(directory) || !import_node_fs2.default.existsSync(directory))
       return false;
     seen.add(directory);
     return true;
@@ -4422,7 +4703,7 @@ function getSupportedReasoningLevels(model) {
 
 // src/pi/runner.mjs
 var import_node_child_process3 = require("node:child_process");
-var import_node_fs2 = __toESM(require("node:fs"), 1);
+var import_node_fs3 = __toESM(require("node:fs"), 1);
 var import_node_path3 = __toESM(require("node:path"), 1);
 
 // src/pi/token-usage.mjs
@@ -5565,7 +5846,7 @@ var PiRunner = class {
   }
   createSessionFilePath() {
     const sessionDir = this.getSessionDirectory();
-    import_node_fs2.default.mkdirSync(sessionDir, { recursive: true });
+    import_node_fs3.default.mkdirSync(sessionDir, { recursive: true });
     return import_node_path3.default.join(
       sessionDir,
       `${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
@@ -5592,7 +5873,7 @@ var PiRunner = class {
   resolveOrCreateSession(sessionReference) {
     const existingPath = this.resolveSessionPath(sessionReference);
     const sessionPath =
-      existingPath && import_node_fs2.default.existsSync(existingPath)
+      existingPath && import_node_fs3.default.existsSync(existingPath)
         ? existingPath
         : this.createSessionFilePath();
     return {
@@ -5602,7 +5883,7 @@ var PiRunner = class {
   }
   async getExistingSessionRpcClient(sessionReference) {
     const sessionPath = this.resolveSessionPath(sessionReference);
-    if (!sessionPath || !import_node_fs2.default.existsSync(sessionPath)) {
+    if (!sessionPath || !import_node_fs3.default.existsSync(sessionPath)) {
       throw new Error("The local Pi session file is not available.");
     }
     return this.getOrCreateRpcClient(sessionReference);
@@ -5614,7 +5895,7 @@ var PiRunner = class {
     const state = await client.request("get_state");
     const cloneReference = this.createSessionReference(state?.sessionFile);
     const clonePath = this.resolveSessionPath(cloneReference);
-    if (!clonePath || !import_node_fs2.default.existsSync(clonePath)) {
+    if (!clonePath || !import_node_fs3.default.existsSync(clonePath)) {
       throw new Error("Pi did not return a portable local clone session.");
     }
     return cloneReference;
@@ -5999,7 +6280,7 @@ async function requestDesktopNotificationPermission(NotificationApi) {
   }
 }
 async function openNotificationThread(plugin, threadId, viewType) {
-  if (!plugin?.switchThread?.(threadId)) return false;
+  if (!plugin?.threads?.switchThread?.(threadId)) return false;
   await plugin.activateView?.();
   const leaf = plugin.app?.workspace?.getLeavesOfType?.(viewType)?.[0];
   leaf?.view?.renderChatView?.();
@@ -6872,7 +7153,7 @@ var NoteActions = class {
   }
   getPreviousUserPrompt(messageIndex) {
     for (let index = messageIndex - 1; index >= 0; index--) {
-      const message = this.plugin.messages[index];
+      const message = this.plugin.threads.currentMessages()[index];
       if (message?.role === "user") return message.content;
     }
     return void 0;
@@ -7062,7 +7343,7 @@ function enqueuePrompt(
   contextFilePath,
   includeActiveNote
 ) {
-  const targetThreadId = threadId ?? this.plugin.getCurrentThread().id;
+  const targetThreadId = threadId ?? this.plugin.threads.currentThreadId;
   const item = this.plugin.enqueueLocalPrompt({
     prompt,
     images,
@@ -7460,8 +7741,8 @@ function showThreadList() {
 }
 function renderThreadList() {
   let root = this.containerEl.children[1],
-    threads = this.plugin.listThreads({ includeArchived: true }),
-    currentThread = this.plugin.getCurrentThread();
+    threads = this.plugin.threads.listThreads({ includeArchived: true }),
+    currentThread = this.plugin.threads.currentThread;
   this.suggestions?.close();
   this.cleanupComposerBarObserver();
   this.messagesEl = void 0;
@@ -7499,7 +7780,7 @@ function renderThreadList() {
   });
   (0, f2.setIcon)(newChatButton, "plus");
   newChatButton.addEventListener("click", () => {
-    this.plugin.startNewThread();
+    this.plugin.threads.startNewThread();
     this.renderChatView();
   });
   let listEl = root.createDiv({ cls: "pi-agent-thread-list" });
@@ -7527,7 +7808,7 @@ function renderThreadListRow(listEl, thread, isCurrent) {
   }
   titleEl.createSpan({ text: thread.title });
   row.addEventListener("click", () => {
-    this.plugin.switchThread(thread.id);
+    this.plugin.threads.switchThread(thread.id);
     this.renderChatView();
   });
   info.createDiv({
@@ -7573,7 +7854,7 @@ function renderThreadListRow(listEl, thread, isCurrent) {
   });
 }
 async function deleteChats() {
-  const threads = this.plugin.listThreads({ includeArchived: true });
+  const threads = this.plugin.threads.listThreads({ includeArchived: true });
   const plan = planBulkThreadDeletion(threads, this.runtime.activeThreadIds());
   if (plan.all.deleteCount === 0) {
     new f2.Notice(
@@ -7589,7 +7870,7 @@ async function deleteChats() {
   if (scope.deleteCount === 0) return;
   const newlyRunningIds = scope.deleteIds.filter((threadId) => this.isThreadRunning(threadId));
   const safeDeleteIds = scope.deleteIds.filter((threadId) => !this.isThreadRunning(threadId));
-  const result = this.plugin.deleteThreads(safeDeleteIds);
+  const result = this.plugin.threads.deleteThreads(safeDeleteIds);
   new f2.Notice(
     formatBulkDeleteResult({
       deletedCount: result.deletedCount,
@@ -7607,7 +7888,7 @@ function showThreadRowMenu(event, thread, isCurrent, titleEl) {
       .setIcon(isCurrent ? "check" : "arrow-right")
       .setDisabled(isCurrent)
       .onClick(() => {
-        this.plugin.switchThread(thread.id);
+        this.plugin.threads.switchThread(thread.id);
         this.renderChatView();
       })
   );
@@ -7631,8 +7912,8 @@ function showThreadRowMenu(event, thread, isCurrent, titleEl) {
         .onClick(async () => {
           try {
             const [stats, tree] = await Promise.all([
-              this.plugin.getThreadSessionStats(thread.id),
-              this.plugin.getThreadSessionTree(thread.id)
+              this.plugin.threads.getThreadSessionStats(thread.id),
+              this.plugin.threads.getThreadSessionTree(thread.id)
             ]);
             const entryCount = countSessionEntries(tree?.tree ?? []);
             new f2.Notice(
@@ -7657,7 +7938,7 @@ function showThreadRowMenu(event, thread, isCurrent, titleEl) {
         .setIcon("download")
         .onClick(async () => {
           try {
-            const result = await this.plugin.exportThreadSession(thread.id);
+            const result = await this.plugin.threads.exportThreadSession(thread.id);
             new f2.Notice(
               result?.path ? STRINGS.threads.exportTo(result.path) : STRINGS.threads.exportFailed
             );
@@ -7685,7 +7966,8 @@ function startThreadListRename(thread, titleEl) {
   titleEl.replaceWith(input);
   let commit = (event) => {
     let title = input.value.trim();
-    if (event && title && title !== thread.title) this.plugin.renameThread(thread.id, title);
+    if (event && title && title !== thread.title)
+      this.plugin.threads.renameThread(thread.id, title);
     this.renderThreadList();
   };
   input.addEventListener("click", (event) => event.stopPropagation());
@@ -7703,7 +7985,7 @@ function startThreadListRename(thread, titleEl) {
   input.select();
 }
 function toggleThreadFavorite(thread) {
-  this.plugin.toggleThreadFavorite(thread.id)
+  this.plugin.threads.toggleThreadFavorite(thread.id)
     ? this.renderThreadList()
     : new f2.Notice(STRINGS.threads.threadNotFound);
 }
@@ -7714,7 +7996,7 @@ async function deleteThreadFromList(thread) {
   }
   const choice = await chooseThreadDeletion(this.plugin.app, thread);
   if (choice === "cancel") return;
-  if (this.plugin.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
+  if (this.plugin.threads.deleteThread(thread.id, { deletePiSession: choice === "both" })) {
     new f2.Notice(
       choice === "both" ? STRINGS.threads.deletedChatAndSession : STRINGS.threads.deletedChat
     );
@@ -7724,8 +8006,8 @@ async function deleteThreadFromList(thread) {
   }
 }
 function formatThreadMeta(thread, isCurrent) {
-  let messageCount = this.plugin.getThreadDisplayMessageCount
-      ? this.plugin.getThreadDisplayMessageCount(thread)
+  let messageCount = this.plugin.threads.getThreadDisplayMessageCount
+      ? this.plugin.threads.getThreadDisplayMessageCount(thread)
       : thread.messages.length,
     meta = `${STRINGS.threads.messageCount(messageCount)} • ${STRINGS.threads.updatedAt(
       this.formatThreadDate(thread.updatedAt)
@@ -7886,7 +8168,7 @@ function renderMessages() {
   try {
     this.unloadMessageRenderComponents();
     messagesEl.empty();
-    let messages = this.plugin.messages;
+    let messages = this.plugin.threads.currentMessages();
     if (messages.length === 0) {
       this.renderEmptyState();
       return;
@@ -9054,7 +9336,7 @@ var ThreadActions = class {
     this.callbacks = callbacks;
   }
   startNewChat() {
-    this.plugin.startNewThread();
+    this.plugin.threads.startNewThread();
     this.callbacks.resetThreadUiState?.();
     this.callbacks.renderThreadTitle();
     this.callbacks.renderMessages();
@@ -9062,7 +9344,7 @@ var ThreadActions = class {
   }
   async forkChat() {
     try {
-      const fork = await this.plugin.forkCurrentThread();
+      const fork = await this.plugin.threads.forkCurrentThread();
       if (fork) {
         this.callbacks.resetThreadUiState?.();
         this.callbacks.renderThreadTitle();
@@ -9325,7 +9607,7 @@ var PiAgentView = class extends f4.ItemView {
     (0, f4.setIcon)(forkButton, "split");
     forkButton.addEventListener("click", (event) => {
       event.preventDefault();
-      if (this.isThreadRunning(this.plugin.getCurrentThread().id)) {
+      if (this.isThreadRunning(this.plugin.threads.currentThreadId)) {
         new f4.Notice(STRINGS.view.forkBusy);
         return;
       }
@@ -9584,7 +9866,7 @@ var PiAgentView = class extends f4.ItemView {
   }
   getDisplayedContextUsage() {
     if (this.currentRunContextUsage) return this.currentRunContextUsage;
-    const thread = this.plugin.getCurrentThread();
+    const thread = this.plugin.threads.currentThread;
     if (this.invalidatedContextThreadIds.has(thread.id))
       return { compacted: true, contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow };
     const messages = thread.messages ?? [];
@@ -9596,14 +9878,14 @@ var PiAgentView = class extends f4.ItemView {
   }
   renderThreadTitle() {
     if (!this.threadTitleEl) return;
-    let thread = this.plugin.getCurrentThread();
+    let thread = this.plugin.threads.currentThread;
     this.threadTitleEl.empty();
     this.threadTitleEl.createSpan({ text: thread.title });
     this.renderThreadFavorite();
   }
   renderThreadFavorite() {
     if (!this.threadFavoriteEl) return;
-    const favorite = this.plugin.getCurrentThread().favorite === true;
+    const favorite = this.plugin.threads.currentThread.favorite === true;
     this.threadFavoriteEl.toggleClass("is-favorite", favorite);
     this.threadFavoriteEl.setAttr("aria-pressed", String(favorite));
     const favoriteLabel = favorite ? STRINGS.threads.removeFavorite : STRINGS.threads.markFavorite;
@@ -9611,8 +9893,8 @@ var PiAgentView = class extends f4.ItemView {
     this.threadFavoriteEl.setAttr("title", favoriteLabel);
   }
   toggleCurrentThreadFavorite() {
-    const thread = this.plugin.getCurrentThread();
-    if (!this.plugin.toggleThreadFavorite(thread.id)) {
+    const thread = this.plugin.threads.currentThread;
+    if (!this.plugin.threads.toggleThreadFavorite(thread.id)) {
       new f4.Notice(STRINGS.view.threadNotFound);
       return;
     }
@@ -9621,7 +9903,7 @@ var PiAgentView = class extends f4.ItemView {
   }
   startThreadTitleRename() {
     if (!this.threadTitleEl?.isConnected) return;
-    const thread = this.plugin.getCurrentThread();
+    const thread = this.plugin.threads.currentThread;
     this.threadTitleEl.empty();
     this.threadTitleEl.addClass("is-editing");
     const input = this.threadTitleEl.createEl("input", {
@@ -9631,7 +9913,8 @@ var PiAgentView = class extends f4.ItemView {
     const commit = (save) => {
       const title = input.value.trim();
       this.threadTitleEl?.removeClass("is-editing");
-      if (save && title && title !== thread.title) this.plugin.renameThread(thread.id, title);
+      if (save && title && title !== thread.title)
+        this.plugin.threads.renameThread(thread.id, title);
       this.renderThreadTitle();
     };
     const stopPropagation = (event) => {
@@ -9910,7 +10193,7 @@ var PiAgentView = class extends f4.ItemView {
     });
   }
   getCurrentThreadId() {
-    return this.plugin.getCurrentThread()?.id;
+    return this.plugin.threads.currentThreadId;
   }
   isCurrentThread(threadId) {
     return this.getCurrentThreadId() === threadId;
@@ -10066,7 +10349,7 @@ var PiAgentView = class extends f4.ItemView {
   }
   async runPrompt(
     prompt,
-    threadId = this.plugin.getCurrentThread().id,
+    threadId = this.plugin.threads.currentThreadId,
     images = [],
     queuedId,
     attachments = [],
@@ -10226,7 +10509,7 @@ var PiAgentView = class extends f4.ItemView {
     const addUserMessage = () => {
       if (run.userMessageAdded) return;
       run.userMessageAdded = true;
-      this.plugin.addMessageToThread(threadId, {
+      this.plugin.threads.addMessageToThread(threadId, {
         role: "user",
         content: prompt || conciseAttachmentSummary(images, attachments),
         createdAt: Date.now()
@@ -10275,7 +10558,7 @@ var PiAgentView = class extends f4.ItemView {
       this.streamingThinkingContent = "";
       this.streamingItemEl = void 0;
       this.streamingTextEl = void 0;
-      this.plugin.addMessageToThread(threadId, {
+      this.plugin.threads.addMessageToThread(threadId, {
         role: "assistant",
         content: result.finalResponse,
         createdAt,
@@ -10310,7 +10593,7 @@ var PiAgentView = class extends f4.ItemView {
         `${threadId}:${createdAt}`,
         run.thinkingUserSet ? run.thinkingExpanded : false
       );
-      this.plugin.addMessageToThread(threadId, {
+      this.plugin.threads.addMessageToThread(threadId, {
         role: "assistant",
         content: `${STRINGS.view.runFailed}：${message}`,
         createdAt,
@@ -10327,7 +10610,7 @@ var PiAgentView = class extends f4.ItemView {
     } finally {
       if (run) {
         this.syncCurrentRunFlags();
-        this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
+        this.running = this.isThreadRunning(this.plugin.threads.currentThreadId);
         this.canceling = this.getCurrentThreadRun()?.canceling === true;
         this.streamingAssistantContent = "";
         this.streamingThinkingContent = "";
@@ -10548,7 +10831,7 @@ function sanitizeThreadHistory(history) {
 
 // src/threads/chat-history-backup.mjs
 var import_node_crypto = __toESM(require("node:crypto"), 1);
-var import_node_fs3 = __toESM(require("node:fs"), 1);
+var import_node_fs4 = __toESM(require("node:fs"), 1);
 var import_node_path4 = __toESM(require("node:path"), 1);
 var BACKUP_SCHEMA_VERSION = 1;
 var BACKUP_FILE = "chat-history.backup.json";
@@ -10562,11 +10845,11 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
     checksum: checksum(normalized),
     chatHistory: normalized
   };
-  await import_node_fs3.default.promises.mkdir(pluginDirectory, { recursive: true });
+  await import_node_fs4.default.promises.mkdir(pluginDirectory, { recursive: true });
   const backupPath = import_node_path4.default.join(pluginDirectory, BACKUP_FILE);
   const previousPath = import_node_path4.default.join(pluginDirectory, PREVIOUS_BACKUP_FILE);
   const temporaryPath = `${backupPath}.tmp-${process.pid}-${Date.now()}`;
-  await import_node_fs3.default.promises.writeFile(
+  await import_node_fs4.default.promises.writeFile(
     temporaryPath,
     `${JSON.stringify(payload, null, 2)}
 `,
@@ -10577,7 +10860,7 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
     if (current) await copyAtomic(backupPath, previousPath);
     await replaceFile(temporaryPath, backupPath);
   } finally {
-    await import_node_fs3.default.promises.rm(temporaryPath, { force: true });
+    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
   }
 }
 async function readChatHistoryBackup(pluginDirectory) {
@@ -10590,7 +10873,7 @@ async function readChatHistoryBackup(pluginDirectory) {
 }
 async function readValidBackup(filePath) {
   try {
-    const backup = JSON.parse(await import_node_fs3.default.promises.readFile(filePath, "utf8"));
+    const backup = JSON.parse(await import_node_fs4.default.promises.readFile(filePath, "utf8"));
     if (
       backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
       backup.checksum !== checksum(backup.chatHistory)
@@ -10627,28 +10910,28 @@ function checksum(history) {
 }
 async function copyAtomic(sourcePath, destinationPath) {
   const temporaryPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
-  await import_node_fs3.default.promises.copyFile(sourcePath, temporaryPath);
+  await import_node_fs4.default.promises.copyFile(sourcePath, temporaryPath);
   try {
     await replaceFile(temporaryPath, destinationPath);
   } finally {
-    await import_node_fs3.default.promises.rm(temporaryPath, { force: true });
+    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
   }
 }
 async function replaceFile(sourcePath, destinationPath) {
   try {
-    await import_node_fs3.default.promises.rename(sourcePath, destinationPath);
+    await import_node_fs4.default.promises.rename(sourcePath, destinationPath);
   } catch (error) {
     const code =
       /** @type {NodeJS.ErrnoException} */
       error?.code;
     if (code !== "EEXIST" && code !== "EPERM") throw error;
-    await import_node_fs3.default.promises.rm(destinationPath, { force: true });
-    await import_node_fs3.default.promises.rename(sourcePath, destinationPath);
+    await import_node_fs4.default.promises.rm(destinationPath, { force: true });
+    await import_node_fs4.default.promises.rename(sourcePath, destinationPath);
   }
 }
 
 // src/threads/chat-history-import.mjs
-var import_node_fs4 = __toESM(require("node:fs"), 1);
+var import_node_fs5 = __toESM(require("node:fs"), 1);
 var import_node_path5 = __toESM(require("node:path"), 1);
 var MARKDOWN_STORAGE_VERSION = 3;
 var JSON_STORAGE_VERSION = 2;
@@ -10697,7 +10980,7 @@ async function removeImportedVaultChatHistory(vaultBasePath, managedFiles, vault
       .replaceAll(import_node_path5.default.sep, "/");
     const abstractFile = vault?.getAbstractFileByPath?.(vaultPath);
     if (abstractFile && abstractFile.extension === "md") await vault.delete(abstractFile, true);
-    else await import_node_fs4.default.promises.rm(resolved, { force: true });
+    else await import_node_fs5.default.promises.rm(resolved, { force: true });
     directories.add(import_node_path5.default.dirname(resolved));
   }
   for (const directory of [...directories].sort((left, right) => right.length - left.length)) {
@@ -10734,7 +11017,7 @@ async function loadMarkdownThreads(folder) {
     const filePath = import_node_path5.default.join(folder, fileName);
     try {
       const thread = parseMarkdownThread(
-        await import_node_fs4.default.promises.readFile(filePath, "utf8")
+        await import_node_fs5.default.promises.readFile(filePath, "utf8")
       );
       if (!thread) continue;
       result.threads.push(thread);
@@ -10757,7 +11040,7 @@ async function loadJsonThreads(folder) {
     const filePath = import_node_path5.default.join(folder, fileName);
     try {
       const thread = parseJsonThread(
-        JSON.parse(await import_node_fs4.default.promises.readFile(filePath, "utf8"))
+        JSON.parse(await import_node_fs5.default.promises.readFile(filePath, "utf8"))
       );
       result.threads.push(thread);
       result.managedFiles.push(filePath);
@@ -10773,7 +11056,7 @@ async function loadIndexedThreads(root) {
   if (await exists(indexPath)) {
     result.managedFiles.push(indexPath);
     try {
-      const index = JSON.parse(await import_node_fs4.default.promises.readFile(indexPath, "utf8"));
+      const index = JSON.parse(await import_node_fs5.default.promises.readFile(indexPath, "utf8"));
       if (typeof index?.currentThreadId === "string")
         result.currentThreadId = index.currentThreadId;
     } catch (error) {
@@ -10919,7 +11202,7 @@ function isInside(basePath, candidate) {
 }
 async function listFiles(folder, extension, includeHidden = false) {
   try {
-    return (await import_node_fs4.default.promises.readdir(folder, { withFileTypes: true }))
+    return (await import_node_fs5.default.promises.readdir(folder, { withFileTypes: true }))
       .filter(
         (entry) =>
           entry.isFile() &&
@@ -10940,7 +11223,7 @@ async function removeEmptyDirectory(directory, boundary) {
   let current = directory;
   while (isInside(boundary, current)) {
     try {
-      await import_node_fs4.default.promises.rmdir(current);
+      await import_node_fs5.default.promises.rmdir(current);
     } catch (error) {
       const code =
         /** @type {NodeJS.ErrnoException} */
@@ -10954,7 +11237,7 @@ async function removeEmptyDirectory(directory, boundary) {
 }
 async function exists(filePath) {
   try {
-    await import_node_fs4.default.promises.access(filePath);
+    await import_node_fs5.default.promises.access(filePath);
     return true;
   } catch {
     return false;
@@ -11413,11 +11696,11 @@ var PiAgentPlugin = class extends P.Plugin {
   constructor(app, manifest) {
     super(app, manifest);
     this.settings = DEFAULT_SETTINGS;
-    this.messages = [];
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = new ThreadRunnerRegistry(() => this.buildPiRunner());
+    this.threads = this.buildThreadService();
     this.extensionUiHandler = void 0;
     this.piSessionCountCache = void 0;
     this.piCommands = [];
@@ -11606,12 +11889,12 @@ var PiAgentPlugin = class extends P.Plugin {
       messages,
       sessionId != null ? sessionId : threadId
     );
+    this.threads = this.buildThreadService();
     this.annotationStore = new AnnotationStore(annotationData, () => {
       this.saveAnnotations();
       this.annotationController?.refresh();
       this.refreshAnnotationBadges();
     });
-    this.syncCurrentThreadState();
     if (this.settings.model && isLegacyBareModelId(this.settings.model)) {
       this.settings.customModel = `openai/${this.settings.model}`;
       this.settings.model = "__custom";
@@ -11778,222 +12061,6 @@ var PiAgentPlugin = class extends P.Plugin {
   getPiCommands() {
     return this.piCommands;
   }
-  addMessage(message) {
-    return this.addMessageToThread(this.threadHistory.currentThreadId, message);
-  }
-  addMessageToThread(threadId, message) {
-    let added = this.threadHistory.addMessageToThread(threadId, message);
-    return added ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true) : false;
-  }
-  startNewThread(title) {
-    let thread = this.threadHistory.startNewThread(title);
-    return (this.syncCurrentThreadState(), this.saveThreadHistory(), thread);
-  }
-  async forkCurrentThread() {
-    const current = this.getCurrentThread();
-    if (current.messages.length === 0) return void 0;
-    let clonedSession;
-    if (current.piSessionId) {
-      const runner = this.createPiRunner(current.id);
-      try {
-        clonedSession = await runner.cloneSession(current.piSessionId);
-        if (clonedSession) {
-          await runner
-            .setSessionName(clonedSession, `${current.title} (fork)`)
-            .catch((error) => console.warn(STRINGS.plugin.sessionCloneFailed, error));
-        }
-      } finally {
-        this.threadRunners.dispose(current.id);
-      }
-      if (!clonedSession) return void 0;
-    }
-    const fork = this.threadHistory.forkCurrentThread(clonedSession);
-    return fork ? (this.syncCurrentThreadState(), this.saveThreadHistory(), fork) : void 0;
-  }
-  getCurrentThread() {
-    return this.threadHistory.getCurrentThread();
-  }
-  listThreads(options) {
-    return this.threadHistory.listThreads(options);
-  }
-  async getThreadSessionStats(threadId) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return void 0;
-    return this.withSessionRunner(threadId, (runner) => runner.getSessionStats(thread.piSessionId));
-  }
-  async exportThreadSession(threadId) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return void 0;
-    return this.withSessionRunner(threadId, (runner) => runner.exportSession(thread.piSessionId));
-  }
-  async getThreadSessionTree(threadId) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return void 0;
-    return this.withSessionRunner(threadId, (runner) => runner.getSessionTree(thread.piSessionId));
-  }
-  async getThreadSessionEntries(threadId, since) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread?.piSessionId) return void 0;
-    return this.withSessionRunner(threadId, (runner) =>
-      runner.getSessionEntries(thread.piSessionId, since)
-    );
-  }
-  getThreadDisplayMessageCount(thread) {
-    const messageCount = Array.isArray(thread?.messages) ? thread.messages.length : 0;
-    const sessionMessageCount = this.countPiSessionChatMessages(thread?.piSessionId);
-    return Math.max(messageCount, sessionMessageCount);
-  }
-  countPiSessionChatMessages(sessionReference) {
-    const sessionPath = this.pi?.resolveSessionPath(sessionReference);
-    if (!sessionPath) return 0;
-    let stat;
-    try {
-      stat = import_node_fs5.default.statSync(sessionPath);
-    } catch {
-      this.piSessionCountCache?.delete(sessionPath);
-      return 0;
-    }
-    const cached = this.piSessionCountCache?.get(sessionPath);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-      return cached.count;
-    }
-    try {
-      const count = import_node_fs5.default
-        .readFileSync(sessionPath, "utf8")
-        .split(/\r?\n/)
-        .reduce((total, line) => {
-          if (!line.trim()) return total;
-          try {
-            const parsed = JSON.parse(line);
-            const message = parsed?.message;
-            return parsed.type === "message" &&
-              (message?.role === "user" || message?.role === "assistant")
-              ? total + 1
-              : total;
-          } catch {
-            return total;
-          }
-        }, 0);
-      this.piSessionCountCache ??= /* @__PURE__ */ new Map();
-      this.piSessionCountCache.set(sessionPath, {
-        mtimeMs: stat.mtimeMs,
-        size: stat.size,
-        count
-      });
-      return count;
-    } catch {
-      return 0;
-    }
-  }
-  switchThread(threadId) {
-    return this.threadHistory.switchThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  archiveThread(threadId = this.threadHistory.currentThreadId) {
-    return this.threadHistory.archiveThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  unarchiveThread(threadId) {
-    return this.threadHistory.unarchiveThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  archiveThreads(threadIds) {
-    const archivedIds = this.threadHistory.archiveThreads(threadIds);
-    if (archivedIds.length > 0) {
-      this.syncCurrentThreadState();
-      this.saveThreadHistory();
-    }
-    return { archivedIds, archivedCount: archivedIds.length };
-  }
-  deleteThread(threadId, options = {}) {
-    const thread = this.threadHistory.getThread(threadId);
-    if (!thread) return false;
-    const runner = this.threadRunners.get(threadId);
-    if (runner?.isRunning) return false;
-    let sessionPath;
-    if (options.deletePiSession && thread.piSessionId) {
-      const resolver = runner ?? this.pi;
-      sessionPath = resolver?.resolveSessionPath(thread.piSessionId);
-      if (!sessionPath || !import_node_fs5.default.existsSync(sessionPath)) return false;
-      const sessionIsShared = this.threadHistory
-        .listThreads({ includeArchived: true })
-        .some(
-          (other) =>
-            other.id !== threadId &&
-            other.piSessionId &&
-            resolver.resolveSessionPath(other.piSessionId) === sessionPath
-        );
-      if (sessionIsShared) return false;
-    }
-    this.threadRunners.dispose(threadId);
-    if (sessionPath) {
-      try {
-        import_node_fs5.default.unlinkSync(sessionPath);
-      } catch (error) {
-        console.warn(STRINGS.plugin.sessionDeleteFailed, error);
-        return false;
-      }
-    }
-    return this.threadHistory.deleteThread(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
-  deleteThreads(threadIds) {
-    const requested = new Set(threadIds);
-    const threads = this.threadHistory
-      .listThreads({ includeArchived: true })
-      .filter((thread) => requested.has(thread.id));
-    const skippedIds = threads
-      .filter((thread) => this.threadRunners.get(thread.id)?.isRunning)
-      .map((thread) => thread.id);
-    const skipped = new Set(skippedIds);
-    const deleteIds = threads
-      .filter((thread) => !skipped.has(thread.id))
-      .map((thread) => thread.id);
-    for (const threadId of deleteIds) {
-      this.threadRunners.dispose(threadId);
-    }
-    const result = this.threadHistory.deleteThreads(deleteIds);
-    if (result.deletedIds.length > 0) {
-      this.syncCurrentThreadState();
-      this.saveThreadHistory();
-    }
-    return {
-      deletedIds: result.deletedIds,
-      deletedCount: result.deletedIds.length,
-      skippedIds,
-      skippedCount: skippedIds.length,
-      createdThreadId: result.createdThreadId
-    };
-  }
-  clearArchivedThreads() {
-    let clearedCount = this.threadHistory.clearArchivedThreads();
-    return clearedCount === 0
-      ? 0
-      : (this.syncCurrentThreadState(), this.saveThreadHistory(), clearedCount);
-  }
-  renameThread(threadId, title) {
-    const thread = this.threadHistory.getThread(threadId);
-    const renamed = this.threadHistory.renameThread(threadId, title);
-    if (!renamed) return false;
-    this.syncCurrentThreadState();
-    this.saveThreadHistory();
-    if (thread?.piSessionId) {
-      const sessionName = this.threadHistory.getThread(threadId)?.title ?? title;
-      void this.withSessionRunner(threadId, (runner) =>
-        runner.setSessionName(thread.piSessionId, sessionName)
-      ).catch((error) => console.warn(STRINGS.plugin.sessionRenameFailed, error));
-    }
-    return true;
-  }
-  toggleThreadFavorite(threadId) {
-    return this.threadHistory.toggleThreadFavorite(threadId)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
-      : false;
-  }
   getExtensionUiHandler() {
     this.extensionUiHandler ??= createExtensionUiHandler({
       select: (request) => showExtensionUiDialog(this.app, request),
@@ -12105,9 +12172,7 @@ var PiAgentPlugin = class extends P.Plugin {
         tokenUsage: void 0
       };
     }
-    const thread = threadId
-      ? this.threadHistory.getThread(threadId)
-      : this.threadHistory.getCurrentThread();
+    const thread = threadId ? this.threads.getThread(threadId) : this.threads.currentThread;
     if (!thread) throw new Error(STRINGS.plugin.threadGone);
     if (!runner) throw new Error(STRINGS.plugin.runnerUnavailable);
     const history = getPriorThreadHistory(thread.messages, prompt);
@@ -12130,11 +12195,7 @@ var PiAgentPlugin = class extends P.Plugin {
       callbacks,
       images
     );
-    if (result.sessionId) {
-      this.threadHistory.setThreadPiSessionId(thread.id, result.sessionId);
-      this.syncCurrentThreadState();
-      this.saveThreadHistory();
-    }
+    if (result.sessionId) this.threads.setThreadSessionId(thread.id, result.sessionId);
     return result;
   }
   setPromptEnricher(callback) {
@@ -12288,7 +12349,7 @@ var PiAgentPlugin = class extends P.Plugin {
       now: () => Date.now()
     });
   }
-  createPiRunner(threadId = this.getCurrentThread().id) {
+  createPiRunner(threadId = this.threads.currentThreadId) {
     return this.threadRunners.create(threadId);
   }
   buildPiRunner() {
@@ -12410,8 +12471,14 @@ var PiAgentPlugin = class extends P.Plugin {
     if (typeof content !== "string") content = await this.app.vault.read(file);
     return this.annotationStore.reanchorPath(path6, content);
   }
-  syncCurrentThreadState() {
-    this.messages = this.threadHistory.getCurrentMessages();
+  buildThreadService() {
+    return new ThreadService({
+      store: this.threadHistory,
+      runners: this.threadRunners,
+      createRunner: (threadId) => this.createPiRunner(threadId),
+      getDefaultRunner: () => this.pi,
+      persist: () => this.saveThreadHistory()
+    });
   }
   saveThreadHistory() {
     this.savePluginData().catch((error) => {

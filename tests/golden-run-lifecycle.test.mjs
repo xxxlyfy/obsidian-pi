@@ -37,6 +37,7 @@ globalThis.window ??= {
 const { PiAgentView } = await import("../src/ui/PiAgentView.mjs");
 const { PiRunCanceledError } = await import("../src/pi/run-canceled.mjs");
 const { ThreadStore } = await import("../src/threads/thread-store.mjs");
+const { ThreadService } = await import("../src/threads/thread-service.mjs");
 const { DEFAULT_SETTINGS } = await import("../src/plugin/settings.mjs");
 
 function createScriptedRunner(script) {
@@ -56,15 +57,8 @@ function createPluginDouble(runner) {
   const plugin = {
     settings: { ...DEFAULT_SETTINGS, desktopNotifications: false },
     threadHistory: store,
-    savedMessages: [],
     replacedQueues: [],
-    getCurrentThread: () => store.getCurrentThread(),
     getCurrentContextFile: () => undefined,
-    addMessageToThread(threadId, message) {
-      const added = store.addMessageToThread(threadId, message);
-      if (added) this.savedMessages.push(message);
-      return added;
-    },
     consumeAnnotationsForPrompt: vi.fn(async () => []),
     restoreConsumedAnnotations: vi.fn(),
     enrichPromptDelivery: vi.fn(async (delivery) => ({ ...delivery, promptContext: undefined })),
@@ -87,6 +81,18 @@ function createPluginDouble(runner) {
     cancelPiRun: vi.fn((activeRunner) => activeRunner?.cancelCurrentRun()),
     app: { vault: { getAbstractFileByPath: () => undefined } }
   };
+  plugin.threads = new ThreadService({
+    store,
+    runners: {
+      get: () => undefined,
+      dispose: () => {},
+      disposeAll: () => {},
+      withRunner: async (threadId, action) => action(plugin.createPiRunner(threadId))
+    },
+    createRunner: (threadId) => plugin.createPiRunner(threadId),
+    getDefaultRunner: () => undefined,
+    persist: () => {}
+  });
   // The runtime owns run records exactly like the real plugin composition root.
   plugin.createAgentRuntime = () =>
     new AgentRuntime({
@@ -209,16 +215,18 @@ describe("golden path 1: prompt -> streaming -> tool -> completion", () => {
       return successfulResult("hello world", threadId);
     });
     const plugin = createPluginDouble(runner);
-    threadId = plugin.getCurrentThread().id;
+    threadId = plugin.threads.currentThreadId;
     view = createViewDouble(plugin);
 
     await view.runPrompt("hi", threadId);
 
-    expect(plugin.savedMessages.map((message) => [message.role, message.content])).toEqual([
+    expect(
+      plugin.threads.currentMessages().map((message) => [message.role, message.content])
+    ).toEqual([
       ["user", "hi"],
       ["assistant", "hello world"]
     ]);
-    expect(plugin.savedMessages[1].runMetadata).toMatchObject({
+    expect(plugin.threads.currentMessages()[1].runMetadata).toMatchObject({
       toolMode: "read-only",
       toolModeLabel: "审阅"
     });
@@ -249,12 +257,12 @@ describe("golden path 1: prompt -> streaming -> tool -> completion", () => {
       return successfulResult("answer", threadId);
     });
     const plugin = createPluginDouble(runner);
-    threadId = plugin.getCurrentThread().id;
+    threadId = plugin.threads.currentThreadId;
     const view = createViewDouble(plugin);
 
     await view.runPrompt("think", threadId);
 
-    expect(plugin.savedMessages[1]).toMatchObject({
+    expect(plugin.threads.currentMessages()[1]).toMatchObject({
       role: "assistant",
       content: "answer",
       thinking: "step 1 step 2"
@@ -282,7 +290,7 @@ describe("golden path 2: prompt -> cancel", () => {
       throw new PiRunCanceledError();
     });
     const plugin = createPluginDouble(runner);
-    const threadId = plugin.getCurrentThread().id;
+    const threadId = plugin.threads.currentThreadId;
     const view = createViewDouble(plugin);
 
     await view.runPrompt("stop me", threadId);
@@ -292,7 +300,7 @@ describe("golden path 2: prompt -> cancel", () => {
       activity: STRINGS.view.canceling,
       runnerCancelRequests: 1
     });
-    expect(plugin.savedMessages.map((message) => message.role)).toEqual(["user"]);
+    expect(plugin.threads.currentMessages().map((message) => message.role)).toEqual(["user"]);
     expect(notices.messages).toEqual([STRINGS.view.runCanceled]);
     expect(view.runtime.listRuns().length).toBe(0);
     expect(view.running).toBe(false);
@@ -313,7 +321,7 @@ describe("golden path 2: prompt -> cancel", () => {
     expect(view.streamingAssistantContent).toBe("");
     expect(view.activityText).toBe("");
     expect(view.activeToolCalls.size).toBe(0);
-    expect(plugin.savedMessages.map((message) => message.role)).toEqual(["user"]);
+    expect(plugin.threads.currentMessages().map((message) => message.role)).toEqual(["user"]);
   });
 });
 
@@ -326,12 +334,14 @@ describe("golden path 3: prompt -> failure -> retry", () => {
       throw timeoutError;
     });
     const plugin = createPluginDouble(failingRunner);
-    threadId = plugin.getCurrentThread().id;
+    threadId = plugin.threads.currentThreadId;
     const view = createViewDouble(plugin);
 
     await view.runPrompt("slow", threadId);
 
-    expect(plugin.savedMessages.map((message) => [message.role, message.content])).toEqual([
+    expect(
+      plugin.threads.currentMessages().map((message) => [message.role, message.content])
+    ).toEqual([
       ["user", "slow"],
       ["assistant", `${STRINGS.view.runFailed}：${timeoutError.message}`]
     ]);
@@ -348,7 +358,9 @@ describe("golden path 3: prompt -> failure -> retry", () => {
 
     await view.runPrompt("retry", threadId);
 
-    expect(plugin.savedMessages.map((message) => [message.role, message.content])).toEqual([
+    expect(
+      plugin.threads.currentMessages().map((message) => [message.role, message.content])
+    ).toEqual([
       ["user", "slow"],
       ["assistant", `${STRINGS.view.runFailed}：${timeoutError.message}`],
       ["user", "retry"],

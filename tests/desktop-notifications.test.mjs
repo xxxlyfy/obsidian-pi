@@ -130,7 +130,7 @@ describe("desktop completion notifications", () => {
     const focus = vi.fn();
     const renderChatView = vi.fn();
     const plugin = {
-      switchThread: vi.fn(() => true),
+      threads: { switchThread: vi.fn(() => true) },
       activateView: vi.fn().mockResolvedValue(undefined),
       app: {
         workspace: {
@@ -152,7 +152,7 @@ describe("desktop completion notifications", () => {
 
     expect(focus).toHaveBeenCalledOnce();
     expect(instances[0].close).toHaveBeenCalledOnce();
-    expect(plugin.switchThread).toHaveBeenCalledWith("thread-1");
+    expect(plugin.threads.switchThread).toHaveBeenCalledWith("thread-1");
     expect(plugin.activateView).toHaveBeenCalledOnce();
     expect(plugin.app.workspace.getLeavesOfType).toHaveBeenCalledWith("pi-agent-view");
   });

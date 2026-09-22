@@ -123,7 +123,7 @@ describe("composer current-note exclusion", () => {
     const view = {
       promptQueue: [],
       plugin: {
-        getCurrentThread: () => ({ id: "t1" }),
+        threads: { currentThreadId: "t1" },
         enqueueLocalPrompt,
         getLocalPromptQueue: () => []
       },

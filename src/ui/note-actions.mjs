@@ -43,7 +43,7 @@ export class NoteActions {
 
   getPreviousUserPrompt(messageIndex) {
     for (let index = messageIndex - 1; index >= 0; index--) {
-      const message = this.plugin.messages[index];
+      const message = this.plugin.threads.currentMessages()[index];
       if (message?.role === "user") return message.content;
     }
 
