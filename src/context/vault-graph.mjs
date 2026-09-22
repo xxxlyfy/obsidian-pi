@@ -99,26 +99,6 @@ export class VaultGraph {
     };
   }
 
-  async findReferences(query) {
-    const titleMatches = this.getIndex()
-      .matchTitleOrAlias(query, { isPathAllowed: (path) => this.isPathAllowed(path) })
-      .map((path) => {
-        const file = this.app.vault.getAbstractFileByPath(path);
-        if (!(file instanceof TFile)) return undefined;
-        return {
-          path: file.path,
-          title: file.basename,
-          score: 20,
-          excerpt: "Title match",
-          tags: this.getTags(this.app.metadataCache.getFileCache(file))
-        };
-      })
-      .filter(Boolean);
-    const searchMatches = await this.searchNotes(query, { limit: CONTEXT_RESULT_LIMIT });
-
-    return rankSearchResults([...titleMatches, ...searchMatches], CONTEXT_RESULT_LIMIT);
-  }
-
   async getFolderSummary(folderPath) {
     const normalizedFolderPath = folderPath.replace(/^\/+|\/+$/g, "");
     const files = this.getMarkdownFiles()

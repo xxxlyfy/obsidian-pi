@@ -4190,24 +4190,6 @@ var VaultGraph = class {
       excerpt: createExcerpt(content, tokenizeQuery(file.basename), 320)
     };
   }
-  async findReferences(query) {
-    const titleMatches = this.getIndex()
-      .matchTitleOrAlias(query, { isPathAllowed: (path6) => this.isPathAllowed(path6) })
-      .map((path6) => {
-        const file = this.app.vault.getAbstractFileByPath(path6);
-        if (!(file instanceof import_obsidian3.TFile)) return void 0;
-        return {
-          path: file.path,
-          title: file.basename,
-          score: 20,
-          excerpt: "Title match",
-          tags: this.getTags(this.app.metadataCache.getFileCache(file))
-        };
-      })
-      .filter(Boolean);
-    const searchMatches = await this.searchNotes(query, { limit: CONTEXT_RESULT_LIMIT });
-    return rankSearchResults([...titleMatches, ...searchMatches], CONTEXT_RESULT_LIMIT);
-  }
   async getFolderSummary(folderPath) {
     const normalizedFolderPath = folderPath.replace(/^\/+|\/+$/g, "");
     const files = this.getMarkdownFiles()
