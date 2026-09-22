@@ -3,10 +3,10 @@
 **Status: 0.0.39 was published from a passing automated gate (71 test files / 466 tests); the full manual checklist below has not been re-run since 0.0.31.** Keep this checklist current for every release. Do not publish a release until every applicable manual item below passes in the validation vault:
 
 ```text
-C:\Users\zcooo\OneDrive\Obsidian
+/path/to/dedicated/test-vault
 ```
 
-Use disposable notes and non-sensitive content in that vault. Do not place source changes or test fixtures in it. Its plugin files should point to a development build from this repository.
+Use disposable notes and non-sensitive content in that vault. Do not place source changes or test fixtures in it. Its plugin files should point to a development build from this repository. Keep the concrete local path out of this file: it is a machine-local detail.
 
 ## Automated checks
 
@@ -15,7 +15,7 @@ From this repository (not from the vault):
 ```bash
 npm ci
 npm run ci
-npm run test:pi -- "C:\Users\zcooo\OneDrive\Obsidian"
+npm run test:pi -- "/path/to/dedicated/test-vault"
 ```
 
 `npm run ci` includes `lint:obsidian:errors`, which runs the official `eslint-plugin-obsidianmd` recommended rules and fails on error-level Community scanner findings. This gate runs on pull requests, pushes to `main`, and again before the release workflow can publish assets. Run `npm run lint:obsidian` separately to inspect the scanner's non-blocking warnings as well.
@@ -26,7 +26,7 @@ npm run test:pi -- "C:\Users\zcooo\OneDrive\Obsidian"
 
 ```bash
 npm run build
-npm run dev:install -- "C:\Users\zcooo\OneDrive\Obsidian\.obsidian\plugins\pi-agent"
+npm run dev:install -- "/path/to/dedicated/test-vault/.obsidian/plugins/pi-agent"
 ```
 
 Then open the vault, reload or disable/re-enable Pi Agent, and keep the developer console visible.

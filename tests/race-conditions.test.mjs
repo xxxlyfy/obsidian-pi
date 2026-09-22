@@ -208,16 +208,16 @@ describe("race: thread switch while a run streams", () => {
 });
 
 describe("race: view closed while a run is active", () => {
-  it("does not throw and does not touch detached DOM when callbacks arrive after close", async () => {
+  it("cancels the view's own run and ignores every late callback", async () => {
     let view;
     let threadId;
     let runCallbacks;
-    let settle;
+    let rejectWithCancellation;
     const runner = createScriptedRunner(
       async ({ callbacks }) =>
-        new Promise((resolve) => {
+        new Promise((_resolve, reject) => {
           runCallbacks = callbacks;
-          settle = () => resolve(result("finished after close", threadId));
+          rejectWithCancellation = () => reject(new PiRunCanceledError());
         })
     );
     const plugin = createPluginDouble(runner);
@@ -226,27 +226,70 @@ describe("race: view closed while a run is active", () => {
 
     const pending = view.runPrompt("go", threadId);
     await vi.waitFor(() => expect(runner.calls).toHaveLength(1));
+    expect(view.runtime.hasRun(threadId)).toBe(true);
 
     view.onClose();
-    expect(view.messagesEl).toBeUndefined();
-    expect(view.inputEl).toBeUndefined();
-    expect(view.promptQueueEl).toBeUndefined();
-    expect(view.sendButtonEl).toBeUndefined();
 
-    // The run keeps going: streaming, tools, and settle must not throw or render.
+    // Closing the view owns the outcome: the run is cancelled and released.
+    expect(runner.cancelCurrentRun).toHaveBeenCalledOnce();
+    expect(view.runtime.listRuns()).toHaveLength(0);
+    expect(view.runtime.disposed).toBe(true);
+
+    // Late callbacks must not throw, render, or resurrect the run.
     expect(() => {
       runCallbacks.onTextDelta("closed delta");
       runCallbacks.onEvent({ type: "tool_start", toolCallId: "t", toolName: "read" });
       runCallbacks.onEvent({ type: "agent_end" });
     }).not.toThrow();
 
-    settle();
-    await expect(pending).resolves.toBeUndefined();
+    rejectWithCancellation();
+    await pending;
 
-    expect(plugin.threads.currentMessages().at(-1).content).toBe("finished after close");
     expect(view.streamingRenderTimer).toBeUndefined();
     expect(view.pendingActivityTimer).toBeUndefined();
     expect(view.activeToolCalls.size).toBe(0);
+    expect(plugin.threads.getThread(threadId).messages.map((message) => message.role)).toEqual([
+      "user"
+    ]);
+  });
+
+  it("leaves other chatting views alone", async () => {
+    let runCallbacks;
+    const first = createScriptedRunner(
+      async ({ callbacks }) =>
+        new Promise((resolve) => {
+          runCallbacks = callbacks;
+          settleFirst = () => resolve(result("first done", firstThreadId));
+        })
+    );
+    let settleFirst;
+    let firstThreadId;
+    const pluginA = createPluginDouble(first);
+    firstThreadId = pluginA.threads.currentThreadId;
+    const viewA = createViewDouble(pluginA);
+
+    const pendingA = viewA.runPrompt("go", firstThreadId);
+    await vi.waitFor(() => expect(first.calls).toHaveLength(1));
+
+    // A second view with its own thread keeps running while the first closes.
+    const second = createScriptedRunner(async ({ callbacks }) => {
+      callbacks.onTextDelta("second view text");
+      return result("second done", pluginB.threads.currentThreadId);
+    });
+    const pluginB = createPluginDouble(second);
+    const viewB = createViewDouble(pluginB);
+    await viewB.runPrompt("go", pluginB.threads.currentThreadId);
+    expect(viewB.runtime.listRuns()).toHaveLength(0);
+
+    viewA.onClose();
+    expect(viewA.runtime.disposed).toBe(true);
+    expect(viewB.runtime.disposed).toBe(false);
+
+    runCallbacks.onTextDelta(" late");
+    expect(viewB.streamingAssistantContent).toBe("");
+
+    settleFirst();
+    await pendingA;
   });
 });
 
@@ -313,6 +356,110 @@ describe("race: RPC process restarted", () => {
     await view.runPrompt("try again", threadId);
 
     expect(plugin.threads.currentMessages().at(-1).content).toBe("recovered");
+  });
+});
+
+describe("multi-view", () => {
+  it("rejects a second run for a thread another view is already running", async () => {
+    let releaseFirst;
+    let firstCallbacks;
+    const sharedRunner = {
+      isRunning: false,
+      cancelCurrentRun: vi.fn(),
+      steer: vi.fn(async () => {}),
+      run: vi.fn(async (prompt, context, sessionId, history, callbacks) => {
+        if (sharedRunner.isRunning)
+          throw new Error(
+            "This chat already has an active run. Wait for it to finish or cancel it."
+          );
+        sharedRunner.isRunning = true;
+        firstCallbacks = callbacks;
+        try {
+          callbacks.onTextDelta("view A streaming");
+          await new Promise((resolve) => (releaseFirst = resolve));
+          return result("view A done", plugin.threads.currentThreadId);
+        } finally {
+          sharedRunner.isRunning = false;
+        }
+      })
+    };
+    const plugin = createPluginDouble(sharedRunner);
+    const threadId = plugin.threads.currentThreadId;
+    const viewA = createViewDouble(plugin);
+    const viewB = createViewDouble(plugin);
+
+    const pendingA = viewA.runPrompt("from A", threadId);
+    await vi.waitFor(() => expect(sharedRunner.run).toHaveBeenCalledTimes(1));
+
+    await viewB.runPrompt("from B", threadId);
+
+    // The second view gets a clear failure instead of interleaving on the same runner.
+    expect(sharedRunner.run).toHaveBeenCalledTimes(2);
+    expect(plugin.threads.getThread(threadId).messages.at(-1).content).toContain("运行失败");
+    expect(plugin.threads.getThread(threadId).messages.at(-1).content).toContain(
+      "already has an active run"
+    );
+    expect(viewA.runtime.hasRun(threadId)).toBe(true);
+    expect(viewB.runtime.hasRun(threadId)).toBe(false);
+    expect(viewA.streamingAssistantContent).toBe("view A streaming");
+
+    firstCallbacks.onTextDelta(" still A only");
+    expect(viewB.streamingAssistantContent).toBe("");
+    expect(viewA.streamingAssistantContent).toBe("view A streaming still A only");
+
+    releaseFirst();
+    await pendingA;
+    expect(plugin.threads.getThread(threadId).messages.at(-1).content).toBe("view A done");
+  });
+
+  it("lets two views stream different threads at the same time", async () => {
+    const runners = new Map();
+    const callbacksByThread = new Map();
+    const releases = new Map();
+    const plugin = createPluginDouble(null);
+    plugin.createPiRunner = (threadId) => {
+      if (!runners.has(threadId)) {
+        runners.set(threadId, {
+          cancelCurrentRun: vi.fn(),
+          steer: vi.fn(async () => {}),
+          run: vi.fn(async (prompt, context, sessionId, history, callbacks) => {
+            callbacksByThread.set(threadId, callbacks);
+            callbacks.onTextDelta(`${threadId}:`);
+            await new Promise((resolve) => releases.set(threadId, resolve));
+            return result(`${threadId} done`, threadId);
+          })
+        });
+      }
+      return runners.get(threadId);
+    };
+    const threadA = plugin.threads.currentThreadId;
+    const threadB = plugin.threads.startNewThread("B").id;
+    plugin.threads.switchThread(threadA);
+    const viewA = createViewDouble(plugin);
+    viewA.getCurrentThreadId = () => threadA;
+    const viewB = createViewDouble(plugin);
+    viewB.getCurrentThreadId = () => threadB;
+
+    const pendingA = viewA.runPrompt("to A", threadA);
+    const pendingB = viewB.runPrompt("to B", threadB);
+    await vi.waitFor(() => expect(runners.size).toBe(2));
+
+    expect(viewA.streamingAssistantContent).toBe(`${threadA}:`);
+    expect(viewB.streamingAssistantContent).toBe(`${threadB}:`);
+
+    // A delta that arrives for A must never show up in B's live buffer.
+    callbacksByThread.get(threadA).onTextDelta("extra-A");
+    expect(viewA.streamingAssistantContent).toBe(`${threadA}:extra-A`);
+    expect(viewB.streamingAssistantContent).toBe(`${threadB}:`);
+
+    releases.get(threadA)();
+    releases.get(threadB)();
+    await Promise.all([pendingA, pendingB]);
+
+    expect(plugin.threads.getThread(threadA).messages.at(-1).content).toBe(`${threadA} done`);
+    expect(plugin.threads.getThread(threadB).messages.at(-1).content).toBe(`${threadB} done`);
+    expect(viewA.runtime.listRuns()).toHaveLength(0);
+    expect(viewB.runtime.listRuns()).toHaveLength(0);
   });
 });
 

@@ -322,6 +322,10 @@ export class PiAgentView extends f.ItemView {
     this.setRunningState(this.running);
   }
   async onClose() {
+    // A run created by this view belongs to this view: closing the view cancels
+    // it and releases the runtime instead of leaving an unattached run behind.
+    for (const run of this.runtime.listRuns()) this.runtime.requestCancel(run);
+    this.runtime.dispose();
     this.messagesEl = undefined;
     this.inputEl = undefined;
     this.promptQueueEl = undefined;

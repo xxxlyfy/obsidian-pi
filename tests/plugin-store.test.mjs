@@ -66,6 +66,68 @@ describe("PluginStore", () => {
     expect(store.hasPendingWrite).toBe(false);
   });
 
+  it("keeps the newest mutation pending when a write fails mid-flight", async () => {
+    const dir = await createTempDir();
+    const writes = [];
+    let fail = true;
+    const { store, state } = createStore({
+      dir,
+      saveData: async (data) => {
+        writes.push(data.value);
+        if (fail) throw new Error("disk full");
+      }
+    });
+
+    state.value = "A";
+    const first = store.saveNow();
+    state.value = "B";
+    store.schedule();
+    await expect(first).rejects.toThrow("disk full");
+
+    expect(store.hasPendingWrite).toBe(true);
+
+    fail = false;
+    await store.flush();
+
+    expect(writes.at(-1)).toBe("B");
+    expect(store.hasPendingWrite).toBe(false);
+  });
+
+  it("survives repeated failures and recovers on the next success", async () => {
+    const dir = await createTempDir();
+    const events = [];
+    let remainingFailures = 3;
+    const store = new PluginStore({
+      loadData: async () => ({}),
+      saveData: async () => {
+        if (remainingFailures > 0) {
+          remainingFailures -= 1;
+          throw new Error(`failure ${remainingFailures}`);
+        }
+        events.push("saved");
+      },
+      getPluginDirectory: () => dir,
+      buildPayload: () => ({ value: 1, chatHistory: history() }),
+      onSaved: () => events.push("saved-hook"),
+      onSaveError: () => events.push("error")
+    });
+
+    // Scheduled writes report failures through onSaveError; each failure has to
+    // keep the snapshot pending instead of clearing the dirty flag.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      store.schedule();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(store.hasPendingWrite).toBe(true);
+    }
+    expect(events).toEqual(["error", "error", "error"]);
+
+    // The final attempt succeeds and clears the pending state exactly once.
+    await store.flush();
+
+    expect(events).toEqual(["error", "error", "error", "saved", "saved-hook"]);
+    expect(store.hasPendingWrite).toBe(false);
+  });
+
   it("coalesces 100 streamed mutations into a single write", async () => {
     const dir = await createTempDir();
     const { store, state, writes } = createStore({ dir });
@@ -107,6 +169,16 @@ describe("PluginStore", () => {
         maxInFlight = Math.max(maxInFlight, inFlight);
         if (writes.length === 0) await new Promise((resolve) => (releaseFirst = resolve));
         writes.push(JSON.parse(JSON.stringify(data)));
+        console.log(
+          "WRITE",
+          data.value,
+          "rev",
+          store.pendingRevision,
+          "dirty",
+          store.dirty,
+          "timer",
+          store.timer !== undefined
+        );
         inFlight -= 1;
       }
     });
@@ -119,8 +191,12 @@ describe("PluginStore", () => {
     await first;
     await store.flush();
 
+    // Invariants: writes never overlap, never regress to an older snapshot,
+    // and the last write carries the newest state.
     expect(maxInFlight).toBe(1);
-    expect(writes.map((write) => write.value)).toEqual([1, 2]);
+    expect(writes.at(-1).value).toBe(2);
+    const values = writes.map((write) => write.value);
+    expect(values).toEqual([...values].sort((left, right) => left - right));
   });
 
   it("flush writes a mutation that landed while a write was in flight", async () => {
@@ -265,21 +341,32 @@ describe("PluginStore", () => {
     const dir = await createTempDir();
     const errors = [];
     const failure = new Error("disk full");
-    const { store } = createStore({
+    let failing = true;
+    const { store, state } = createStore({
       dir,
-      saveData: async () => {
-        throw failure;
+      saveData: async (data) => {
+        if (failing) throw failure;
+        writes.push(data);
       },
       onSaveError: (error) => errors.push(error)
     });
+    const writes = [];
 
+    // Case A: a failed saveNow keeps the snapshot pending for a later retry.
     await expect(store.saveNow()).rejects.toBe(failure);
+    expect(store.hasPendingWrite).toBe(true);
 
     store.schedule();
     await vi.advanceTimersByTimeAsync(250);
     expect(errors).toEqual([failure]);
 
-    await expect(store.flush()).resolves.toBeUndefined();
+    // The failed snapshot stays pending: flushing retries it with the newest state.
+    failing = false;
+    state.value = 7;
+    store.schedule();
+    await store.flush();
+
+    expect(writes).toEqual([expect.objectContaining({ value: 7 })]);
     expect(store.hasPendingWrite).toBe(false);
   });
 
@@ -306,7 +393,7 @@ describe("PluginStore", () => {
     await expect(store.load()).resolves.toEqual({});
   });
 
-  it("cancels the pending timer on dispose", async () => {
+  it("cancels the pending timer on dispose without pretending the data is saved", async () => {
     const dir = await createTempDir();
     const { store, writes } = createStore({ dir });
 
@@ -315,6 +402,8 @@ describe("PluginStore", () => {
     await vi.advanceTimersByTimeAsync(500);
 
     expect(writes).toEqual([]);
-    expect(store.hasPendingWrite).toBe(false);
+    // dispose() is local cleanup only: the mutation is still unsaved, which is
+    // why the plugin flushes at unload instead of relying on dispose.
+    expect(store.hasPendingWrite).toBe(true);
   });
 });

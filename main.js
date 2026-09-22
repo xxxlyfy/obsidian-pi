@@ -1201,6 +1201,7 @@ var PluginStore = class {
     this.flushDelayMs = flushDelayMs;
     this.timer = void 0;
     this.dirty = false;
+    this.pendingRevision = 0;
     this.writing = void 0;
   }
   /** @returns {Promise<any>} Raw plugin data, never undefined. */
@@ -1219,11 +1220,16 @@ var PluginStore = class {
    * with the latest snapshot.
    */
   schedule() {
+    this.markDirty();
     if (this.timer !== void 0) return;
     this.timer = setTimeout(() => {
       this.timer = void 0;
       this.saveNow().catch((error) => this.onSaveError(error));
     }, this.flushDelayMs);
+  }
+  markDirty() {
+    this.pendingRevision += 1;
+    this.dirty = true;
   }
   /**
    * Immediate serialized write. Rejects when the write fails so callers can
@@ -1233,7 +1239,7 @@ var PluginStore = class {
    */
   saveNow() {
     this.clearTimer();
-    this.dirty = true;
+    this.markDirty();
     if (!this.writing) this.writing = this.drain();
     return this.writing;
   }
@@ -1253,7 +1259,7 @@ var PluginStore = class {
   async drain() {
     try {
       while (this.dirty) {
-        this.dirty = false;
+        const revision = this.pendingRevision;
         const payload = this.buildPayload();
         await this.saveData(payload);
         try {
@@ -1262,6 +1268,7 @@ var PluginStore = class {
           this.onBackupError(error);
         }
         this.onSaved();
+        if (this.pendingRevision === revision) this.dirty = false;
       }
     } finally {
       this.writing = void 0;
@@ -6525,6 +6532,8 @@ var PiRunner = class {
     this.cancelRequested = false;
   }
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
+    if (this.isRunning)
+      throw new Error("This chat already has an active run. Wait for it to finish or cancel it.");
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== void 0)
@@ -10935,6 +10944,8 @@ var PiAgentView = class extends f4.ItemView {
     this.setRunningState(this.running);
   }
   async onClose() {
+    for (const run of this.runtime.listRuns()) this.runtime.requestCancel(run);
+    this.runtime.dispose();
     this.messagesEl = void 0;
     this.inputEl = void 0;
     this.promptQueueEl = void 0;

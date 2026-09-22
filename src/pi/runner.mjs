@@ -54,6 +54,10 @@ export class PiRunner {
   }
 
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
+    // One runner belongs to one thread and can only host one run: two views on
+    // the same chat must not interleave on the same Pi process.
+    if (this.isRunning)
+      throw new Error("This chat already has an active run. Wait for it to finish or cancel it.");
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== undefined)

@@ -95,6 +95,47 @@ describe("PiRunner", () => {
     expect(formatPrompt).toHaveBeenCalledOnce();
   });
 
+  it("refuses a second concurrent run on the same runner", async () => {
+    const tempDir = createTempDir();
+    const listeners = new Set();
+    let releasePrompt;
+    const rpcClient = {
+      start: vi.fn(async () => {}),
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async request(type) {
+        if (type === "prompt") await new Promise((resolve) => (releasePrompt = resolve));
+        return {};
+      }
+    };
+    const runner = new PiRunner(
+      DEFAULT_SETTINGS,
+      { formatPrompt: (prompt) => prompt },
+      "/vault",
+      tempDir,
+      rpcClient
+    );
+
+    const first = runner.run("one", undefined, undefined, [], {
+      isCanceled: () => false,
+      onEvent: () => {}
+    });
+    await vi.waitFor(() => expect(typeof releasePrompt).toBe("function"));
+
+    // `run()` is the entry point the plugin uses; a second run must be refused
+    // instead of interleaving on the same Pi process.
+    await expect(
+      runner.run("two", undefined, undefined, [], { isCanceled: () => false })
+    ).rejects.toThrow("This chat already has an active run");
+
+    for (const listener of listeners) listener({ type: "agent_settled" });
+    releasePrompt();
+    await expect(first).resolves.toMatchObject({ finalResponse: "" });
+    expect(runner.isRunning).toBe(false);
+  });
+
   it("honors cancellation before spawning Pi", async () => {
     await expect(
       createRunner({ dryRun: true }).run(

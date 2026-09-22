@@ -54,6 +54,7 @@ export class PluginStore {
     this.flushDelayMs = flushDelayMs;
     this.timer = undefined;
     this.dirty = false;
+    this.pendingRevision = 0;
     /** @type {Promise<void> | undefined} */
     this.writing = undefined;
   }
@@ -77,11 +78,17 @@ export class PluginStore {
    * with the latest snapshot.
    */
   schedule() {
+    this.markDirty();
     if (this.timer !== undefined) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
       this.saveNow().catch((error) => this.onSaveError(error));
     }, this.flushDelayMs);
+  }
+
+  markDirty() {
+    this.pendingRevision += 1;
+    this.dirty = true;
   }
 
   /**
@@ -92,7 +99,7 @@ export class PluginStore {
    */
   saveNow() {
     this.clearTimer();
-    this.dirty = true;
+    this.markDirty();
     if (!this.writing) this.writing = this.drain();
     return this.writing;
   }
@@ -114,8 +121,11 @@ export class PluginStore {
   async drain() {
     try {
       while (this.dirty) {
-        this.dirty = false;
+        const revision = this.pendingRevision;
         const payload = this.buildPayload();
+        // `dirty` is only cleared once the snapshot is durable: a failed write
+        // must stay pending so the next flush/save retries it instead of
+        // silently dropping the change.
         await this.saveData(payload);
         try {
           await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
@@ -125,6 +135,7 @@ export class PluginStore {
           this.onBackupError(error);
         }
         this.onSaved();
+        if (this.pendingRevision === revision) this.dirty = false;
       }
     } finally {
       this.writing = undefined;
