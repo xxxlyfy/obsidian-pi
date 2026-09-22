@@ -1,5 +1,20 @@
 import { STRINGS } from "../shared/strings.mjs";
-import { appendTextAttachmentContext, modelSupportsImages } from "../ui/prompt-payload.mjs";
+import { appendTextAttachmentContext, modelSupportsImages } from "../shared/prompt-payload.mjs";
+
+/**
+ * A pending user request before the context is attached.
+ *
+ * @typedef {{
+ *   prompt: string,
+ *   threadId: string,
+ *   images?: any[],
+ *   attachments?: any[],
+ *   annotations?: any[],
+ *   annotationSourcePath?: string,
+ *   includeActiveNote?: boolean,
+ *   queuedId?: string
+ * }} PromptDeliveryRequest
+ */
 
 /**
  * Turns a user request into the payload a run needs: annotations are consumed
@@ -115,7 +130,7 @@ export class PromptDelivery {
   }
 
   /**
-   * @param {any} request
+   * @param {PromptDeliveryRequest} request
    * @returns {Promise<{ ok: true, prepared: any } | { ok: false }>}
    */
   async prepare(request) {

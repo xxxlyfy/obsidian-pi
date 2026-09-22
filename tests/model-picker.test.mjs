@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildModelPickerItems,
   createRuntimeCatalogSnapshot,
-  getModelPickerPrimary,
-  getModelPickerSecondary,
   hasSafeRuntimeCatalog,
   needsRuntimeCatalogRefresh,
   RuntimeCatalogRefreshGate
+} from "../src/pi/model-catalog-values.mjs";
+import {
+  buildModelPickerItems,
+  getModelPickerPrimary,
+  getModelPickerSecondary
 } from "../src/ui/model-picker.mjs";
 
 const model = {

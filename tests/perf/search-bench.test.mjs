@@ -44,6 +44,12 @@ async function measure(action) {
   return { ms: now() - started, value };
 }
 
+function percentile(samples, fraction) {
+  const sorted = [...samples].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1));
+  return sorted[index];
+}
+
 describe("search and context performance", () => {
   it("keeps index, search, backlink, and context work bounded by candidate caps", async () => {
     const report = [];
@@ -66,6 +72,28 @@ describe("search and context performance", () => {
       const context = await measure(() => vault.graph.getNoteContext(target));
       const contextReads = vault.readCounts.size;
 
+      // Incremental index work: modify, rename, and delete one note.
+      vault.readCounts.clear();
+      const modify = await measure(() => {
+        vault.caches.set(target, {
+          frontmatter: { tags: ["#bench"] },
+          tags: [{ tag: "#bench" }],
+          headings: [{ heading: "bench" }]
+        });
+        vault.index.updatePath(target);
+      });
+      const renameTarget = `Notes/bench-renamed-${notes}.md`;
+      const rename = await measure(() => vault.index.renamePath(target, renameTarget));
+      const remove = await measure(() => vault.index.removePath(renameTarget));
+      expect(vault.readCounts.size).toBe(0);
+
+      // Search latency distribution over repeated runs.
+      const samples = [];
+      for (let index = 0; index < 20; index++) {
+        const sample = await measure(() => vault.graph.searchNotes("alpha"));
+        samples.push(sample.ms);
+      }
+
       expect(searchReads).toBeLessThanOrEqual(SEARCH_CANDIDATE_LIMIT);
       expect(backlinkReads).toBeLessThanOrEqual(8);
       expect(contextReads).toBeLessThanOrEqual(9);
@@ -75,11 +103,16 @@ describe("search and context performance", () => {
         notes,
         indexBuildMs: Number(build.ms.toFixed(1)),
         searchMs: Number(search.ms.toFixed(1)),
+        searchP50Ms: Number(percentile(samples, 0.5).toFixed(1)),
+        searchP95Ms: Number(percentile(samples, 0.95).toFixed(1)),
         searchReads,
         backlinkMs: Number(backlinks.ms.toFixed(1)),
         backlinkReads: backlinks.value.length,
         contextMs: Number(context.ms.toFixed(1)),
-        contextReads
+        contextReads,
+        modifyMs: Number(modify.ms.toFixed(2)),
+        renameMs: Number(rename.ms.toFixed(2)),
+        deleteMs: Number(remove.ms.toFixed(2))
       });
     }
 

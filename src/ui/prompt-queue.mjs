@@ -6,12 +6,12 @@ import {
   removeLocalPrompt,
   restoreLocalPrompt,
   takeLocalPrompt
-} from "./local-prompt-queue.mjs";
+} from "../shared/local-prompt-queue.mjs";
 import {
   appendTextAttachmentContext,
   imagePreviewUrl,
   modelSupportsImages
-} from "./prompt-payload.mjs";
+} from "../shared/prompt-payload.mjs";
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function enqueuePrompt(

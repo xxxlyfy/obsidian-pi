@@ -13,7 +13,7 @@ import {
   normalizePromptImages,
   normalizeTextAttachments,
   toRpcImages
-} from "../src/ui/prompt-payload.mjs";
+} from "../src/shared/prompt-payload.mjs";
 
 const image = {
   id: "image-1",

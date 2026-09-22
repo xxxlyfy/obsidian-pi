@@ -1,6 +1,12 @@
 export const SEARCH_CANDIDATE_LIMIT = 128;
 
 /**
+ * @typedef {{ path: string, count: number }} BacklinkEntry
+ * @typedef {{ path: string, title: string, score: number, excerpt: string, tags: string[] }} SearchResult
+ * @typedef {{ path: string, score: number }} SearchCandidate
+ */
+
+/**
  * Metadata and link index for the vault.
  *
  * Everything here comes from Obsidian's `metadataCache`, so building or
@@ -63,11 +69,20 @@ export class VaultIndex {
 
   rebuild() {
     this.metadata.clear();
+    for (const note of this.vault.listNotes()) this.indexNoteMetadata(note);
+    this.rebuildLinks();
+    this.built = true;
+  }
+
+  /**
+   * Rebuilds outgoing/backlink/unresolved maps from Obsidian's link tables.
+   * Cheap (no content reads) and used for renames, where Obsidian may update
+   * many source files at once.
+   */
+  rebuildLinks() {
     this.outgoing.clear();
     this.backlinks.clear();
     this.unresolved.clear();
-
-    for (const note of this.vault.listNotes()) this.indexNoteMetadata(note);
 
     const resolvedLinks = this.vault.resolvedLinks();
     for (const [source, links] of Object.entries(resolvedLinks)) {
@@ -79,8 +94,6 @@ export class VaultIndex {
       const counts = toCountMap(links);
       if (counts.size > 0) this.unresolved.set(source, counts);
     }
-
-    this.built = true;
   }
 
   /** @param {string | undefined} path */
@@ -105,6 +118,8 @@ export class VaultIndex {
     this.metadata.delete(path);
     this.setOutgoing(path, new Map());
     this.unresolved.delete(path);
+    // Nobody may still report backlinks pointing at the removed note.
+    this.backlinks.delete(path);
   }
 
   /**
@@ -116,6 +131,9 @@ export class VaultIndex {
     const entry = this.metadata.get(oldPath);
     this.removePath(oldPath);
     if (entry) this.metadata.set(newPath, { ...entry, path: newPath });
+    // Obsidian rewrites the link tables on rename but may only report the
+    // renamed file, so resync the maps instead of waiting for per-source events.
+    this.rebuildLinks();
   }
 
   /** @param {{ path: string, title: string, mtime: number }} note */
@@ -185,7 +203,7 @@ export class VaultIndex {
     return this.metadata.get(path);
   }
 
-  /** @returns {Array<{ path: string, count: number }>} */
+  /** @returns {BacklinkEntry[]} */
   getBacklinkCounts(targetPath) {
     this.ensureBuilt();
     const sources = this.backlinks.get(targetPath);
@@ -195,7 +213,7 @@ export class VaultIndex {
       .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
   }
 
-  /** @returns {Array<{ path: string, count: number }>} */
+  /** @returns {BacklinkEntry[]} */
   getOutgoingCounts(sourcePath) {
     this.ensureBuilt();
     const targets = this.outgoing.get(sourcePath);
@@ -205,7 +223,7 @@ export class VaultIndex {
       .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
   }
 
-  /** @returns {Array<{ path: string, count: number }>} */
+  /** @returns {BacklinkEntry[]} */
   getUnresolvedCounts(sourcePath) {
     this.ensureBuilt();
     const links = this.unresolved.get(sourcePath);
@@ -237,7 +255,7 @@ export class VaultIndex {
    *
    * @param {string[]} terms
    * @param {{ limit?: number, isPathAllowed?: (path: string) => boolean }} [options]
-   * @returns {Array<{ path: string, score: number }>}
+   * @returns {SearchCandidate[]}
    */
   candidatesForTerms(terms, options = {}) {
     this.ensureBuilt();

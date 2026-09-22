@@ -13,7 +13,7 @@ import {
   restorePersistedLocalPromptQueue,
   takeLocalPrompt,
   updateLocalPrompt
-} from "../src/ui/local-prompt-queue.mjs";
+} from "../src/shared/local-prompt-queue.mjs";
 
 function queue() {
   return [

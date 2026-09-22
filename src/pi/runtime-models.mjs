@@ -5,7 +5,7 @@ import {
   hasSafeRuntimeCatalog,
   needsRuntimeCatalogRefresh,
   RuntimeCatalogRefreshGate
-} from "../ui/model-picker.mjs";
+} from "./model-catalog-values.mjs";
 
 /**
  * Owns the runtime model/thinking catalog: refreshing it from Pi, keeping the

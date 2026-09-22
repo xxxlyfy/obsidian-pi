@@ -23,8 +23,8 @@ vi.mock("obsidian", () => ({
 const { PiAgentView } = await import("../src/ui/PiAgentView.mjs");
 const { enqueuePrompt, retrieveQueuedPrompt, runNextQueuedPrompt } =
   await import("../src/ui/prompt-queue.mjs");
-const { createQueuedPrompt } = await import("../src/ui/prompt-payload.mjs");
-const { normalizeLocalPromptQueue } = await import("../src/ui/local-prompt-queue.mjs");
+const { createQueuedPrompt } = await import("../src/shared/prompt-payload.mjs");
+const { normalizeLocalPromptQueue } = await import("../src/shared/local-prompt-queue.mjs");
 
 const viewSource = fs.readFileSync("src/ui/PiAgentView.mjs", "utf8");
 const contextSource = fs.readFileSync("src/context/context-service.mjs", "utf8");

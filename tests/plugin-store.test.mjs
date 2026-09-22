@@ -66,6 +66,21 @@ describe("PluginStore", () => {
     expect(store.hasPendingWrite).toBe(false);
   });
 
+  it("coalesces 100 streamed mutations into a single write", async () => {
+    const dir = await createTempDir();
+    const { store, state, writes } = createStore({ dir });
+
+    for (let index = 0; index < 100; index++) {
+      state.value = index;
+      store.schedule();
+    }
+    await vi.advanceTimersByTimeAsync(250);
+    await store.flush();
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].value).toBe(99);
+  });
+
   it("writes immediately on saveNow and cancels the pending timer", async () => {
     const dir = await createTempDir();
     const { store, state, writes } = createStore({ dir });
@@ -129,6 +144,70 @@ describe("PluginStore", () => {
 
     expect(writes.at(-1)).toMatchObject({ value: 2 });
     expect(store.hasPendingWrite).toBe(false);
+  });
+
+  it("never persists an older snapshot over a newer one", async () => {
+    const dir = await createTempDir();
+    const writes = [];
+    let releaseFirst;
+    let inFlight = 0;
+    const { store, state } = createStore({
+      dir,
+      saveData: async (data) => {
+        inFlight += 1;
+        if (writes.length === 0) await new Promise((resolve) => (releaseFirst = resolve));
+        writes.push({ value: data.value, inFlight });
+        inFlight -= 1;
+      }
+    });
+
+    // A: scheduled, B: scheduled, then a write starts while C lands.
+    state.value = "A";
+    store.schedule();
+    state.value = "B";
+    store.schedule();
+    await vi.advanceTimersByTimeAsync(250);
+    state.value = "C";
+    store.schedule();
+
+    releaseFirst();
+    await store.flush();
+
+    expect(writes.at(-1).value).toBe("C");
+    expect(writes.every((write) => write.inFlight === 1)).toBe(true);
+    expect(writes.map((write) => write.value)).not.toContain("A");
+  });
+
+  it("calls onSaved after each successful write and onSaveError when it fails", async () => {
+    const dir = await createTempDir();
+    const saved = [];
+    let failing = false;
+    const store = new PluginStore({
+      loadData: async () => ({}),
+      saveData: async () => {
+        if (failing) throw new Error("disk full");
+      },
+      getPluginDirectory: () => dir,
+      buildPayload: () => ({ value: 1, chatHistory: history() }),
+      onSaved: () => saved.push("saved"),
+      onSaveError: () => saved.push("error")
+    });
+
+    await store.saveNow();
+    expect(saved).toEqual(["saved"]);
+
+    // saveNow reports to its caller; scheduled and flushed writes report
+    // through onSaveError.
+    failing = true;
+    await expect(store.saveNow()).rejects.toThrow("disk full");
+    store.schedule();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(saved).toEqual(["saved", "error"]);
+
+    // The next successful write clears the failure streak.
+    failing = false;
+    await store.saveNow();
+    expect(saved).toEqual(["saved", "error", "saved"]);
   });
 
   it("does not write anything when nothing is pending", async () => {

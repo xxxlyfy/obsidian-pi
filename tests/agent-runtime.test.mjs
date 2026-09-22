@@ -156,6 +156,29 @@ describe("AgentRuntime", () => {
     expect(runners[1]).not.toBe(runners[0]);
   });
 
+  it("does not keep a successful prompt replayable", async () => {
+    const { runtime } = createRuntime(async () => ({ finalResponse: "done" }));
+
+    await runtime.startPrompt({ threadId: "t1", prompt: "finished" });
+
+    expect(runtime.lastRequests.has("t1")).toBe(false);
+    await expect(runtime.retryRun("t1")).rejects.toThrow("no previous prompt");
+  });
+
+  it("keeps a failed prompt replayable and releases it on dispose", async () => {
+    const { runtime } = createRuntime(async () => {
+      throw new Error("timed out");
+    });
+
+    await expect(runtime.startPrompt({ threadId: "t1", prompt: "slow" })).rejects.toThrow(
+      "timed out"
+    );
+    expect(runtime.lastRequests.has("t1")).toBe(true);
+
+    runtime.dispose();
+    expect(runtime.lastRequests.size).toBe(0);
+  });
+
   it("refuses to retry a thread without a previous prompt", async () => {
     const { runtime } = createRuntime(async () => ({}));
 

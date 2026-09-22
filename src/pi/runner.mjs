@@ -9,7 +9,22 @@ import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
 import { handlePiJsonEventLine } from "./events.mjs";
 import { PiRpcClient } from "./rpc-client.mjs";
 import { PiRunCanceledError } from "./run-canceled.mjs";
-import { toRpcImages } from "../ui/prompt-payload.mjs";
+import { toRpcImages } from "../shared/prompt-payload.mjs";
+
+/**
+ * What a finished run returns to the caller.
+ *
+ * @typedef {{
+ *   finalResponse: string,
+ *   sessionId?: string,
+ *   threadId?: string,
+ *   events: import("./events.mjs").RunEvent[],
+ *   contextUsage?: any,
+ *   contextCompacted?: boolean,
+ *   tokenUsage?: import("./token-usage.mjs").TokenUsage,
+ *   runtimeState?: any
+ * }} RunResult
+ */
 
 export function isPiCliCommandPrompt(prompt) {
   return /^\/(compact)(?:\s|$)/i.test(prompt.trim());

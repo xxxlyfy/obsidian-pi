@@ -11,8 +11,24 @@ import { RUN_STATUS, RunStateStore } from "./run-state.mjs";
  */
 
 /**
+ * @typedef {object} RunCallbacks
+ * @property {() => boolean} isCanceled
+ * @property {(event: import("../pi/events.mjs").RunEvent) => void} [onEvent]
+ * @property {(delta: string) => void} [onTextDelta]
+ * @property {() => void} [onPromptAccepted]
+ */
+
+/**
+ * @typedef {object} RunHooks
+ * @property {(run: import("./run-state.mjs").RunRecord) => void} [onStarted]
+ * @property {(event: import("../pi/events.mjs").RunEvent) => void} [onEvent]
+ * @property {(delta: string) => void} [onTextDelta]
+ * @property {() => void} [onPromptAccepted]
+ */
+
+/**
  * @typedef {object} AgentRuntimePorts
- * @property {(request: PromptRunRequest, callbacks: any) => Promise<any>} runPrompt
+ * @property {(request: PromptRunRequest, callbacks: RunCallbacks) => Promise<import("../pi/runner.mjs").RunResult>} runPrompt
  * @property {(threadId: string) => any} [createRunner]
  * @property {(runner: any) => void} [cancelRunner]
  * @property {() => number} [now]
@@ -71,7 +87,7 @@ export class AgentRuntime {
   /**
    * True while `run` still describes its thread's active run.
    *
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord | undefined} run
    */
   isCurrent(run) {
     if (this.disposed || !run) return false;
@@ -98,15 +114,16 @@ export class AgentRuntime {
     return run;
   }
 
-  /** @param {any} run */
+  /** @param {import("./run-state.mjs").RunRecord | undefined} run */
   finishRun(run) {
     if (!run) return false;
     return this.runStates.end(run.threadId, run.runId);
   }
 
   /**
-   * @param {any} run
-   * @param {any} [hooks]
+   * @param {import("./run-state.mjs").RunRecord} run
+   * @param {RunHooks} [hooks]
+   * @returns {RunCallbacks}
    */
   guardedCallbacks(run, hooks = {}) {
     const alive = () => this.isCurrent(run);
@@ -133,7 +150,7 @@ export class AgentRuntime {
    * afterwards is stale by definition.
    *
    * @param {PromptRunRequest} request
-   * @param {any} [hooks] `{ onStarted, onEvent, onTextDelta, onPromptAccepted }`
+   * @param {RunHooks} [hooks]
    */
   async startPrompt(request, hooks = {}) {
     const threadId = request?.threadId;
@@ -152,6 +169,9 @@ export class AgentRuntime {
     try {
       hooks.onStarted?.(run);
       const result = await this.execute(run, activeRequest, hooks);
+      // A successful run must not be replayable: retrying it would silently
+      // send the same prompt twice. Failed and cancelled runs stay replayable.
+      this.lastRequests.delete(threadId);
       return { run, result };
     } finally {
       this.finishRun(run);
@@ -159,9 +179,9 @@ export class AgentRuntime {
   }
 
   /**
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord} run
    * @param {PromptRunRequest} request
-   * @param {any} [hooks]
+   * @param {RunHooks} [hooks]
    */
   async execute(run, request, hooks = {}) {
     if (!this.ports.runPrompt)
@@ -184,7 +204,7 @@ export class AgentRuntime {
    * Replays the last request of a thread on a fresh runner.
    *
    * @param {string} threadId
-   * @param {any} [hooks]
+   * @param {RunHooks} [hooks]
    */
   async retryRun(threadId, hooks = {}) {
     const previous = this.lastRequests.get(threadId);
@@ -193,11 +213,11 @@ export class AgentRuntime {
   }
 
   /**
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord | undefined} run
    * @param {any} [runner]
    */
   requestCancel(run, runner = run?.runner) {
-    if (!this.isCurrent(run) || run.canceling) return false;
+    if (!run || !this.isCurrent(run) || run.canceling) return false;
     run.canceling = true;
     this.runStates.transition(run.threadId, RUN_STATUS.cancelling);
     if (this.ports.cancelRunner) this.ports.cancelRunner(runner);
@@ -208,13 +228,14 @@ export class AgentRuntime {
   /**
    * Sends a one-shot steering prompt into the run that is still streaming.
    *
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord | undefined} run
    * @param {string} prompt
    * @param {any[]} [images]
    */
   async steerRun(run, prompt, images = []) {
-    const runner = run?.runner;
-    if (!this.isCurrent(run) || !runner?.steer) return false;
+    if (!run || !this.isCurrent(run)) return false;
+    const runner = run.runner;
+    if (!runner?.steer) return false;
     await runner.steer(prompt, images);
     if (this.isCurrent(run)) this.runStates.transition(run.threadId, RUN_STATUS.running);
     return true;
@@ -229,7 +250,7 @@ export class AgentRuntime {
   /**
    * @param {string} threadId
    * @param {string} [instructions]
-   * @param {any} [hooks]
+   * @param {RunHooks} [hooks]
    */
   async compactRun(threadId, instructions = "", hooks = {}) {
     return this.startPrompt(

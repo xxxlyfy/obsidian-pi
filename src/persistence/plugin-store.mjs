@@ -30,6 +30,7 @@ export class PluginStore {
    * @param {() => string | undefined} options.getPluginDirectory
    * @param {() => PersistedData} options.buildPayload Builds the current snapshot to persist.
    * @param {(error: unknown) => void} [options.onSaveError] For scheduled/flushed writes.
+   * @param {() => void} [options.onSaved] Called after every successful write.
    * @param {number} [options.flushDelayMs]
    */
   constructor({
@@ -38,6 +39,7 @@ export class PluginStore {
     getPluginDirectory,
     buildPayload,
     onSaveError = () => {},
+    onSaved = () => {},
     flushDelayMs = DEFAULT_FLUSH_DELAY_MS
   }) {
     this.loadData = loadData;
@@ -45,6 +47,7 @@ export class PluginStore {
     this.getPluginDirectory = getPluginDirectory;
     this.buildPayload = buildPayload;
     this.onSaveError = onSaveError;
+    this.onSaved = onSaved;
     this.flushDelayMs = flushDelayMs;
     this.timer = undefined;
     this.dirty = false;
@@ -112,6 +115,7 @@ export class PluginStore {
         const payload = this.buildPayload();
         await this.saveData(payload);
         await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
+        this.onSaved();
       }
     } finally {
       this.writing = undefined;

@@ -1,4 +1,4 @@
-import { createQueuedPrompt } from "./prompt-payload.mjs";
+import { createQueuedPrompt } from "../shared/prompt-payload.mjs";
 
 export function restorePersistedLocalPromptQueue(queue, steering) {
   return normalizeLocalPromptQueue([

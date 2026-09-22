@@ -577,7 +577,7 @@ var AgentRuntime = class {
   /**
    * True while `run` still describes its thread's active run.
    *
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord | undefined} run
    */
   isCurrent(run) {
     if (this.disposed || !run) return false;
@@ -601,14 +601,15 @@ var AgentRuntime = class {
     if (presentation) Object.assign(run, presentation);
     return run;
   }
-  /** @param {any} run */
+  /** @param {import("./run-state.mjs").RunRecord | undefined} run */
   finishRun(run) {
     if (!run) return false;
     return this.runStates.end(run.threadId, run.runId);
   }
   /**
-   * @param {any} run
-   * @param {any} [hooks]
+   * @param {import("./run-state.mjs").RunRecord} run
+   * @param {RunHooks} [hooks]
+   * @returns {RunCallbacks}
    */
   guardedCallbacks(run, hooks = {}) {
     const alive = () => this.isCurrent(run);
@@ -634,7 +635,7 @@ var AgentRuntime = class {
    * afterwards is stale by definition.
    *
    * @param {PromptRunRequest} request
-   * @param {any} [hooks] `{ onStarted, onEvent, onTextDelta, onPromptAccepted }`
+   * @param {RunHooks} [hooks]
    */
   async startPrompt(request, hooks = {}) {
     const threadId = request?.threadId;
@@ -652,15 +653,16 @@ var AgentRuntime = class {
     try {
       hooks.onStarted?.(run);
       const result = await this.execute(run, activeRequest, hooks);
+      this.lastRequests.delete(threadId);
       return { run, result };
     } finally {
       this.finishRun(run);
     }
   }
   /**
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord} run
    * @param {PromptRunRequest} request
-   * @param {any} [hooks]
+   * @param {RunHooks} [hooks]
    */
   async execute(run, request, hooks = {}) {
     if (!this.ports.runPrompt)
@@ -682,7 +684,7 @@ var AgentRuntime = class {
    * Replays the last request of a thread on a fresh runner.
    *
    * @param {string} threadId
-   * @param {any} [hooks]
+   * @param {RunHooks} [hooks]
    */
   async retryRun(threadId, hooks = {}) {
     const previous = this.lastRequests.get(threadId);
@@ -690,11 +692,11 @@ var AgentRuntime = class {
     return this.startPrompt({ ...previous, runner: void 0 }, hooks);
   }
   /**
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord | undefined} run
    * @param {any} [runner]
    */
   requestCancel(run, runner = run?.runner) {
-    if (!this.isCurrent(run) || run.canceling) return false;
+    if (!run || !this.isCurrent(run) || run.canceling) return false;
     run.canceling = true;
     this.runStates.transition(run.threadId, RUN_STATUS.cancelling);
     if (this.ports.cancelRunner) this.ports.cancelRunner(runner);
@@ -704,13 +706,14 @@ var AgentRuntime = class {
   /**
    * Sends a one-shot steering prompt into the run that is still streaming.
    *
-   * @param {any} run
+   * @param {import("./run-state.mjs").RunRecord | undefined} run
    * @param {string} prompt
    * @param {any[]} [images]
    */
   async steerRun(run, prompt, images = []) {
-    const runner = run?.runner;
-    if (!this.isCurrent(run) || !runner?.steer) return false;
+    if (!run || !this.isCurrent(run)) return false;
+    const runner = run.runner;
+    if (!runner?.steer) return false;
     await runner.steer(prompt, images);
     if (this.isCurrent(run)) this.runStates.transition(run.threadId, RUN_STATUS.running);
     return true;
@@ -723,7 +726,7 @@ var AgentRuntime = class {
   /**
    * @param {string} threadId
    * @param {string} [instructions]
-   * @param {any} [hooks]
+   * @param {RunHooks} [hooks]
    */
   async compactRun(threadId, instructions = "", hooks = {}) {
     return this.startPrompt(
@@ -1133,6 +1136,7 @@ var PluginStore = class {
    * @param {() => string | undefined} options.getPluginDirectory
    * @param {() => PersistedData} options.buildPayload Builds the current snapshot to persist.
    * @param {(error: unknown) => void} [options.onSaveError] For scheduled/flushed writes.
+   * @param {() => void} [options.onSaved] Called after every successful write.
    * @param {number} [options.flushDelayMs]
    */
   constructor({
@@ -1141,6 +1145,7 @@ var PluginStore = class {
     getPluginDirectory,
     buildPayload,
     onSaveError = () => {},
+    onSaved = () => {},
     flushDelayMs = DEFAULT_FLUSH_DELAY_MS
   }) {
     this.loadData = loadData;
@@ -1148,6 +1153,7 @@ var PluginStore = class {
     this.getPluginDirectory = getPluginDirectory;
     this.buildPayload = buildPayload;
     this.onSaveError = onSaveError;
+    this.onSaved = onSaved;
     this.flushDelayMs = flushDelayMs;
     this.timer = void 0;
     this.dirty = false;
@@ -1207,6 +1213,7 @@ var PluginStore = class {
         const payload = this.buildPayload();
         await this.saveData(payload);
         await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
+        this.onSaved();
       }
     } finally {
       this.writing = void 0;
@@ -1222,7 +1229,7 @@ var PluginStore = class {
   }
 };
 
-// src/ui/prompt-payload.mjs
+// src/shared/prompt-payload.mjs
 var import_node_util = require("node:util");
 
 // src/annotations/annotation-model.mjs
@@ -1414,7 +1421,7 @@ function isRecord(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
-// src/ui/prompt-payload.mjs
+// src/shared/prompt-payload.mjs
 var textEncoder = new import_node_util.TextEncoder();
 var textDecoder = new import_node_util.TextDecoder("utf-8");
 var SUPPORTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -1822,7 +1829,7 @@ function createId2() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-// src/ui/local-prompt-queue.mjs
+// src/shared/local-prompt-queue.mjs
 function restorePersistedLocalPromptQueue(queue, steering) {
   return normalizeLocalPromptQueue([
     ...(Array.isArray(queue) ? queue : []),
@@ -2164,7 +2171,7 @@ function normalizeToolMode(value) {
       : DEFAULT_SETTINGS.sandboxMode;
 }
 
-// src/ui/model-picker.mjs
+// src/pi/model-catalog-values.mjs
 var RuntimeCatalogRefreshGate = class {
   run(task) {
     if (this.inFlight) return this.inFlight;
@@ -2201,31 +2208,6 @@ function createRuntimeCatalogSnapshot(models, effectiveConfig) {
 }
 function hasSafeRuntimeCatalog(settings) {
   return Array.isArray(settings.availableModels) && settings.availableModels.length > 0;
-}
-function buildModelPickerItems(settings) {
-  return settings.availableModels.map((model) => {
-    const isDefault = model.slug === settings.effectiveModel;
-    return { value: isDefault ? "" : model.slug, model, isDefault };
-  });
-}
-function getModelPickerPrimary(item) {
-  return item.model.displayName || item.model.id || item.model.slug;
-}
-function getModelPickerSecondary(item) {
-  const capabilities = [
-    item.isDefault ? "Pi 默认" : "",
-    item.model.reasoning ? "思考" : "",
-    item.model.supportsImages ? "图片" : "",
-    item.model.contextWindow ? `${formatTokenAmount(item.model.contextWindow)} 上下文` : ""
-  ].filter(Boolean);
-  return [item.model.slug, ...capabilities].join(" · ");
-}
-function formatTokenAmount(value) {
-  return value >= 1e6
-    ? `${Number((value / 1e6).toFixed(1))}M`
-    : value >= 1e3
-      ? `${Number((value / 1e3).toFixed(1))}K`
-      : String(value);
 }
 
 // src/pi/runtime-models.mjs
@@ -4724,10 +4706,19 @@ var VaultIndex = class {
   }
   rebuild() {
     this.metadata.clear();
+    for (const note of this.vault.listNotes()) this.indexNoteMetadata(note);
+    this.rebuildLinks();
+    this.built = true;
+  }
+  /**
+   * Rebuilds outgoing/backlink/unresolved maps from Obsidian's link tables.
+   * Cheap (no content reads) and used for renames, where Obsidian may update
+   * many source files at once.
+   */
+  rebuildLinks() {
     this.outgoing.clear();
     this.backlinks.clear();
     this.unresolved.clear();
-    for (const note of this.vault.listNotes()) this.indexNoteMetadata(note);
     const resolvedLinks = this.vault.resolvedLinks();
     for (const [source, links] of Object.entries(resolvedLinks)) {
       const counts = toCountMap(links);
@@ -4738,7 +4729,6 @@ var VaultIndex = class {
       const counts = toCountMap(links);
       if (counts.size > 0) this.unresolved.set(source, counts);
     }
-    this.built = true;
   }
   /** @param {string | undefined} path */
   updatePath(path5) {
@@ -4761,6 +4751,7 @@ var VaultIndex = class {
     this.metadata.delete(path5);
     this.setOutgoing(path5, /* @__PURE__ */ new Map());
     this.unresolved.delete(path5);
+    this.backlinks.delete(path5);
   }
   /**
    * @param {string} oldPath
@@ -4771,6 +4762,7 @@ var VaultIndex = class {
     const entry = this.metadata.get(oldPath);
     this.removePath(oldPath);
     if (entry) this.metadata.set(newPath, { ...entry, path: newPath });
+    this.rebuildLinks();
   }
   /** @param {{ path: string, title: string, mtime: number }} note */
   indexNoteMetadata(note) {
@@ -4834,7 +4826,7 @@ var VaultIndex = class {
     this.ensureBuilt();
     return this.metadata.get(path5);
   }
-  /** @returns {Array<{ path: string, count: number }>} */
+  /** @returns {BacklinkEntry[]} */
   getBacklinkCounts(targetPath) {
     this.ensureBuilt();
     const sources = this.backlinks.get(targetPath);
@@ -4843,7 +4835,7 @@ var VaultIndex = class {
       .map(([path5, count]) => ({ path: path5, count }))
       .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
   }
-  /** @returns {Array<{ path: string, count: number }>} */
+  /** @returns {BacklinkEntry[]} */
   getOutgoingCounts(sourcePath) {
     this.ensureBuilt();
     const targets = this.outgoing.get(sourcePath);
@@ -4852,7 +4844,7 @@ var VaultIndex = class {
       .map(([path5, count]) => ({ path: path5, count }))
       .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path));
   }
-  /** @returns {Array<{ path: string, count: number }>} */
+  /** @returns {BacklinkEntry[]} */
   getUnresolvedCounts(sourcePath) {
     this.ensureBuilt();
     const links = this.unresolved.get(sourcePath);
@@ -4882,7 +4874,7 @@ var VaultIndex = class {
    *
    * @param {string[]} terms
    * @param {{ limit?: number, isPathAllowed?: (path: string) => boolean }} [options]
-   * @returns {Array<{ path: string, score: number }>}
+   * @returns {SearchCandidate[]}
    */
   candidatesForTerms(terms, options = {}) {
     this.ensureBuilt();
@@ -5271,7 +5263,9 @@ var VaultAdapter = class {
         .filter(Boolean)
         .slice(0, 20)
         .map(String),
-      frontmatter: cache?.frontmatter ?? {}
+      // Detached copy: a context snapshot must not change when Obsidian
+      // mutates its metadata cache later on.
+      frontmatter: cloneFrontmatter(cache?.frontmatter)
     };
   }
   /** @returns {Record<string, Record<string, number>>} */
@@ -5312,6 +5306,14 @@ var VaultAdapter = class {
     };
   }
 };
+function cloneFrontmatter(frontmatter) {
+  if (!frontmatter || typeof frontmatter !== "object") return {};
+  try {
+    return JSON.parse(JSON.stringify(frontmatter));
+  } catch {
+    return { ...frontmatter };
+  }
+}
 
 // src/obsidian/workspace-adapter.mjs
 var WorkspaceAdapter = class {
@@ -7129,6 +7131,33 @@ var ConfirmModal = class extends import_obsidian4.Modal {
 // src/ui/modals/model-picker-modal.mjs
 var import_obsidian5 = require("obsidian");
 
+// src/ui/model-picker.mjs
+function buildModelPickerItems(settings) {
+  return settings.availableModels.map((model) => {
+    const isDefault = model.slug === settings.effectiveModel;
+    return { value: isDefault ? "" : model.slug, model, isDefault };
+  });
+}
+function getModelPickerPrimary(item) {
+  return item.model.displayName || item.model.id || item.model.slug;
+}
+function getModelPickerSecondary(item) {
+  const capabilities = [
+    item.isDefault ? "Pi 默认" : "",
+    item.model.reasoning ? "思考" : "",
+    item.model.supportsImages ? "图片" : "",
+    item.model.contextWindow ? `${formatTokenAmount(item.model.contextWindow)} 上下文` : ""
+  ].filter(Boolean);
+  return [item.model.slug, ...capabilities].join(" · ");
+}
+function formatTokenAmount(value) {
+  return value >= 1e6
+    ? `${Number((value / 1e6).toFixed(1))}M`
+    : value >= 1e3
+      ? `${Number((value / 1e3).toFixed(1))}K`
+      : String(value);
+}
+
 // src/ui/provider-icons.mjs
 var siOpenai = {
   path: "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"
@@ -7341,6 +7370,10 @@ function showDesktopRunNotification({
       silent: false
     });
     sentRunIds.add(runId);
+    if (sentRunIds.size > 100) {
+      const oldest = sentRunIds.values().next();
+      if (!oldest.done) sentRunIds.delete(oldest.value);
+    }
     if (sentRunIds.size > 200) sentRunIds.delete(sentRunIds.values().next().value);
     notification.onclick = () => {
       try {
@@ -9904,7 +9937,7 @@ var PromptDelivery = class {
     }
   }
   /**
-   * @param {any} request
+   * @param {PromptDeliveryRequest} request
    * @returns {Promise<{ ok: true, prepared: any } | { ok: false }>}
    */
   async prepare(request) {
@@ -11570,7 +11603,8 @@ var PiAgentView = class extends f4.ItemView {
       acknowledgeQueuedDelivery();
       const createdAt = Date.now();
       const thinkingKey = `${threadId}:${createdAt}`;
-      this.completedThinkingExpansion.set(
+      rememberBounded(
+        this.completedThinkingExpansion,
         thinkingKey,
         run.thinkingUserSet ? run.thinkingExpanded : false
       );
@@ -11610,7 +11644,8 @@ var PiAgentView = class extends f4.ItemView {
         return;
       }
       const createdAt = Date.now();
-      this.completedThinkingExpansion.set(
+      rememberBounded(
+        this.completedThinkingExpansion,
         `${threadId}:${createdAt}`,
         run.thinkingUserSet ? run.thinkingExpanded : false
       );
@@ -11799,6 +11834,13 @@ var PiAgentView = class extends f4.ItemView {
     (0, f4.setIcon)(element, PI_AGENT_ICON_ID);
   }
 };
+function rememberBounded(map, key, value) {
+  if (map.size >= 200 && !map.has(key)) {
+    const oldest = map.keys().next();
+    if (!oldest.done) map.delete(oldest.value);
+  }
+  map.set(key, value);
+}
 function noteTitleFromPath(path5) {
   const name =
     String(path5 ?? "")
@@ -12323,6 +12365,7 @@ var PiAgentPlugin = class extends P.Plugin {
     });
     this.promptQueue = this.buildPromptQueueService();
     this.promptEnricher = void 0;
+    this.persistenceFailureNotified = false;
     this.models = this.buildModelService();
   }
   async onload() {
@@ -12883,7 +12926,15 @@ var PiAgentPlugin = class extends P.Plugin {
       saveData: (data) => this.saveData(data),
       getPluginDirectory: () => this.getPluginDirectory(),
       buildPayload: () => this.buildPluginData(),
-      onSaveError: (error) => console.warn(STRINGS.plugin.historySaveFailed, error)
+      onSaveError: (error) => {
+        console.warn(STRINGS.plugin.historySaveFailed, error);
+        if (this.persistenceFailureNotified) return;
+        this.persistenceFailureNotified = true;
+        new P.Notice(STRINGS.plugin.historySaveFailed);
+      },
+      onSaved: () => {
+        this.persistenceFailureNotified = false;
+      }
     });
   }
   buildPluginData() {

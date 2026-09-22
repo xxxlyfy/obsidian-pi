@@ -56,6 +56,10 @@ export function showDesktopRunNotification({
       silent: false
     });
     sentRunIds.add(runId);
+    if (sentRunIds.size > 100) {
+      const oldest = sentRunIds.values().next();
+      if (!oldest.done) sentRunIds.delete(oldest.value);
+    }
     if (sentRunIds.size > 200) sentRunIds.delete(sentRunIds.values().next().value);
     notification.onclick = () => {
       try {

@@ -84,7 +84,9 @@ export class VaultAdapter {
         .filter(Boolean)
         .slice(0, 20)
         .map(String),
-      frontmatter: cache?.frontmatter ?? {}
+      // Detached copy: a context snapshot must not change when Obsidian
+      // mutates its metadata cache later on.
+      frontmatter: cloneFrontmatter(cache?.frontmatter)
     };
   }
 
@@ -130,5 +132,18 @@ export class VaultAdapter {
       title: String(file.basename ?? file.name ?? ""),
       mtime: Number(file.stat?.mtime ?? 0)
     };
+  }
+}
+
+/**
+ * @param {any} frontmatter
+ * @returns {Record<string, any>}
+ */
+function cloneFrontmatter(frontmatter) {
+  if (!frontmatter || typeof frontmatter !== "object") return {};
+  try {
+    return JSON.parse(JSON.stringify(frontmatter));
+  } catch {
+    return { ...frontmatter };
   }
 }

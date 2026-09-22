@@ -30,7 +30,7 @@ import {
   SUPPORTED_TEXT_EXTENSIONS,
   textAttachmentBytes,
   MAX_TOTAL_TEXT_ATTACHMENT_BYTES
-} from "./prompt-payload.mjs";
+} from "../shared/prompt-payload.mjs";
 import { formatToolError, getSkillCommandName, getThinkingDelta } from "./activity.mjs";
 import { getSendActionState } from "./send-state.mjs";
 import {
@@ -1038,7 +1038,8 @@ export class PiAgentView extends f.ItemView {
       acknowledgeQueuedDelivery();
       const createdAt = Date.now();
       const thinkingKey = `${threadId}:${createdAt}`;
-      this.completedThinkingExpansion.set(
+      rememberBounded(
+        this.completedThinkingExpansion,
         thinkingKey,
         run.thinkingUserSet ? run.thinkingExpanded : false
       );
@@ -1079,7 +1080,8 @@ export class PiAgentView extends f.ItemView {
         return;
       }
       const createdAt = Date.now();
-      this.completedThinkingExpansion.set(
+      rememberBounded(
+        this.completedThinkingExpansion,
         `${threadId}:${createdAt}`,
         run.thinkingUserSet ? run.thinkingExpanded : false
       );
@@ -1269,6 +1271,20 @@ export class PiAgentView extends f.ItemView {
   }
 }
 
+/**
+ * Keeps a per-view map bounded so a long-lived view cannot grow forever.
+ *
+ * @param {Map<string, any>} map
+ * @param {string} key
+ * @param {any} value
+ */
+function rememberBounded(map, key, value) {
+  if (map.size >= 200 && !map.has(key)) {
+    const oldest = map.keys().next();
+    if (!oldest.done) map.delete(oldest.value);
+  }
+  map.set(key, value);
+}
 function noteTitleFromPath(path) {
   const name =
     String(path ?? "")

@@ -9,11 +9,8 @@ import {
   getToolModeOptions
 } from "../plugin/settings.mjs";
 import { confirmWithModal } from "./modals/confirm-modal.mjs";
-import {
-  buildModelPickerItems,
-  getModelPickerPrimary,
-  hasSafeRuntimeCatalog
-} from "./model-picker.mjs";
+import { hasSafeRuntimeCatalog } from "../pi/model-catalog-values.mjs";
+import { buildModelPickerItems, getModelPickerPrimary } from "./model-picker.mjs";
 import { renderProviderIcon } from "./provider-icons.mjs";
 import { formatToolModeLabel } from "./view/run-metadata.mjs";
 

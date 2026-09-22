@@ -39,8 +39,8 @@ import { previewFrontmatterPatch } from "../shared/frontmatter.mjs";
 import { sanitizeThreadHistory } from "../shared/thread-history.mjs";
 import { ThreadStore } from "../threads/thread-store.mjs";
 import { ThreadRunnerRegistry } from "./thread-runners.mjs";
-import { restorePersistedLocalPromptQueue } from "../ui/local-prompt-queue.mjs";
-import { applyPromptEnricher } from "../ui/prompt-payload.mjs";
+import { restorePersistedLocalPromptQueue } from "../shared/local-prompt-queue.mjs";
+import { applyPromptEnricher } from "../shared/prompt-payload.mjs";
 
 const PI_BRAND_NAME = "Pi";
 
@@ -148,6 +148,7 @@ export class PiAgentPlugin extends P.Plugin {
     });
     this.promptQueue = this.buildPromptQueueService();
     this.promptEnricher = undefined;
+    this.persistenceFailureNotified = false;
     this.models = this.buildModelService();
   }
   async onload() {
@@ -728,7 +729,16 @@ export class PiAgentPlugin extends P.Plugin {
       saveData: (data) => this.saveData(data),
       getPluginDirectory: () => this.getPluginDirectory(),
       buildPayload: () => this.buildPluginData(),
-      onSaveError: (error) => console.warn(STRINGS.plugin.historySaveFailed, error)
+      onSaveError: (error) => {
+        console.warn(STRINGS.plugin.historySaveFailed, error);
+        // Tell the user once per failure streak instead of silently losing data.
+        if (this.persistenceFailureNotified) return;
+        this.persistenceFailureNotified = true;
+        new P.Notice(STRINGS.plugin.historySaveFailed);
+      },
+      onSaved: () => {
+        this.persistenceFailureNotified = false;
+      }
     });
   }
   buildPluginData() {

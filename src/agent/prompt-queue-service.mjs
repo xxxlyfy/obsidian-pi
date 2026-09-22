@@ -5,7 +5,7 @@ import {
   normalizeLocalPromptQueue,
   removeLocalPrompt,
   updateLocalPrompt
-} from "../ui/local-prompt-queue.mjs";
+} from "../shared/local-prompt-queue.mjs";
 
 /**
  * Owns the pending prompt queue and the in-flight steering list.

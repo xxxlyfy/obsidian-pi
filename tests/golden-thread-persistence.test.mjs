@@ -221,6 +221,55 @@ describe("golden path 4: message -> persist -> reload", () => {
     expect(reloaded.threadHistory.getCurrentMessages()).toEqual([]);
   });
 
+  it("loads safely when persisted data is corrupted or partial", async () => {
+    notices.messages.length = 0;
+    const dir = await createTempDir();
+    const plugin = createPluginDouble({
+      dir,
+      data: {
+        chatHistory: { threads: "nope" },
+        annotationData: ["not", "an", "object"],
+        localPromptQueue: 42,
+        localPromptSteering: "nope",
+        sandboxMode: "banana",
+        availableModels: "nope",
+        ignoredFolders: "nope",
+        model: 42,
+        customModel: { nested: true },
+        desktopNotifications: "yes"
+      }
+    });
+
+    await expect(plugin.loadSettings()).resolves.toBeUndefined();
+
+    expect(plugin.threads.currentThread.messages).toEqual([]);
+    expect(plugin.threads.listThreads({ includeArchived: true })).toHaveLength(1);
+    expect(plugin.annotationStore.toJSON()).toEqual({ schemaVersion: 1, annotations: {} });
+    expect(plugin.promptQueue.getItems()).toEqual([]);
+    expect(plugin.settings).toMatchObject({
+      sandboxMode: "read-only",
+      model: "",
+      customModel: "",
+      availableModels: [],
+      ignoredFolders: DEFAULT_SETTINGS.ignoredFolders,
+      desktopNotifications: true
+    });
+  });
+
+  it("flushes pending writes when the plugin unloads", async () => {
+    const dir = await createTempDir();
+    const plugin = createPluginDouble({ dir });
+    plugin.annotationController = { destroy: vi.fn() };
+    plugin.threads.addMessage({ role: "user", content: "pending write", createdAt: 1 });
+    expect(plugin.store.hasPendingWrite).toBe(true);
+
+    PiAgentPlugin.prototype.onunload.call(plugin);
+    await plugin.store.flush();
+
+    expect(plugin.saved.chatHistory.threads[0].messages.at(-1).content).toBe("pending write");
+    expect(plugin.store.hasPendingWrite).toBe(false);
+  });
+
   it("persists thread metadata changes through the plugin thread API", async () => {
     const dir = await createTempDir();
     const plugin = createPluginDouble({ dir });
