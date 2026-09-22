@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../src/plugin/settings.mjs";
 import { PiRunner } from "../src/pi/runner.mjs";
 import { ThreadRunnerRegistry } from "../src/plugin/thread-runners.mjs";
@@ -47,15 +50,23 @@ function createFakeClient({ autoSettle = false } = {}) {
   return client;
 }
 
+const tempDirs = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+/** A real temp plugin directory: session files must not be written to a fake root. */
 function createRunner({ client, autoSettle = false } = {}) {
-  const runner = new PiRunner(
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-agent-runner-lifecycle-"));
+  tempDirs.push(tempDir);
+  return new PiRunner(
     DEFAULT_SETTINGS,
     { formatPrompt: (prompt) => prompt },
-    "/vault",
-    "/vault/.obsidian/plugins/pi-agent",
+    tempDir,
+    tempDir,
     client ?? createFakeClient({ autoSettle })
   );
-  return runner;
 }
 
 function callbacks() {
