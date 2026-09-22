@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.0.41
+
+- Compaction (`/compact`) now claims the chat while it runs, like any other run. Previously a compaction could stream while another run was already active on the same chat, letting two streams interleave on one Pi process.
+- A cancelled run that had to be force-stopped no longer leaves the chat wedged. Force termination now disposes and drops the RPC client and clears the runner state, so the next message starts a fresh Pi process instead of inheriting the stopped one, and the chat is immediately usable again.
+- Removed the unreachable CLI run path (`runPiCli` and its process-termination helpers) that had no callers and did not respect the one-run-per-chat rule. Cancel is RPC-only.
+- Added a dedicated runner-lifecycle test suite that pins the reuse rules: reuse after a settled cancel, refusal while a cancel is pending (including compaction), invalidation after force termination, recovery after the Pi process dies, and registry reuse/removal. Runtime tests now cover dispose-ignores-late-events and retry-after-forced-termination.
+- `docs/state-ownership.md` documents the Run, Runner, and RPC process lifecycles plus the runner reuse table.
+
 ## 0.0.40
 
 - Fixed a persistence data-loss path: a failed save used to clear the pending flag before writing, so the unsaved change was only retried if another edit happened later. The pending state now survives a failed write, the next flush retries it, and the newest state is what gets written.
