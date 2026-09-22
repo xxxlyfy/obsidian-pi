@@ -133,7 +133,7 @@ export class RunSettingsControls {
 
   async ensureCatalog() {
     if (!hasSafeRuntimeCatalog(this.plugin.settings)) {
-      await this.plugin.ensureRuntimeModelState();
+      await this.plugin.models.ensureLoaded();
     }
   }
 

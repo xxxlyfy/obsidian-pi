@@ -142,7 +142,7 @@ describe("per-thread live run UI state", () => {
     const view = {
       promptQueue: [{ id: "stale" }],
       running: true,
-      plugin: { getLocalPromptQueue: () => [{ id: "fresh" }] },
+      plugin: { promptQueue: { getItems: () => [{ id: "fresh" }] } },
       renderPromptQueue: vi.fn(),
       setRunningState: vi.fn()
     };

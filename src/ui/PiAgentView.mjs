@@ -60,7 +60,7 @@ export class PiAgentView extends f.ItemView {
     this.currentRunContextUsage = undefined;
     this.invalidatedContextThreadIds = new Set();
     this.streamingAssistantContent = "";
-    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.promptQueue = this.plugin.promptQueue.getItems();
     this.composerImages = [];
     this.composerAttachments = [];
     this.excludedContextPath = undefined;
@@ -221,7 +221,7 @@ export class PiAgentView extends f.ItemView {
     let composer = root.createDiv({ cls: "pi-agent-composer" });
     this.toolBadgesEl = composer.createDiv({ cls: "pi-agent-tool-badges" });
     this.renderToolBadges();
-    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.promptQueue = this.plugin.promptQueue.getItems();
     this.promptQueueEl = composer.createDiv({ cls: "pi-agent-prompt-queue" });
     this.renderPromptQueue();
     this.extensionWidgetsAboveEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
@@ -329,6 +329,9 @@ export class PiAgentView extends f.ItemView {
     this.threadMenu = undefined;
     this.suggestions?.close();
     this.suggestions = undefined;
+  }
+  refreshRunSettings() {
+    this.runSettings?.refresh?.();
   }
   renderExtensionWidgets() {
     this.extensionWidgetsAboveEl?.empty();
@@ -452,7 +455,10 @@ export class PiAgentView extends f.ItemView {
     if (this.currentRunContextUsage) return this.currentRunContextUsage;
     const thread = this.plugin.threads.currentThread;
     if (this.invalidatedContextThreadIds.has(thread.id))
-      return { compacted: true, contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow };
+      return {
+        compacted: true,
+        contextWindow: this.plugin.models.getSelectedInfo()?.contextWindow
+      };
     const messages = thread.messages ?? [];
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index];
@@ -529,13 +535,13 @@ export class PiAgentView extends f.ItemView {
     if (!text && images.length === 0 && attachments.length === 0) return;
     if (images.length > 0) {
       try {
-        await this.plugin.ensureModelCatalogLoaded();
+        await this.plugin.models.ensureLoaded();
       } catch (error) {
         new f.Notice(error instanceof Error ? error.message : String(error));
         return;
       }
     }
-    if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
+    if (images.length > 0 && !modelSupportsImages(this.plugin.models.getSelectedInfo())) {
       new f.Notice(STRINGS.view.modelNoImage);
       return;
     }
@@ -711,8 +717,8 @@ export class PiAgentView extends f.ItemView {
       const mimeType = mimeForName(file.name);
       const bytes = new Uint8Array(await this.plugin.app.vault.readBinary(file));
       if (SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType)) {
-        await this.plugin.ensureModelCatalogLoaded();
-        if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
+        await this.plugin.models.ensureLoaded();
+        if (!modelSupportsImages(this.plugin.models.getSelectedInfo()))
           throw new Error(STRINGS.view.modelNoImage);
         this.composerImages.push(
           bytesToPromptImage({
@@ -740,8 +746,8 @@ export class PiAgentView extends f.ItemView {
   async addImageFiles(files) {
     const imageFiles = [...(files || [])];
     if (imageFiles.length === 0) return;
-    await this.plugin.ensureModelCatalogLoaded();
-    if (!modelSupportsImages(this.plugin.getSelectedModelInfo())) {
+    await this.plugin.models.ensureLoaded();
+    if (!modelSupportsImages(this.plugin.models.getSelectedInfo())) {
       new f.Notice(STRINGS.view.modelNoImage);
       return;
     }
@@ -815,7 +821,7 @@ export class PiAgentView extends f.ItemView {
     if (this.showingThreadList) this.renderThreadList();
   }
   refreshLocalPromptQueue() {
-    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.promptQueue = this.plugin.promptQueue.getItems();
     this.renderPromptQueue();
     this.setRunningState(this.running);
   }
@@ -895,7 +901,7 @@ export class PiAgentView extends f.ItemView {
     this.promptQueue = this.promptQueue.map((item) =>
       item.id === queuedId ? { ...item, state: "pending" } : item
     );
-    this.plugin.replaceLocalPromptQueue(this.promptQueue);
+    this.plugin.promptQueue.replace(this.promptQueue);
     this.renderPromptQueue();
   }
   restoreActiveRunUiState() {
@@ -1035,8 +1041,8 @@ export class PiAgentView extends f.ItemView {
       } else restoreUnsentAnnotations();
       return undefined;
     }
-    if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
-    if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
+    if (images.length > 0) await this.plugin.models.ensureLoaded();
+    if (images.length > 0 && !modelSupportsImages(this.plugin.models.getSelectedInfo())) {
       if (queuedId) {
         this.requeueQueuedPrompt(queuedId);
       } else restoreUnsentAnnotations();
@@ -1108,7 +1114,7 @@ export class PiAgentView extends f.ItemView {
       run.accepted = true;
       if (!queuedId) return;
       this.promptQueue = this.promptQueue.filter((item) => item.id !== queuedId);
-      this.plugin.replaceLocalPromptQueue(this.promptQueue);
+      this.plugin.promptQueue.replace(this.promptQueue);
       this.renderPromptQueue();
     };
     try {

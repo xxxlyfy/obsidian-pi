@@ -76,6 +76,7 @@ function createPluginDouble({ dir, data, history, annotationData } = {}) {
     withSessionRunner: async () => undefined
   });
   plugin.store = plugin.createPluginStore();
+  plugin.promptQueue = plugin.buildPromptQueueService();
   plugin.threads = plugin.buildThreadService();
   return plugin;
 }

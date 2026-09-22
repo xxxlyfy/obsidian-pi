@@ -94,9 +94,11 @@ describe("annotation processing UX", () => {
   it("keeps queued annotation snapshots in sync with note rename and delete", () => {
     expect(pluginSource).toContain("this.migrateQueuedAnnotationPaths(oldPath, file.path)");
     expect(pluginSource).toContain("this.invalidateQueuedAnnotationPaths(file.path)");
-    expect(pluginSource).toContain("this.refreshOpenQueueViews()");
-    expect(pluginSource).toContain("this.migrateOpenViewInFlightAnnotations(oldPath, newPath)");
-    expect(pluginSource).toContain("this.invalidateOpenViewInFlightAnnotations(path)");
+    expect(pluginSource).toContain('this.views.call("refreshLocalPromptQueue")');
+    expect(pluginSource).toContain(
+      'this.views.call("migrateInFlightAnnotationPaths", oldPath, newPath)'
+    );
+    expect(pluginSource).toContain('this.views.call("invalidateInFlightAnnotationPaths", path)');
     expect(pluginSource).toContain("this.migrateQueuedAttachmentPaths(oldPath, file.path)");
   });
 

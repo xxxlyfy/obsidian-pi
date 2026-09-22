@@ -57,7 +57,6 @@ function createPluginDouble(runner) {
   const plugin = {
     settings: { ...DEFAULT_SETTINGS, desktopNotifications: false },
     threadHistory: store,
-    replacedQueues: [],
     getCurrentContextFile: () => undefined,
     consumeAnnotationsForPrompt: vi.fn(async () => []),
     restoreConsumedAnnotations: vi.fn(),
@@ -72,11 +71,14 @@ function createPluginDouble(runner) {
     endAnnotationProcessingForThread: vi.fn(),
     completeAnnotationProcessingForPath: vi.fn(),
     rebuildServicesIfPending: vi.fn(),
-    replaceLocalPromptQueue(queue) {
-      this.replacedQueues.push(queue);
+    promptQueue: {
+      replaced: [],
+      replace(queue) {
+        this.replaced.push(queue);
+      },
+      getItems: () => [],
+      isPaused: () => false
     },
-    getLocalPromptQueue: () => [],
-    isLocalPromptQueuePaused: () => false,
     getVaultBasePath: () => undefined,
     cancelPiRun: vi.fn((activeRunner) => activeRunner?.cancelCurrentRun()),
     app: { vault: { getAbstractFileByPath: () => undefined } }

@@ -3,6 +3,9 @@ import * as P from "obsidian";
 import { AgentRuntime } from "../agent/agent-runtime.mjs";
 import { ThreadService } from "../threads/thread-service.mjs";
 import { PluginStore } from "../persistence/plugin-store.mjs";
+import { PromptQueueService } from "../agent/prompt-queue-service.mjs";
+import { RuntimeModelService } from "../pi/runtime-models.mjs";
+import { ViewRegistry } from "./view-registry.mjs";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
 import { ContextBuilder } from "../context/context-builder.mjs";
@@ -16,7 +19,7 @@ import { PiCommandCatalog } from "../pi/command-catalog.mjs";
 import { createExtensionUiHandler } from "../pi/extension-ui.mjs";
 import { PiModelCatalog } from "../pi/model-catalog.mjs";
 import { getCompactInstructions, PiRunner } from "../pi/runner.mjs";
-import { CUSTOM_MODEL_VALUE, DEFAULT_SETTINGS, normalizeSettings } from "./settings.mjs";
+import { DEFAULT_SETTINGS, normalizeSettings } from "./settings.mjs";
 import { PiAgentSettingTab } from "./settings-tab.mjs";
 import {
   PI_AGENT_DISPLAY_NAME,
@@ -37,22 +40,8 @@ import {
 } from "../threads/chat-history-import.mjs";
 import { ThreadStore } from "../threads/thread-store.mjs";
 import { ThreadRunnerRegistry } from "./thread-runners.mjs";
-import {
-  enqueueLocalPrompt,
-  invalidateLocalPromptPaths,
-  migrateLocalPromptPaths,
-  normalizeLocalPromptQueue,
-  removeLocalPrompt,
-  restorePersistedLocalPromptQueue,
-  updateLocalPrompt
-} from "../ui/local-prompt-queue.mjs";
+import { restorePersistedLocalPromptQueue } from "../ui/local-prompt-queue.mjs";
 import { applyPromptEnricher } from "../ui/prompt-payload.mjs";
-import {
-  createRuntimeCatalogSnapshot,
-  hasSafeRuntimeCatalog,
-  needsRuntimeCatalogRefresh,
-  RuntimeCatalogRefreshGate
-} from "../ui/model-picker.mjs";
 
 const PI_BRAND_NAME = "Pi";
 
@@ -150,14 +139,14 @@ export class PiAgentPlugin extends P.Plugin {
     this.extensionStatuses = new Map();
     this.extensionWidgets = new Map();
     this.extensionTitle = "";
-    this.localPromptQueue = [];
-    this.localPromptSteering = [];
-    this.localPromptQueuePaused = false;
+    this.views = new ViewRegistry({
+      app: this.app,
+      viewType: PI_AGENT_VIEW_TYPE,
+      notify: () => new P.Notice(STRINGS.plugin.couldNotOpenView)
+    });
+    this.promptQueue = this.buildPromptQueueService();
     this.promptEnricher = undefined;
-    this.modelCatalogRefreshGate = new RuntimeCatalogRefreshGate();
-    this.modelCatalogRefreshedAt = 0;
-    this.modelCatalogGeneration = 0;
-    this.modelCatalogError = "";
+    this.models = this.buildModelService();
   }
   async onload() {
     await this.loadSettings();
@@ -334,9 +323,12 @@ export class PiAgentPlugin extends P.Plugin {
     }
 
     this.settings = normalizeSettings(rawSettings);
-    this.localPromptQueue = restorePersistedLocalPromptQueue(localPromptQueue, localPromptSteering);
-    this.localPromptSteering = [];
-    this.localPromptQueuePaused = this.localPromptQueue.length > 0;
+    const restoredQueue = restorePersistedLocalPromptQueue(localPromptQueue, localPromptSteering);
+    this.promptQueue = this.buildPromptQueueService({
+      items: restoredQueue,
+      steering: [],
+      paused: restoredQueue.length > 0
+    });
     this.settings.additionalSkillFolders = normalizeSkillFolderList(
       this.settings.additionalSkillFolders
     );
@@ -378,8 +370,7 @@ export class PiAgentPlugin extends P.Plugin {
   async saveSettings() {
     // Invalidate before the first await so an older catalog request cannot win
     // the race against settings persistence or a service restart.
-    this.modelCatalogGeneration += 1;
-    this.modelCatalogRefreshedAt = 0;
+    this.models.invalidate();
     try {
       await this.savePluginData();
     } catch (error) {
@@ -417,90 +408,6 @@ export class PiAgentPlugin extends P.Plugin {
       showSuccess ? new P.Notice(result.message) : new PiSetupModal(this, result).open();
       return result;
     });
-  }
-  async refreshModelCatalog(showNotice = false, force = true) {
-    if (!force && !needsRuntimeCatalogRefresh(this.settings, this.modelCatalogRefreshedAt)) {
-      return { ok: true, stale: false };
-    }
-    const result = await this.modelCatalogRefreshGate.run(() => this.performModelCatalogRefresh());
-    if (showNotice) {
-      new P.Notice(
-        result.ok
-          ? STRINGS.plugin.modelsLoaded(
-              this.settings.availableModels.length,
-              this.settings.effectiveModel
-            )
-          : this.modelCatalogError
-      );
-    }
-    return result;
-  }
-  async performModelCatalogRefresh() {
-    try {
-      while (true) {
-        const generation = this.modelCatalogGeneration;
-        const catalog = this.catalog;
-        if (!catalog) throw new Error(STRINGS.plugin.modelServiceNotReady);
-
-        let models;
-        let effectiveConfig;
-        try {
-          models = await catalog.getAvailableModels(this.getVaultBasePath());
-          effectiveConfig = catalog.getEffectiveConfig();
-        } catch (error) {
-          if (generation !== this.modelCatalogGeneration) continue;
-          throw error;
-        }
-        if (generation !== this.modelCatalogGeneration) continue;
-
-        const snapshot = createRuntimeCatalogSnapshot(models, effectiveConfig);
-        this.settings.availableModels = snapshot.availableModels;
-        this.settings.effectiveModel = snapshot.effectiveModel;
-        this.settings.effectiveReasoning = snapshot.effectiveReasoning;
-        if (
-          this.settings.model === "__custom" &&
-          this.settings.customModel &&
-          models.some((model) => model.slug === this.settings.customModel)
-        ) {
-          this.settings.model = this.settings.customModel;
-        }
-        if (
-          this.settings.model &&
-          this.settings.model !== "__custom" &&
-          !models.some((model) => model.slug === this.settings.model)
-        ) {
-          this.settings.model = "";
-          this.settings.reasoningEffort = "";
-        }
-
-        this.modelCatalogRefreshedAt = Date.now();
-        this.modelCatalogError = "";
-        await this.savePluginData();
-        if (generation !== this.modelCatalogGeneration) continue;
-
-        this.refreshOpenModelControls();
-        return { ok: true, stale: false };
-      }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      this.modelCatalogError = `Could not refresh models from Pi. Check the Pi executable and configuration, then try again. ${detail}`;
-      console.warn(STRINGS.plugin.modelCatalogFailed, error);
-      this.refreshOpenModelControls();
-      if (hasSafeRuntimeCatalog(this.settings)) return { ok: false, stale: true };
-      throw new Error(this.modelCatalogError, { cause: error });
-    }
-  }
-  async ensureRuntimeModelState() {
-    const result = await this.refreshModelCatalog(false, false);
-    if (!result.ok && this.modelCatalogError) new P.Notice(this.modelCatalogError);
-    return result;
-  }
-  refreshOpenModelControls() {
-    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      const view = /** @type {any} */ (leaf.view);
-      view?.runSettings?.refresh?.();
-    }
-    this.settingsTab?.display?.();
   }
   async refreshCommandCatalog(showNotice = false) {
     if (this.commandCatalogRefreshPromise) return this.commandCatalogRefreshPromise;
@@ -569,35 +476,23 @@ export class PiAgentPlugin extends P.Plugin {
     this.refreshExtensionUiViews();
   }
   setExtensionEditorText(text) {
-    const leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0];
-    const view = /** @type {any} */ (leaf?.view);
-    view?.setExtensionEditorText?.(String(text ?? ""));
+    this.views.call("setExtensionEditorText", String(text ?? ""));
   }
   refreshExtensionUiViews() {
+    this.views.call("renderExtensionWidgets");
     for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      const view = /** @type {any} */ (leaf.view);
-      view?.renderExtensionWidgets?.();
       /** @type {any} */ (leaf).updateHeader?.();
     }
   }
   refreshAnnotationBadges() {
-    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      const view = /** @type {any} */ (leaf.view);
-      view?.renderToolBadges?.();
-    }
+    this.views.call("renderToolBadges");
   }
   async activateView() {
-    /** @type {import("obsidian").WorkspaceLeaf | null} */
-    let leaf = this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)[0] ?? null;
-    if (!leaf) {
-      leaf = this.app.workspace.getRightLeaf(false);
-      if (!leaf) {
-        new P.Notice(STRINGS.plugin.couldNotOpenView);
-        return;
-      }
-      await leaf.setViewState({ type: PI_AGENT_VIEW_TYPE, active: true });
-    }
-    this.app.workspace.revealLeaf(leaf);
+    return this.views.activate();
+  }
+  refreshOpenModelControls() {
+    this.views.call("refreshRunSettings");
+    this.settingsTab?.display?.();
   }
   async runPiPrompt(prompt, callbacks, threadId, runner = this.pi, images = [], promptContext) {
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
@@ -673,109 +568,24 @@ export class PiAgentPlugin extends P.Plugin {
     );
     return { ...enriched, promptContext };
   }
-  getLocalPromptQueue() {
-    return this.localPromptQueue.map((item) => ({
-      ...item,
-      images: item.images.map((image) => ({ ...image })),
-      attachments: item.attachments.map((attachment) => ({ ...attachment })),
-      annotations: item.annotations.map((annotation) => ({ ...annotation }))
-    }));
-  }
-  isLocalPromptQueuePaused() {
-    return this.localPromptQueuePaused;
-  }
-  resumeLocalPromptQueue() {
-    this.localPromptQueuePaused = false;
-  }
-  beginLocalPromptSteering(item) {
-    if (!this.localPromptSteering.some((candidate) => candidate.id === item.id))
-      this.localPromptSteering.push(item);
-    this.saveThreadHistory();
-  }
-  finishLocalPromptSteering(id) {
-    this.localPromptSteering = this.localPromptSteering.filter((item) => item.id !== id);
-    this.saveThreadHistory();
-  }
-  replaceLocalPromptQueue(queue) {
-    this.localPromptQueue = normalizeLocalPromptQueue(queue, { preserveState: true });
-    this.saveThreadHistory();
-  }
   migrateQueuedAnnotationPaths(oldPath, newPath) {
     if (!oldPath || !newPath || oldPath === newPath) return;
     this.migrateQueuedPaths(oldPath, newPath);
-    this.migrateOpenViewInFlightAnnotations(oldPath, newPath);
+    this.views.call("migrateInFlightAnnotationPaths", oldPath, newPath);
   }
   migrateQueuedAttachmentPaths(oldPath, newPath) {
     if (!oldPath || !newPath || oldPath === newPath) return;
     this.migrateQueuedPaths(oldPath, newPath);
   }
   migrateQueuedPaths(oldPath, newPath) {
-    this.localPromptQueue = migrateLocalPromptPaths(this.localPromptQueue, oldPath, newPath);
-    this.localPromptSteering = migrateLocalPromptPaths(this.localPromptSteering, oldPath, newPath);
-    this.saveThreadHistory();
-    this.refreshOpenQueueViews();
+    this.promptQueue.migratePaths(oldPath, newPath);
+    this.views.call("refreshLocalPromptQueue");
   }
   invalidateQueuedAnnotationPaths(path) {
     if (!path) return;
-    this.localPromptQueue = invalidateLocalPromptPaths(this.localPromptQueue, path);
-    this.localPromptSteering = invalidateLocalPromptPaths(this.localPromptSteering, path);
-    this.saveThreadHistory();
-    this.refreshOpenQueueViews();
-    this.invalidateOpenViewInFlightAnnotations(path);
-  }
-  forEachOpenView(callback) {
-    for (const leaf of this.app.workspace.getLeavesOfType(PI_AGENT_VIEW_TYPE)) {
-      const view = /** @type {any} */ (leaf.view);
-      if (view) callback(view);
-    }
-  }
-  refreshOpenQueueViews() {
-    this.forEachOpenView((view) => view.refreshLocalPromptQueue?.());
-  }
-  migrateOpenViewInFlightAnnotations(oldPath, newPath) {
-    this.forEachOpenView((view) => view.migrateInFlightAnnotationPaths?.(oldPath, newPath));
-  }
-  invalidateOpenViewInFlightAnnotations(path) {
-    this.forEachOpenView((view) => view.invalidateInFlightAnnotationPaths?.(path));
-  }
-  enqueueLocalPrompt(item) {
-    this.localPromptQueue = enqueueLocalPrompt(this.localPromptQueue, item);
-    this.saveThreadHistory();
-    return this.localPromptQueue.at(-1);
-  }
-  updateLocalPrompt(id, patch) {
-    this.localPromptQueue = updateLocalPrompt(this.localPromptQueue, id, patch);
-    this.saveThreadHistory();
-  }
-  removeLocalPrompt(id) {
-    this.localPromptQueue = removeLocalPrompt(this.localPromptQueue, id);
-    this.saveThreadHistory();
-  }
-  async ensureModelCatalogLoaded() {
-    this.settings.availableModels.length === 0 && (await this.refreshModelCatalog(false));
-  }
-  getModelInfoForTokenUsage(tokenUsage) {
-    if (!tokenUsage) return undefined;
-    const modelId =
-      tokenUsage.modelId ||
-      (tokenUsage.provider && tokenUsage.model ? `${tokenUsage.provider}/${tokenUsage.model}` : "");
-    if (modelId) {
-      const match = this.settings.availableModels.find((model) => model.slug === modelId);
-      if (match) return match;
-    }
-    return tokenUsage.model
-      ? this.settings.availableModels.find((model) => model.slug.endsWith(`/${tokenUsage.model}`))
-      : undefined;
-  }
-  getSelectedModelInfo(tokenUsage) {
-    const tokenUsageModel = this.getModelInfoForTokenUsage(tokenUsage);
-    if (tokenUsageModel) return tokenUsageModel;
-    let modelId =
-      this.settings.model === CUSTOM_MODEL_VALUE ? this.settings.customModel : this.settings.model;
-    if (!modelId) modelId = this.settings.effectiveModel;
-    return modelId
-      ? this.settings.availableModels.find((model) => model.slug === modelId)
-      : undefined;
+    this.promptQueue.invalidatePaths(path);
+    this.views.call("refreshLocalPromptQueue");
+    this.views.call("invalidateInFlightAnnotationPaths", path);
   }
   async inspectPiContext(prompt) {
     if (((!this.graph || !this.contextBuilder) && this.rebuildServices(), !this.contextBuilder))
@@ -829,8 +639,7 @@ export class PiAgentPlugin extends P.Plugin {
     return this.threadRunners.withRunner(threadId, action);
   }
   rebuildServices() {
-    this.modelCatalogGeneration += 1;
-    this.modelCatalogRefreshedAt = 0;
+    this.models.invalidate();
     this.threadRunners.disposeAll();
     this.piCommands = [];
     this.commandCatalogLoaded = false;
@@ -946,6 +755,23 @@ export class PiAgentPlugin extends P.Plugin {
       persist: () => this.saveThreadHistory()
     });
   }
+  buildPromptQueueService(options = {}) {
+    return new PromptQueueService({
+      ...options,
+      persist: () => this.saveThreadHistory()
+    });
+  }
+  buildModelService() {
+    return new RuntimeModelService({
+      getSettings: () => this.settings,
+      getCatalog: () => this.catalog,
+      getVaultBasePath: () => this.getVaultBasePath(),
+      save: () => this.savePluginData(),
+      onCatalogChanged: () => this.refreshOpenModelControls(),
+      notify: (message) => new P.Notice(message),
+      now: () => Date.now()
+    });
+  }
   createPluginStore() {
     return new PluginStore({
       loadData: () => this.loadData(),
@@ -956,11 +782,12 @@ export class PiAgentPlugin extends P.Plugin {
     });
   }
   buildPluginData() {
+    const { localPromptQueue, localPromptSteering } = this.promptQueue.toJSON();
     return {
       ...this.settings,
       chatHistory: sanitizeThreadHistory(this.threadHistory.toJSON()),
-      localPromptQueue: this.localPromptQueue,
-      localPromptSteering: this.localPromptSteering,
+      localPromptQueue,
+      localPromptSteering,
       annotationData: this.annotationStore.toJSON()
     };
   }

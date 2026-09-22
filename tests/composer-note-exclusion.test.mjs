@@ -119,13 +119,12 @@ describe("composer current-note exclusion", () => {
   });
 
   it("forwards the exclusion when a message is queued", () => {
-    const enqueueLocalPrompt = vi.fn(() => ({ id: "q1" }));
+    const enqueue = vi.fn(() => ({ id: "q1" }));
     const view = {
       promptQueue: [],
       plugin: {
         threads: { currentThreadId: "t1" },
-        enqueueLocalPrompt,
-        getLocalPromptQueue: () => []
+        promptQueue: { enqueue, getItems: () => [] }
       },
       renderPromptQueue: () => {},
       syncCurrentRunFlags: () => {},
@@ -134,7 +133,7 @@ describe("composer current-note exclusion", () => {
 
     enqueuePrompt.call(view, "later", "t1", [], [], [], "Notes/A.md", false);
 
-    expect(enqueueLocalPrompt).toHaveBeenCalledWith(
+    expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ contextFilePath: "Notes/A.md", includeActiveNote: false })
     );
   });
@@ -146,7 +145,7 @@ describe("composer current-note exclusion", () => {
       steeringPromptIds: new Set(),
       promptQueue: [createQueuedItem()],
       isThreadRunning: () => false,
-      plugin: { isLocalPromptQueuePaused: () => false, replaceLocalPromptQueue: () => {} },
+      plugin: { promptQueue: { isPaused: () => false, replace: () => {} } },
       renderPromptQueue: () => {},
       startPrompt
     };

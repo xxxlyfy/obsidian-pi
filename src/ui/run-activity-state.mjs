@@ -148,7 +148,7 @@ export function captureContextUsage(event, threadId) {
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function getContextUsageForTokens(tokenUsage) {
   if (!tokenUsage) return;
-  const modelInfo = this.plugin.getSelectedModelInfo(tokenUsage);
+  const modelInfo = this.plugin.models.getSelectedInfo(tokenUsage);
   const contextWindow = modelInfo?.contextWindow ?? tokenUsage?.contextWindow;
   return createContextUsage(tokenUsage, contextWindow);
 }
@@ -204,7 +204,7 @@ export function handleRunEvent(event, threadId) {
     if (threadId) this.invalidatedContextThreadIds.add(threadId);
     this.currentRunContextUsage = {
       compacted: true,
-      contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow
+      contextWindow: this.plugin.models.getSelectedInfo()?.contextWindow
     };
     this.syncRunContextUsage(threadId);
     this.renderToolBadges();

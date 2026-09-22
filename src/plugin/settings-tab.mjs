@@ -96,7 +96,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
                 button.setButtonText("加载中…");
                 button.setDisabled(true);
                 try {
-                  await this.plugin.ensureRuntimeModelState();
+                  await this.plugin.models.ensureLoaded();
                   new ModelPickerModal(this.app, this.plugin.settings, async (value) => {
                     this.plugin.settings.model = value;
                     this.plugin.settings.reasoningEffort = "";
@@ -119,7 +119,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
                 button.setButtonText("刷新中…");
                 button.setDisabled(true);
                 try {
-                  await this.plugin.refreshModelCatalog(true);
+                  await this.plugin.models.refresh(true);
                 } catch (error) {
                   new Notice(error instanceof Error ? error.message : String(error));
                 }
@@ -143,7 +143,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
               button.setButtonText("加载中…");
               button.setDisabled(true);
               try {
-                await this.plugin.ensureRuntimeModelState();
+                await this.plugin.models.ensureLoaded();
                 new ThinkingPickerModal(this.app, this.plugin.settings, async (value) => {
                   this.plugin.settings.reasoningEffort = value;
                   await this.plugin.saveSettings();
