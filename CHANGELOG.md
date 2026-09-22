@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.46
+
+- No behavior change: this release completes the lifecycle cleanup. The force-termination contract is documented on the runner (a force-terminated runner becomes invalid, is never reusable, and the thread runner registry replaces it with a runner that starts its own Pi process), and two focused unit tests pin that contract for both the prompt and the compaction path.
+
 ## 0.0.45
 
 - Fixed a stuck-chat case after closing a view: a cancel watchdog was disarmed when the view released its runtime, so a run whose cancellation never settled could leave the thread runner wedged. That runner stayed in the registry reporting "already running", and the chat refused every later prompt until the plugin was reloaded. The watchdog now completes even after the runtime is gone, force-retires the wedged runner (which the registry replaces), and the chat is usable again within the cancel deadline.
