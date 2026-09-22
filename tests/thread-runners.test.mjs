@@ -14,6 +14,27 @@ describe("ThreadRunnerRegistry", () => {
     expect(registry.get("t1")).toBe(first);
   });
 
+  it("replaces an invalid runner instead of handing it out again", () => {
+    const created = [];
+    const registry = new ThreadRunnerRegistry(() => {
+      const runner = { invalid: false, isRunning: false, rpcClient: { dispose: vi.fn() } };
+      created.push(runner);
+      return runner;
+    });
+
+    const first = registry.create("t1");
+    expect(registry.create("t1")).toBe(first);
+
+    first.invalid = true;
+    const second = registry.create("t1");
+
+    expect(second).not.toBe(first);
+    expect(created).toEqual([first, second]);
+    expect(first.rpcClient.dispose).toHaveBeenCalledOnce();
+    expect(registry.runners.size).toBe(1);
+    expect(registry.hasActive()).toBe(false);
+  });
+
   it("disposes temporary runners created through withRunner", async () => {
     const registry = new ThreadRunnerRegistry(() => createRunner());
     let created;

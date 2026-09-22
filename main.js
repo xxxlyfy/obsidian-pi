@@ -6526,9 +6526,10 @@ var PiRunner = class {
     this.rpcClient = rpcClient;
     this.extensionUiHandler = extensionUiHandler;
     this.cancelRequested = false;
-    this.executionGeneration = 0;
+    this.invalid = false;
   }
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
+    if (this.invalid) throw new Error("This agent runner was force-stopped and cannot be reused.");
     if (this.isRunning)
       throw new Error("This chat already has an active run. Wait for it to finish or cancel it.");
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
@@ -6564,7 +6565,7 @@ var PiRunner = class {
    * becomes reusable.
    */
   forceTerminate() {
-    this.executionGeneration += 1;
+    this.invalid = true;
     const client = this.rpcClient;
     this.rpcClient = void 0;
     this.rpcSession = void 0;
@@ -6611,7 +6612,6 @@ var PiRunner = class {
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     this.cancelRequested = false;
     this.isRunning = true;
-    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     let client;
     try {
@@ -6690,10 +6690,8 @@ var PiRunner = class {
       }
       throw error;
     } finally {
-      if (executionId === this.executionGeneration) {
-        this.cancelRequested = false;
-        this.isRunning = false;
-      }
+      this.cancelRequested = false;
+      this.isRunning = false;
       unsubscribe();
     }
   }
@@ -6735,7 +6733,6 @@ var PiRunner = class {
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     this.cancelRequested = false;
     this.isRunning = true;
-    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
@@ -6772,10 +6769,8 @@ var PiRunner = class {
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       throw error;
     } finally {
-      if (executionId === this.executionGeneration) {
-        this.cancelRequested = false;
-        this.isRunning = false;
-      }
+      this.cancelRequested = false;
+      this.isRunning = false;
       unsubscribe();
     }
   }
@@ -12156,10 +12151,16 @@ var ThreadRunnerRegistry = class {
   get(threadId) {
     return this.runners.get(threadId);
   }
-  /** @param {string} threadId */
+  /**
+   * Returns a reusable runner for the thread. A force-terminated runner is never
+   * handed out again: it is disposed and replaced with a fresh one.
+   *
+   * @param {string} threadId
+   */
   create(threadId) {
     const existing = this.runners.get(threadId);
-    if (existing) return existing;
+    if (existing && !existing.invalid) return existing;
+    if (existing) this.dispose(threadId);
     const runner = this.createRunner(threadId);
     this.runners.set(threadId, runner);
     return runner;
@@ -12178,7 +12179,7 @@ var ThreadRunnerRegistry = class {
     }
   }
   hasActive() {
-    return [...this.runners.values()].some((runner) => runner.isRunning);
+    return [...this.runners.values()].some((runner) => runner.isRunning && !runner.invalid);
   }
   /** @param {string} threadId */
   dispose(threadId) {

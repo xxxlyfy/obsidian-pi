@@ -15,10 +15,16 @@ export class ThreadRunnerRegistry {
     return this.runners.get(threadId);
   }
 
-  /** @param {string} threadId */
+  /**
+   * Returns a reusable runner for the thread. A force-terminated runner is never
+   * handed out again: it is disposed and replaced with a fresh one.
+   *
+   * @param {string} threadId
+   */
   create(threadId) {
     const existing = this.runners.get(threadId);
-    if (existing) return existing;
+    if (existing && !existing.invalid) return existing;
+    if (existing) this.dispose(threadId);
     const runner = this.createRunner(threadId);
     this.runners.set(threadId, runner);
     return runner;
@@ -39,7 +45,7 @@ export class ThreadRunnerRegistry {
   }
 
   hasActive() {
-    return [...this.runners.values()].some((runner) => runner.isRunning);
+    return [...this.runners.values()].some((runner) => runner.isRunning && !runner.invalid);
   }
 
   /** @param {string} threadId */

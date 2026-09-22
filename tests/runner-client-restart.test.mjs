@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS } from "../src/plugin/settings.mjs";
+import { ThreadRunnerRegistry } from "../src/plugin/thread-runners.mjs";
 
 const state = vi.hoisted(() => ({ instances: [], autoSettle: false }));
 
@@ -78,27 +79,34 @@ function createRunner() {
   return new PiRunner(DEFAULT_SETTINGS, { formatPrompt: (prompt) => prompt }, tempDir, tempDir);
 }
 
+function createRegistry() {
+  return new ThreadRunnerRegistry(() => createRunner());
+}
+
 function callbacks() {
   return { isCanceled: () => false, onEvent: () => {}, onTextDelta: () => {} };
 }
 
 describe("runner client identity across force termination", () => {
   it("creates a fresh RPC client for the next run and never reuses the terminated one", async () => {
-    const runner = createRunner();
+    const registry = createRegistry();
+    const runnerA = registry.create("t1");
 
     // Run A builds its own client through the runner's production path.
     state.autoSettle = false;
-    const runA = runner.run("A", undefined, undefined, [], callbacks());
+    const runA = runnerA.run("A", undefined, undefined, [], callbacks());
     await vi.waitFor(() => expect(state.instances).toHaveLength(1));
     const clientA = state.instances[0];
-    expect(runner.rpcClient).toBe(clientA);
+    expect(runnerA.rpcClient).toBe(clientA);
     const runAOutcome = runA.catch(() => {});
 
-    runner.forceTerminate();
+    runnerA.forceTerminate();
     expect(clientA.disposed).toBe(true);
-    expect(runner.rpcClient).toBeUndefined();
+    expect(runnerA.rpcClient).toBeUndefined();
 
-    // Run B must build a different client, not inherit A's stopped process.
+    // The registry replaces the invalid runner; the new one builds a new client.
+    const runner = registry.create("t1");
+    expect(runner).not.toBe(runnerA);
     const bDeltas = [];
     const runB = runner.run("B", undefined, undefined, [], {
       isCanceled: () => false,

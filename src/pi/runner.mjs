@@ -45,15 +45,16 @@ export class PiRunner {
     this.extensionUiHandler = extensionUiHandler;
     this.cancelRequested = false;
     /**
-     * Bumped for every execution. A late finalizer from an older execution must
-     * not clear the state of a newer one on the same runner.
+     * A force-terminated runner must never run again. The registry replaces it,
+     * so a late finalizer can only ever touch this dead object.
      */
-    this.executionGeneration = 0;
+    this.invalid = false;
   }
 
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
     // One runner belongs to one thread and can only host one run: two views on
     // the same chat must not interleave on the same Pi process.
+    if (this.invalid) throw new Error("This agent runner was force-stopped and cannot be reused.");
     if (this.isRunning)
       throw new Error("This chat already has an active run. Wait for it to finish or cancel it.");
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
@@ -93,7 +94,7 @@ export class PiRunner {
    * becomes reusable.
    */
   forceTerminate() {
-    this.executionGeneration += 1;
+    this.invalid = true;
     const client = this.rpcClient;
     this.rpcClient = undefined;
     this.rpcSession = undefined;
@@ -145,7 +146,6 @@ export class PiRunner {
 
     this.cancelRequested = false;
     this.isRunning = true;
-    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     let client;
     try {
@@ -227,10 +227,8 @@ export class PiRunner {
       }
       throw error;
     } finally {
-      if (executionId === this.executionGeneration) {
-        this.cancelRequested = false;
-        this.isRunning = false;
-      }
+      this.cancelRequested = false;
+      this.isRunning = false;
       unsubscribe();
     }
   }
@@ -275,7 +273,6 @@ export class PiRunner {
 
     this.cancelRequested = false;
     this.isRunning = true;
-    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
@@ -313,10 +310,8 @@ export class PiRunner {
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       throw error;
     } finally {
-      if (executionId === this.executionGeneration) {
-        this.cancelRequested = false;
-        this.isRunning = false;
-      }
+      this.cancelRequested = false;
+      this.isRunning = false;
       unsubscribe();
     }
   }

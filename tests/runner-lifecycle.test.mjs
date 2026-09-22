@@ -134,24 +134,26 @@ describe("runner lifecycle: reuse rules", () => {
     await pending.catch(() => {});
   });
 
-  it("Test 3 — force termination invalidates the client and leaves the runner reusable", async () => {
+  it("Test 3 — force termination invalidates the runner and its client", async () => {
     const client = createFakeClient();
     const runner = createRunner({ client });
 
     const { pending } = await startPendingRun(runner, client);
+    const outcome = pending.catch(() => {});
     runner.forceTerminate();
 
-    // The wedged client is disposed and dropped, so no later run can inherit it.
+    // The wedged client is disposed and dropped, and the runner must never run again.
     expect(client.dispose).toHaveBeenCalledOnce();
+    expect(runner.invalid).toBe(true);
     expect(runner.rpcClient).toBeUndefined();
     expect(runner.rpcSession).toBeUndefined();
     expect(runner.isRunning).toBe(false);
     expect(runner.cancelRequested).toBe(false);
-    await pending.catch(() => {});
+    await outcome;
 
-    // Reusable: the guard no longer refuses a new run for this thread.
-    expect(() => runner.forceTerminate()).not.toThrow();
-    expect(runner.isRunning).toBe(false);
+    await expect(runner.run("again", undefined, undefined, [], callbacks())).rejects.toThrow(
+      "force-stopped"
+    );
   });
 
   it("Test 4 — compaction claims the runner like any other run", async () => {
@@ -170,45 +172,55 @@ describe("runner lifecycle: reuse rules", () => {
     expect(runner.isRunning).toBe(false);
   });
 
-  it("Test 5a — a late finalizer from a terminated run cannot clear the new run", async () => {
+  it("Test 5a — a force-terminated runner is replaced, so a late finalizer cannot touch the new run", async () => {
     const first = createFakeClient();
-    const runner = createRunner({ client: first });
-    const registry = new ThreadRunnerRegistry(() => runner);
+    let created = 0;
+    const registry = new ThreadRunnerRegistry(() => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-agent-runner-lifecycle-"));
+      tempDirs.push(tempDir);
+      const client = created === 0 ? first : createFakeClient();
+      created += 1;
+      return new PiRunner(
+        DEFAULT_SETTINGS,
+        { formatPrompt: (prompt) => prompt },
+        tempDir,
+        tempDir,
+        client
+      );
+    });
     const runnerA = registry.create("t1");
-    const runnerB = registry.create("t1");
-    expect(runnerA).toBe(runnerB);
-    expect(runnerA).toBe(runner);
+    expect(runnerA.rpcClient).toBe(first);
 
-    const { pending: runA } = await startPendingRun(runner, first);
-    // Attach the rejection handler before force termination so the settling run
-    // is never an unhandled rejection.
+    const { pending: runA } = await startPendingRun(runnerA, first);
     const runAOutcome = runA.catch(() => {});
-    runner.forceTerminate();
-    expect(runner.rpcClient).toBeUndefined();
 
-    // Run B starts on the same runner before A's continuation runs.
-    const second = createFakeClient();
-    runner.rpcClient = second;
+    runnerA.forceTerminate();
+    expect(runnerA.invalid).toBe(true);
+
+    // The registry must hand out a fresh runner, never the invalidated one.
+    const runnerB = registry.create("t1");
+    expect(runnerB).not.toBe(runnerA);
+    expect(registry.get("t1")).toBe(runnerB);
+
+    const clientB = runnerB.rpcClient;
+    expect(clientB).not.toBe(first);
     const bDeltas = [];
-    const runB = runner.run("B", undefined, undefined, [], {
+    const runB = runnerB.run("B", undefined, undefined, [], {
       isCanceled: () => false,
       onTextDelta: (delta) => bDeltas.push(delta)
     });
-    await waitFor(() => runner.isRunning === true && second.listeners.size > 0);
+    await waitFor(() => runnerB.isRunning === true && clientB.listeners.size > 0);
 
-    // A settles late: its finalizer must not mark the runner as idle.
+    // A settles late: it can only touch the dead runner, so B keeps ownership.
     first.dispose();
     await runAOutcome;
-    expect(runner.isRunning).toBe(true);
-    expect(runner.cancelRequested).toBe(false);
-
-    // The runner is still owned by B, so a third run is refused.
-    await expect(runner.run("C", undefined, undefined, [], callbacks())).rejects.toThrow(
+    expect(runnerB.isRunning).toBe(true);
+    expect(runnerA.isRunning).toBe(false);
+    await expect(runnerB.run("C", undefined, undefined, [], callbacks())).rejects.toThrow(
       "already has an active run"
     );
 
-    // Events from A's client must not reach B's callbacks: different clients,
-    // different listener sets.
+    // Events from A's client cannot reach B's callbacks.
     first.emit({
       type: "message_update",
       assistantMessageEvent: { type: "text_delta", delta: "old" }
@@ -216,48 +228,48 @@ describe("runner lifecycle: reuse rules", () => {
     first.emit({ type: "agent_settled" });
     expect(bDeltas).toEqual([]);
 
-    second.settle();
+    clientB.settle();
     await runB;
-    expect(runner.isRunning).toBe(false);
+    expect(runnerB.isRunning).toBe(false);
   });
 
-  it("Test 5b — the compact path has the same execution ownership", async () => {
+  it("Test 5b — the compact path invalidates the runner the same way", async () => {
     const first = createFakeClient();
-    // Keep the compact request pending until released.
     const releases = [];
     first.request = vi.fn(async (type) => {
       if (type === "compact") await new Promise((resolve) => releases.push(resolve));
       return {};
     });
-    const runner = createRunner({ client: first });
+    const runnerA = createRunner({ client: first });
 
-    const runA = runner.run("/compact", undefined, undefined, [], callbacks());
-    await waitFor(() => runner.isRunning === true && first.listeners.size > 0);
+    const runA = runnerA.run("/compact", undefined, undefined, [], callbacks());
+    await waitFor(() => runnerA.isRunning === true && first.listeners.size > 0);
     const runAOutcome = runA.catch(() => {});
 
-    runner.forceTerminate();
-    expect(runner.isRunning).toBe(false);
+    runnerA.forceTerminate();
+    expect(runnerA.invalid).toBe(true);
 
     const second = createFakeClient();
     second.request = vi.fn(async (type) => {
       if (type === "compact") await new Promise((resolve) => releases.push(resolve));
       return {};
     });
-    runner.rpcClient = second;
-    const runB = runner.run("/compact", undefined, undefined, [], callbacks());
-    await waitFor(() => runner.isRunning === true && second.listeners.size > 0);
+    const runnerB = createRunner({ client: second });
+    const clientB = second;
+    const runB = runnerB.run("/compact", undefined, undefined, [], callbacks());
+    await waitFor(() => runnerB.isRunning === true && clientB.listeners.size > 0);
 
-    // A's late finalizer must not release B's ownership.
+    // A's late compact cleanup must not release B's ownership.
     releases.shift()?.();
     await runAOutcome;
-    expect(runner.isRunning).toBe(true);
-    await expect(runner.run("C", undefined, undefined, [], callbacks())).rejects.toThrow(
+    expect(runnerB.isRunning).toBe(true);
+    await expect(runnerB.run("C", undefined, undefined, [], callbacks())).rejects.toThrow(
       "already has an active run"
     );
 
     releases.shift()?.();
     await runB;
-    expect(runner.isRunning).toBe(false);
+    expect(runnerB.isRunning).toBe(false);
   });
 
   it("Test 5 — a dead RPC process does not make the runner permanently unusable", async () => {
@@ -280,26 +292,34 @@ describe("runner lifecycle: reuse rules", () => {
     expect(runner.isRunning).toBe(false);
   });
 
-  it("Test 6 — the registry keeps handing out a reusable runner after termination", async () => {
-    const client = createFakeClient();
-    const runner = createRunner({ client });
-    const registry = new ThreadRunnerRegistry(() => runner);
+  it("Test 6 — the registry replaces an invalid runner instead of reusing it", async () => {
+    const runners = [];
+    const registry = new ThreadRunnerRegistry(() => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-agent-runner-lifecycle-"));
+      tempDirs.push(tempDir);
+      const runner = new PiRunner(
+        DEFAULT_SETTINGS,
+        { formatPrompt: (prompt) => prompt },
+        tempDir,
+        tempDir,
+        createFakeClient()
+      );
+      runners.push(runner);
+      return runner;
+    });
 
-    const { pending } = await startPendingRun(runner, client);
-    registry.create("t1");
-    runner.forceTerminate();
-    await pending.catch(() => {});
+    const first = registry.create("t1");
+    expect(registry.create("t1")).toBe(first);
 
-    const reused = registry.create("t1");
-    expect(reused).toBe(runner);
-    expect(reusable(reused)).toBe(true);
+    first.forceTerminate();
+    const second = registry.create("t1");
+
+    expect(second).not.toBe(first);
+    expect(second.invalid).toBe(false);
+    expect(runners).toEqual([first, second]);
+    expect(registry.runners.size).toBe(1);
 
     registry.dispose("t1");
     expect(registry.get("t1")).toBeUndefined();
   });
 });
-
-/** Mirrors the contract `PiRunner.run()` enforces at its entry. */
-function reusable(runner) {
-  return runner.isRunning !== true;
-}
