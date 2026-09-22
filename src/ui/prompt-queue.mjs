@@ -43,6 +43,9 @@ export function enqueuePrompt(
 
 /** @this {import("./PiAgentView.mjs").PiAgentView} */
 export function runNextQueuedPrompt() {
+  // A closed view must never start queued work; the queue stays persisted and is
+  // picked up the next time its chat is opened.
+  if (this.closed) return;
   if (this.canceling || this.plugin.promptQueue.isPaused() || this.steeringPromptIds.size > 0)
     return;
   const item = nextDeliverablePrompt(this.promptQueue, (threadId) =>

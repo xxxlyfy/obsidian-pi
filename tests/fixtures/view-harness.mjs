@@ -114,6 +114,7 @@ export function createViewHarness({
         shouldIncludeActiveNote: () => true,
         notify: (message) => notices.messages.push(String(message))
       }),
+      closed: false,
       running: false,
       canceling: false,
       activityText: "",

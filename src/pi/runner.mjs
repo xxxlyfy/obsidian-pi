@@ -44,6 +44,11 @@ export class PiRunner {
     this.rpcClient = rpcClient;
     this.extensionUiHandler = extensionUiHandler;
     this.cancelRequested = false;
+    /**
+     * Bumped for every execution. A late finalizer from an older execution must
+     * not clear the state of a newer one on the same runner.
+     */
+    this.executionGeneration = 0;
   }
 
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
@@ -88,6 +93,7 @@ export class PiRunner {
    * becomes reusable.
    */
   forceTerminate() {
+    this.executionGeneration += 1;
     const client = this.rpcClient;
     this.rpcClient = undefined;
     this.rpcSession = undefined;
@@ -139,6 +145,7 @@ export class PiRunner {
 
     this.cancelRequested = false;
     this.isRunning = true;
+    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     let client;
     try {
@@ -220,8 +227,10 @@ export class PiRunner {
       }
       throw error;
     } finally {
-      this.cancelRequested = false;
-      this.isRunning = false;
+      if (executionId === this.executionGeneration) {
+        this.cancelRequested = false;
+        this.isRunning = false;
+      }
       unsubscribe();
     }
   }
@@ -266,6 +275,7 @@ export class PiRunner {
 
     this.cancelRequested = false;
     this.isRunning = true;
+    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
@@ -303,8 +313,10 @@ export class PiRunner {
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       throw error;
     } finally {
-      this.cancelRequested = false;
-      this.isRunning = false;
+      if (executionId === this.executionGeneration) {
+        this.cancelRequested = false;
+        this.isRunning = false;
+      }
       unsubscribe();
     }
   }

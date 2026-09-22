@@ -359,6 +359,108 @@ describe("race: RPC process restarted", () => {
   });
 });
 
+describe("race: view close must not drain the queue", () => {
+  function queuedItem(threadId, id) {
+    return {
+      id,
+      prompt: `queued ${id}`,
+      threadId,
+      createdAt: 1,
+      images: [],
+      attachments: [],
+      annotations: [],
+      contextFilePath: undefined,
+      includeActiveNote: true,
+      state: "pending"
+    };
+  }
+
+  it("does not start a queued prompt after the view is closed", async () => {
+    let view;
+    let threadId;
+    let rejectWithCancellation;
+    const runner = createScriptedRunner(
+      async ({ callbacks }) =>
+        new Promise((_resolve, reject) => {
+          rejectWithCancellation = () => reject(new PiRunCanceledError());
+          callbacks.onTextDelta("streaming");
+        })
+    );
+    const plugin = createPluginDouble(runner);
+    threadId = plugin.threads.currentThreadId;
+    view = createViewDouble(plugin);
+    view.promptQueue = [queuedItem(threadId, "q1"), queuedItem(threadId, "q2")];
+    view.plugin.promptQueue.getItems = () => view.promptQueue;
+
+    const pending = view.runPrompt("first", threadId);
+    await vi.waitFor(() => expect(runner.calls).toHaveLength(1));
+
+    view.onClose();
+    rejectWithCancellation();
+    await pending;
+
+    // The closed view must not start the queued prompts, and they stay queued.
+    expect(runner.calls).toHaveLength(1);
+    expect(view.closed).toBe(true);
+    expect(view.promptQueue.map((item) => item.id)).toEqual(["q1", "q2"]);
+  });
+
+  it("still drains the queue normally while the view is open", async () => {
+    const prompts = [];
+    const runner = createScriptedRunner(async ({ callbacks, prompt }) => {
+      prompts.push(prompt);
+      callbacks.onTextDelta("done");
+      return result("done", runnerThreadId);
+    });
+    let runnerThreadId;
+    const plugin = createPluginDouble(runner);
+    runnerThreadId = plugin.threads.currentThreadId;
+    const view = createViewDouble(plugin);
+    view.promptQueue = [queuedItem(runnerThreadId, "q1")];
+    plugin.promptQueue.getItems = () => view.promptQueue;
+    plugin.promptQueue.isPaused = () => false;
+
+    await view.runPrompt("first", runnerThreadId);
+    // The drain is fire-and-forget, so wait for the queued run to start.
+    await vi.waitFor(() => expect(prompts).toHaveLength(2));
+
+    expect(prompts).toEqual(["first", "queued q1"]);
+  });
+
+  it("lets a reopened view work while the old queue stays inactive", async () => {
+    let rejectWithCancellation;
+    const firstRunner = createScriptedRunner(
+      async () =>
+        new Promise((_resolve, reject) => {
+          rejectWithCancellation = () => reject(new PiRunCanceledError());
+        })
+    );
+    const plugin = createPluginDouble(firstRunner);
+    const threadId = plugin.threads.currentThreadId;
+    const oldView = createViewDouble(plugin);
+    oldView.promptQueue = [queuedItem(threadId, "q1")];
+    plugin.promptQueue.getItems = () => oldView.promptQueue;
+
+    const pending = oldView.runPrompt("first", threadId);
+    await vi.waitFor(() => expect(firstRunner.calls).toHaveLength(1));
+    oldView.onClose();
+    rejectWithCancellation();
+    await pending;
+
+    const secondRunner = createScriptedRunner(async ({ callbacks }) => {
+      callbacks.onTextDelta("reopened");
+      return result("reopened", threadId);
+    });
+    plugin.createPiRunner = () => secondRunner;
+    const newView = createViewDouble(plugin);
+    await newView.runPrompt("from the new view", threadId);
+
+    expect(firstRunner.calls).toHaveLength(1);
+    expect(plugin.threads.getThread(threadId).messages.at(-1).content).toBe("reopened");
+    expect(newView.closed).toBe(false);
+  });
+});
+
 describe("multi-view", () => {
   it("rejects a second run for a thread another view is already running", async () => {
     let releaseFirst;

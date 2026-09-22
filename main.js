@@ -6526,6 +6526,7 @@ var PiRunner = class {
     this.rpcClient = rpcClient;
     this.extensionUiHandler = extensionUiHandler;
     this.cancelRequested = false;
+    this.executionGeneration = 0;
   }
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
     if (this.isRunning)
@@ -6563,6 +6564,7 @@ var PiRunner = class {
    * becomes reusable.
    */
   forceTerminate() {
+    this.executionGeneration += 1;
     const client = this.rpcClient;
     this.rpcClient = void 0;
     this.rpcSession = void 0;
@@ -6609,6 +6611,7 @@ var PiRunner = class {
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     this.cancelRequested = false;
     this.isRunning = true;
+    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     let client;
     try {
@@ -6687,8 +6690,10 @@ var PiRunner = class {
       }
       throw error;
     } finally {
-      this.cancelRequested = false;
-      this.isRunning = false;
+      if (executionId === this.executionGeneration) {
+        this.cancelRequested = false;
+        this.isRunning = false;
+      }
       unsubscribe();
     }
   }
@@ -6730,6 +6735,7 @@ var PiRunner = class {
     if (callbacks?.isCanceled?.()) throw new PiRunCanceledError();
     this.cancelRequested = false;
     this.isRunning = true;
+    const executionId = ++this.executionGeneration;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
@@ -6766,8 +6772,10 @@ var PiRunner = class {
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new PiRunCanceledError(error);
       throw error;
     } finally {
-      this.cancelRequested = false;
-      this.isRunning = false;
+      if (executionId === this.executionGeneration) {
+        this.cancelRequested = false;
+        this.isRunning = false;
+      }
       unsubscribe();
     }
   }
@@ -8234,6 +8242,7 @@ function enqueuePrompt(
   new f.Notice(STRINGS.queue.queuedNotice(this.promptQueue.length));
 }
 function runNextQueuedPrompt() {
+  if (this.closed) return;
   if (this.canceling || this.plugin.promptQueue.isPaused() || this.steeringPromptIds.size > 0)
     return;
   const item = nextDeliverablePrompt(this.promptQueue, (threadId) =>
@@ -10554,6 +10563,7 @@ var PiAgentView = class extends f4.ItemView {
     this.messageRenderComponents = [];
     this.messageRenderComponentByElement = /* @__PURE__ */ new WeakMap();
     this.runtime = this.plugin.createAgentRuntime();
+    this.closed = false;
     this.delivery = new PromptDelivery({
       consumeAnnotations: (sourcePath) => this.plugin.consumeAnnotationsForPrompt(sourcePath),
       restoreAnnotations: (annotations) => this.plugin.restoreConsumedAnnotations(annotations),
@@ -10803,6 +10813,7 @@ var PiAgentView = class extends f4.ItemView {
     this.setRunningState(this.running);
   }
   async onClose() {
+    this.closed = true;
     for (const run of this.runtime.listRuns()) this.runtime.requestCancel(run);
     this.runtime.dispose();
     this.messagesEl = void 0;

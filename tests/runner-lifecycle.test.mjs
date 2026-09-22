@@ -170,6 +170,39 @@ describe("runner lifecycle: reuse rules", () => {
     expect(runner.isRunning).toBe(false);
   });
 
+  it("Test 5a — a late finalizer from a terminated run cannot clear the new run", async () => {
+    const first = createFakeClient();
+    const runner = createRunner({ client: first });
+
+    const { pending: runA } = await startPendingRun(runner, first);
+    // Attach the rejection handler before force termination so the settling run
+    // is never an unhandled rejection.
+    const runAOutcome = runA.catch(() => {});
+    runner.forceTerminate();
+    expect(runner.rpcClient).toBeUndefined();
+
+    // Run B starts on the same runner before A's continuation runs.
+    const second = createFakeClient();
+    runner.rpcClient = second;
+    const runB = runner.run("B", undefined, undefined, [], callbacks());
+    await waitFor(() => runner.isRunning === true && second.listeners.size > 0);
+
+    // A settles late: its finalizer must not mark the runner as idle.
+    first.dispose();
+    await runAOutcome;
+    expect(runner.isRunning).toBe(true);
+    expect(runner.cancelRequested).toBe(false);
+
+    // The runner is still owned by B, so a third run is refused.
+    await expect(runner.run("C", undefined, undefined, [], callbacks())).rejects.toThrow(
+      "already has an active run"
+    );
+
+    second.settle();
+    await runB;
+    expect(runner.isRunning).toBe(false);
+  });
+
   it("Test 5 — a dead RPC process does not make the runner permanently unusable", async () => {
     const client = createFakeClient();
     const runner = createRunner({ client });

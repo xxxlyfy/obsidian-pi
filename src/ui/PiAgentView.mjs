@@ -73,6 +73,8 @@ export class PiAgentView extends f.ItemView {
     this.messageRenderComponents = [];
     this.messageRenderComponentByElement = new WeakMap();
     this.runtime = this.plugin.createAgentRuntime();
+    /** Set once the view is closed: no async continuation may start new work. */
+    this.closed = false;
     this.delivery = new PromptDelivery({
       consumeAnnotations: (sourcePath) => this.plugin.consumeAnnotationsForPrompt(sourcePath),
       restoreAnnotations: (annotations) => this.plugin.restoreConsumedAnnotations(annotations),
@@ -324,6 +326,9 @@ export class PiAgentView extends f.ItemView {
   async onClose() {
     // A run created by this view belongs to this view: closing the view cancels
     // it and releases the runtime instead of leaving an unattached run behind.
+    // The closed flag keeps the settling run's continuation from draining the
+    // queue of a view that no longer exists.
+    this.closed = true;
     for (const run of this.runtime.listRuns()) this.runtime.requestCancel(run);
     this.runtime.dispose();
     this.messagesEl = undefined;
