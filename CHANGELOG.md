@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.0.37
+
+- Agent runs now have a single owner: `AgentRuntime` keeps one `RunState` record per chat, and start, cancel, retry, steer, compaction, and event routing go through it. RPC events that arrive after a run was cancelled or already finished are dropped instead of leaking into the chat view.
+- Search and backlinks are index-backed. `VaultIndex` builds metadata, tag, and reverse backlink indexes from Obsidian's metadata cache without reading note content, and search reads at most 128 candidate files instead of every note (10,000 notes: about 30 ms index build, 20 ms search, 128 file reads).
+- Chat and queue changes are coalesced into one disk write over a 250 ms window and flushed on unload, instead of writing `data.json` and the chat-history backup on every mutation. Settings, annotations, and model changes are still written immediately.
+- Thread, queue, model-catalog, prompt-delivery, and annotation-snapshot state moved into dedicated services, and `PiAgentPlugin` is now a composition root. Views read run state from the runtime and refresh through a `ViewRegistry` instead of reaching into view internals, and the view exposes explicit intents (`onSendClick`, `onCancelClick`, `onThreadSelect`).
+- All Obsidian API access goes through `src/obsidian/*` adapters, so the agent, context, thread, and persistence modules no longer import Obsidian and can be tested against a fake vault.
+- Removed the legacy vault chat-history import path (storage versions 1-3) and two unused helpers. The stored data format is unchanged: chat history, annotations, queued prompts, settings, and the checksummed backups keep working as before.
+- Added golden-path tests for streaming, cancel with late events, failure and retry, persist and reload, and note-plus-annotation context, plus search and index benchmarks (`npm run bench:search`) and synthetic vault fixtures.
+
 ## 0.0.36
 
 - Cancellation is now detected from the error identity instead of the `"Pi run canceled."` message text, so the runtime message can change without breaking the cancel path. `PiRunCanceledError` and `isPiRunCanceled()` walk the error cause chain, and the runner, the plugin, and the view no longer compare message strings.
