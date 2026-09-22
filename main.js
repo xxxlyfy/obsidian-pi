@@ -1027,6 +1027,206 @@ var ThreadService = class {
   }
 };
 
+// src/threads/chat-history-backup.mjs
+var import_node_crypto = __toESM(require("node:crypto"), 1);
+var import_node_fs2 = __toESM(require("node:fs"), 1);
+var import_node_path = __toESM(require("node:path"), 1);
+var BACKUP_SCHEMA_VERSION = 1;
+var BACKUP_FILE = "chat-history.backup.json";
+var PREVIOUS_BACKUP_FILE = "chat-history.backup.previous.json";
+async function writeChatHistoryBackup(pluginDirectory, history) {
+  if (!pluginDirectory) throw new Error(STRINGS.history.pluginDirectoryUnavailable);
+  const normalized = cloneHistory(history);
+  const payload = {
+    schemaVersion: BACKUP_SCHEMA_VERSION,
+    savedAt: /* @__PURE__ */ new Date().toISOString(),
+    checksum: checksum(normalized),
+    chatHistory: normalized
+  };
+  await import_node_fs2.default.promises.mkdir(pluginDirectory, { recursive: true });
+  const backupPath = import_node_path.default.join(pluginDirectory, BACKUP_FILE);
+  const previousPath = import_node_path.default.join(pluginDirectory, PREVIOUS_BACKUP_FILE);
+  const temporaryPath = `${backupPath}.tmp-${process.pid}-${Date.now()}`;
+  await import_node_fs2.default.promises.writeFile(
+    temporaryPath,
+    `${JSON.stringify(payload, null, 2)}
+`,
+    "utf8"
+  );
+  try {
+    const current = await readValidBackup(backupPath);
+    if (current) await copyAtomic(backupPath, previousPath);
+    await replaceFile(temporaryPath, backupPath);
+  } finally {
+    await import_node_fs2.default.promises.rm(temporaryPath, { force: true });
+  }
+}
+async function readChatHistoryBackup(pluginDirectory) {
+  if (!pluginDirectory) return void 0;
+  for (const fileName of [BACKUP_FILE, PREVIOUS_BACKUP_FILE]) {
+    const backup = await readValidBackup(import_node_path.default.join(pluginDirectory, fileName));
+    if (backup) return backup.chatHistory;
+  }
+  return void 0;
+}
+async function readValidBackup(filePath) {
+  try {
+    const backup = JSON.parse(await import_node_fs2.default.promises.readFile(filePath, "utf8"));
+    if (
+      backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
+      backup.checksum !== checksum(backup.chatHistory)
+    ) {
+      return void 0;
+    }
+    return { ...backup, chatHistory: cloneHistory(backup.chatHistory) };
+  } catch {
+    return void 0;
+  }
+}
+function cloneHistory(history) {
+  if (!history || !Array.isArray(history.threads)) throw new Error(STRINGS.history.invalidBackup);
+  const cloned = JSON.parse(JSON.stringify(history));
+  if (
+    typeof cloned.currentThreadId !== "string" ||
+    cloned.threads.some(
+      (thread) =>
+        !thread ||
+        typeof thread.id !== "string" ||
+        typeof thread.title !== "string" ||
+        !Array.isArray(thread.messages)
+    )
+  ) {
+    throw new Error(STRINGS.history.invalidBackup);
+  }
+  return cloned;
+}
+function checksum(history) {
+  return import_node_crypto.default
+    .createHash("sha256")
+    .update(JSON.stringify(history))
+    .digest("hex");
+}
+async function copyAtomic(sourcePath, destinationPath) {
+  const temporaryPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
+  await import_node_fs2.default.promises.copyFile(sourcePath, temporaryPath);
+  try {
+    await replaceFile(temporaryPath, destinationPath);
+  } finally {
+    await import_node_fs2.default.promises.rm(temporaryPath, { force: true });
+  }
+}
+async function replaceFile(sourcePath, destinationPath) {
+  try {
+    await import_node_fs2.default.promises.rename(sourcePath, destinationPath);
+  } catch (error) {
+    const code =
+      /** @type {NodeJS.ErrnoException} */
+      error?.code;
+    if (code !== "EEXIST" && code !== "EPERM") throw error;
+    await import_node_fs2.default.promises.rm(destinationPath, { force: true });
+    await import_node_fs2.default.promises.rename(sourcePath, destinationPath);
+  }
+}
+
+// src/persistence/plugin-store.mjs
+var DEFAULT_FLUSH_DELAY_MS = 250;
+var PluginStore = class {
+  /**
+   * @param {object} options
+   * @param {() => Promise<any>} options.loadData
+   * @param {(data: any) => Promise<void>} options.saveData
+   * @param {() => string | undefined} options.getPluginDirectory
+   * @param {() => any} options.buildPayload Builds the current snapshot to persist.
+   * @param {(error: unknown) => void} [options.onSaveError] For scheduled/flushed writes.
+   * @param {number} [options.flushDelayMs]
+   */
+  constructor({
+    loadData,
+    saveData,
+    getPluginDirectory,
+    buildPayload,
+    onSaveError = () => {},
+    flushDelayMs = DEFAULT_FLUSH_DELAY_MS
+  }) {
+    this.loadData = loadData;
+    this.saveData = saveData;
+    this.getPluginDirectory = getPluginDirectory;
+    this.buildPayload = buildPayload;
+    this.onSaveError = onSaveError;
+    this.flushDelayMs = flushDelayMs;
+    this.timer = void 0;
+    this.dirty = false;
+    this.writing = void 0;
+  }
+  /** @returns {Promise<any>} Raw plugin data, never undefined. */
+  async load() {
+    return (await this.loadData()) ?? {};
+  }
+  /** @returns {Promise<any>} Chat history recovered from the backup files. */
+  async readBackupHistory() {
+    return readChatHistoryBackup(this.getPluginDirectory());
+  }
+  get hasPendingWrite() {
+    return this.dirty || this.timer !== void 0 || this.writing !== void 0;
+  }
+  /**
+   * Debounced write. Repeated calls inside one window result in a single write
+   * with the latest snapshot.
+   */
+  schedule() {
+    if (this.timer !== void 0) return;
+    this.timer = setTimeout(() => {
+      this.timer = void 0;
+      this.saveNow().catch((error) => this.onSaveError(error));
+    }, this.flushDelayMs);
+  }
+  /**
+   * Immediate serialized write. Rejects when the write fails so callers can
+   * report the failure themselves (settings save, annotation save).
+   *
+   * @returns {Promise<void>}
+   */
+  saveNow() {
+    this.clearTimer();
+    this.dirty = true;
+    if (!this.writing) this.writing = this.drain();
+    return this.writing;
+  }
+  /**
+   * Writes anything that is still pending, including a scheduled write and a
+   * mutation that landed while a write was in flight.
+   *
+   * @returns {Promise<void>}
+   */
+  async flush() {
+    const hadScheduledWrite = this.timer !== void 0;
+    this.clearTimer();
+    if (this.writing) await this.writing.catch((error) => this.onSaveError(error));
+    if (this.dirty || hadScheduledWrite)
+      await this.saveNow().catch((error) => this.onSaveError(error));
+  }
+  async drain() {
+    try {
+      while (this.dirty) {
+        this.dirty = false;
+        const payload = this.buildPayload();
+        await this.saveData(payload);
+        await writeChatHistoryBackup(this.getPluginDirectory(), payload.chatHistory);
+      }
+    } finally {
+      this.writing = void 0;
+    }
+  }
+  clearTimer() {
+    if (this.timer === void 0) return;
+    clearTimeout(this.timer);
+    this.timer = void 0;
+  }
+  dispose() {
+    this.clearTimer();
+  }
+};
+
 // src/annotations/annotation-model.mjs
 var ANNOTATION_SCHEMA_VERSION = 1;
 var ANNOTATION_LIMITS = Object.freeze({
@@ -3515,7 +3715,7 @@ function formatContextShowResponse(inspection) {
 }
 
 // src/context/skills.mjs
-var import_node_path = __toESM(require("node:path"), 1);
+var import_node_path2 = __toESM(require("node:path"), 1);
 
 // src/shared/paths.mjs
 function normalizeVaultFolder(value, fallback = "Pi") {
@@ -3551,15 +3751,15 @@ function getConfiguredSkillPaths(settings, basePath) {
 function resolveSkillPath(skillPath, basePath) {
   const configured = String(skillPath || "").trim();
   if (!configured || configured.startsWith("~")) return "";
-  if (import_node_path.default.isAbsolute(configured))
-    return import_node_path.default.normalize(configured);
+  if (import_node_path2.default.isAbsolute(configured))
+    return import_node_path2.default.normalize(configured);
   if (!basePath) return "";
-  const base = import_node_path.default.resolve(basePath);
-  const resolved = import_node_path.default.resolve(base, configured);
-  const relative = import_node_path.default.relative(base, resolved);
+  const base = import_node_path2.default.resolve(basePath);
+  const resolved = import_node_path2.default.resolve(base, configured);
+  const relative = import_node_path2.default.relative(base, resolved);
   return relative === ".." ||
-    relative.startsWith(`..${import_node_path.default.sep}`) ||
-    import_node_path.default.isAbsolute(relative)
+    relative.startsWith(`..${import_node_path2.default.sep}`) ||
+    import_node_path2.default.isAbsolute(relative)
     ? ""
     : resolved;
 }
@@ -3921,8 +4121,8 @@ function getErrorMessage(error) {
 }
 
 // src/pi/environment.mjs
-var import_node_fs2 = __toESM(require("node:fs"), 1);
-var import_node_path2 = __toESM(require("node:path"), 1);
+var import_node_fs3 = __toESM(require("node:fs"), 1);
+var import_node_path3 = __toESM(require("node:path"), 1);
 var POSIX_PI_CANDIDATES = ["/opt/homebrew/bin/pi", "/usr/local/bin/pi", "/usr/bin/pi"];
 var WINDOWS_PI_CANDIDATES = ["pi.cmd", "pi.exe", "pi"];
 var POSIX_PATH_CANDIDATES = [
@@ -3938,7 +4138,7 @@ function findPiExecutable(configuredPath = "") {
   if (configuredExecutable) return configuredExecutable;
   if (process.platform === "win32") return WINDOWS_PI_CANDIDATES[0];
   for (const candidate of POSIX_PI_CANDIDATES) {
-    if (import_node_fs2.default.existsSync(candidate)) return candidate;
+    if (import_node_fs3.default.existsSync(candidate)) return candidate;
   }
   const piNode = findPiNodeExecutable();
   if (piNode) return piNode;
@@ -3953,8 +4153,8 @@ function expandHomeDirectory(executablePath) {
   const home = process.env.HOME;
   if (!home) return executablePath;
   if (executablePath === "~") return home;
-  return executablePath.startsWith(`~${import_node_path2.default.sep}`)
-    ? import_node_path2.default.join(home, executablePath.slice(2))
+  return executablePath.startsWith(`~${import_node_path3.default.sep}`)
+    ? import_node_path3.default.join(home, executablePath.slice(2))
     : executablePath;
 }
 function expandEnvironmentVariables(executablePath) {
@@ -3966,15 +4166,15 @@ function expandEnvironmentVariables(executablePath) {
 function findPiNodeExecutable() {
   const home = process.env.HOME;
   if (!home) return null;
-  const root = import_node_path2.default.join(home, ".local", "share", "pi-node");
+  const root = import_node_path3.default.join(home, ".local", "share", "pi-node");
   try {
-    const versions = import_node_fs2.default
+    const versions = import_node_fs3.default
       .readdirSync(root, { withFileTypes: true })
       .filter((d) => d.isDirectory())
-      .map((d) => import_node_path2.default.join(root, d.name));
+      .map((d) => import_node_path3.default.join(root, d.name));
     for (const v of versions) {
-      const candidate = import_node_path2.default.join(v, "bin", "pi");
-      if (import_node_fs2.default.existsSync(candidate)) return candidate;
+      const candidate = import_node_path3.default.join(v, "bin", "pi");
+      if (import_node_fs3.default.existsSync(candidate)) return candidate;
     }
   } catch {
     return null;
@@ -4025,55 +4225,55 @@ function buildPosixPath(piExecutable) {
     ...getPiNodePaths(),
     ...getNodeVersionManagerDirectories(),
     ...getExistingPathEntries()
-  ]).join(import_node_path2.default.delimiter);
+  ]).join(import_node_path3.default.delimiter);
 }
 function getPiNodePaths() {
   const home = process.env.HOME;
   if (!home) return [];
-  const root = import_node_path2.default.join(home, ".local", "share", "pi-node");
+  const root = import_node_path3.default.join(home, ".local", "share", "pi-node");
   try {
-    return import_node_fs2.default
+    return import_node_fs3.default
       .readdirSync(root, { withFileTypes: true })
       .filter((d) => d.isDirectory())
-      .map((d) => import_node_path2.default.join(root, d.name, "bin"));
+      .map((d) => import_node_path3.default.join(root, d.name, "bin"));
   } catch {
     return [];
   }
 }
 function getExistingPathEntries() {
-  return (process.env.PATH ?? "").split(import_node_path2.default.delimiter).filter(Boolean);
+  return (process.env.PATH ?? "").split(import_node_path3.default.delimiter).filter(Boolean);
 }
 function getExecutableDirectory(executable) {
-  return import_node_path2.default.isAbsolute(executable)
-    ? [import_node_path2.default.dirname(executable)]
+  return import_node_path3.default.isAbsolute(executable)
+    ? [import_node_path3.default.dirname(executable)]
     : [];
 }
 function getNodeVersionManagerDirectories() {
   const home = process.env.HOME;
   if (!home) return [];
   return [
-    ...getNvmNodeBinDirectories(import_node_path2.default.join(home, ".nvm", "versions", "node")),
-    ...getFnmNodeBinDirectories(import_node_path2.default.join(home, ".fnm", "node-versions")),
-    import_node_path2.default.join(home, ".asdf", "shims"),
-    import_node_path2.default.join(home, ".volta", "bin")
+    ...getNvmNodeBinDirectories(import_node_path3.default.join(home, ".nvm", "versions", "node")),
+    ...getFnmNodeBinDirectories(import_node_path3.default.join(home, ".fnm", "node-versions")),
+    import_node_path3.default.join(home, ".asdf", "shims"),
+    import_node_path3.default.join(home, ".volta", "bin")
   ];
 }
 function getNvmNodeBinDirectories(root) {
   return getChildDirectories(root).map((directory) =>
-    import_node_path2.default.join(directory, "bin")
+    import_node_path3.default.join(directory, "bin")
   );
 }
 function getFnmNodeBinDirectories(root) {
   return getChildDirectories(root).map((directory) =>
-    import_node_path2.default.join(directory, "installation", "bin")
+    import_node_path3.default.join(directory, "installation", "bin")
   );
 }
 function getChildDirectories(root) {
   try {
-    return import_node_fs2.default
+    return import_node_fs3.default
       .readdirSync(root, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => import_node_path2.default.join(root, entry.name));
+      .map((entry) => import_node_path3.default.join(root, entry.name));
   } catch {
     return [];
   }
@@ -4081,7 +4281,7 @@ function getChildDirectories(root) {
 function uniqueExistingDirectories(directories) {
   const seen = /* @__PURE__ */ new Set();
   return directories.filter((directory) => {
-    if (!directory || seen.has(directory) || !import_node_fs2.default.existsSync(directory))
+    if (!directory || seen.has(directory) || !import_node_fs3.default.existsSync(directory))
       return false;
     seen.add(directory);
     return true;
@@ -4703,8 +4903,8 @@ function getSupportedReasoningLevels(model) {
 
 // src/pi/runner.mjs
 var import_node_child_process3 = require("node:child_process");
-var import_node_fs3 = __toESM(require("node:fs"), 1);
-var import_node_path3 = __toESM(require("node:path"), 1);
+var import_node_fs4 = __toESM(require("node:fs"), 1);
+var import_node_path4 = __toESM(require("node:path"), 1);
 
 // src/pi/token-usage.mjs
 function calculateContextTokens(usage) {
@@ -5842,38 +6042,38 @@ var PiRunner = class {
     return args;
   }
   getSessionDirectory() {
-    return import_node_path3.default.resolve(this.pluginDirectory ?? ".", "pi-sessions");
+    return import_node_path4.default.resolve(this.pluginDirectory ?? ".", "pi-sessions");
   }
   createSessionFilePath() {
     const sessionDir = this.getSessionDirectory();
-    import_node_fs3.default.mkdirSync(sessionDir, { recursive: true });
-    return import_node_path3.default.join(
+    import_node_fs4.default.mkdirSync(sessionDir, { recursive: true });
+    return import_node_path4.default.join(
       sessionDir,
       `${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
     );
   }
   createSessionReference(sessionPath) {
     const sessionDir = this.getSessionDirectory();
-    const relativePath = import_node_path3.default.relative(
+    const relativePath = import_node_path4.default.relative(
       sessionDir,
-      import_node_path3.default.resolve(sessionPath)
+      import_node_path4.default.resolve(sessionPath)
     );
     return relativePath && isSafeRelativePath(relativePath) ? relativePath : void 0;
   }
   resolveSessionPath(sessionReference) {
     if (!sessionReference) return void 0;
     const sessionDir = this.getSessionDirectory();
-    const resolvedPath = import_node_path3.default.isAbsolute(sessionReference)
-      ? import_node_path3.default.resolve(sessionReference)
-      : import_node_path3.default.resolve(sessionDir, sessionReference);
-    const relativePath = import_node_path3.default.relative(sessionDir, resolvedPath);
+    const resolvedPath = import_node_path4.default.isAbsolute(sessionReference)
+      ? import_node_path4.default.resolve(sessionReference)
+      : import_node_path4.default.resolve(sessionDir, sessionReference);
+    const relativePath = import_node_path4.default.relative(sessionDir, resolvedPath);
     if (!relativePath || !isSafeRelativePath(relativePath)) return void 0;
     return resolvedPath;
   }
   resolveOrCreateSession(sessionReference) {
     const existingPath = this.resolveSessionPath(sessionReference);
     const sessionPath =
-      existingPath && import_node_fs3.default.existsSync(existingPath)
+      existingPath && import_node_fs4.default.existsSync(existingPath)
         ? existingPath
         : this.createSessionFilePath();
     return {
@@ -5883,7 +6083,7 @@ var PiRunner = class {
   }
   async getExistingSessionRpcClient(sessionReference) {
     const sessionPath = this.resolveSessionPath(sessionReference);
-    if (!sessionPath || !import_node_fs3.default.existsSync(sessionPath)) {
+    if (!sessionPath || !import_node_fs4.default.existsSync(sessionPath)) {
       throw new Error("The local Pi session file is not available.");
     }
     return this.getOrCreateRpcClient(sessionReference);
@@ -5895,7 +6095,7 @@ var PiRunner = class {
     const state = await client.request("get_state");
     const cloneReference = this.createSessionReference(state?.sessionFile);
     const clonePath = this.resolveSessionPath(cloneReference);
-    if (!clonePath || !import_node_fs3.default.existsSync(clonePath)) {
+    if (!clonePath || !import_node_fs4.default.existsSync(clonePath)) {
       throw new Error("Pi did not return a portable local clone session.");
     }
     return cloneReference;
@@ -5978,8 +6178,8 @@ var PiRunner = class {
 function isSafeRelativePath(relativePath) {
   return (
     relativePath !== ".." &&
-    !relativePath.startsWith(`..${import_node_path3.default.sep}`) &&
-    !import_node_path3.default.isAbsolute(relativePath)
+    !relativePath.startsWith(`..${import_node_path4.default.sep}`) &&
+    !import_node_path4.default.isAbsolute(relativePath)
   );
 }
 
@@ -10829,107 +11029,6 @@ function sanitizeThreadHistory(history) {
   return { currentThreadId, threads };
 }
 
-// src/threads/chat-history-backup.mjs
-var import_node_crypto = __toESM(require("node:crypto"), 1);
-var import_node_fs4 = __toESM(require("node:fs"), 1);
-var import_node_path4 = __toESM(require("node:path"), 1);
-var BACKUP_SCHEMA_VERSION = 1;
-var BACKUP_FILE = "chat-history.backup.json";
-var PREVIOUS_BACKUP_FILE = "chat-history.backup.previous.json";
-async function writeChatHistoryBackup(pluginDirectory, history) {
-  if (!pluginDirectory) throw new Error(STRINGS.history.pluginDirectoryUnavailable);
-  const normalized = cloneHistory(history);
-  const payload = {
-    schemaVersion: BACKUP_SCHEMA_VERSION,
-    savedAt: /* @__PURE__ */ new Date().toISOString(),
-    checksum: checksum(normalized),
-    chatHistory: normalized
-  };
-  await import_node_fs4.default.promises.mkdir(pluginDirectory, { recursive: true });
-  const backupPath = import_node_path4.default.join(pluginDirectory, BACKUP_FILE);
-  const previousPath = import_node_path4.default.join(pluginDirectory, PREVIOUS_BACKUP_FILE);
-  const temporaryPath = `${backupPath}.tmp-${process.pid}-${Date.now()}`;
-  await import_node_fs4.default.promises.writeFile(
-    temporaryPath,
-    `${JSON.stringify(payload, null, 2)}
-`,
-    "utf8"
-  );
-  try {
-    const current = await readValidBackup(backupPath);
-    if (current) await copyAtomic(backupPath, previousPath);
-    await replaceFile(temporaryPath, backupPath);
-  } finally {
-    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
-  }
-}
-async function readChatHistoryBackup(pluginDirectory) {
-  if (!pluginDirectory) return void 0;
-  for (const fileName of [BACKUP_FILE, PREVIOUS_BACKUP_FILE]) {
-    const backup = await readValidBackup(import_node_path4.default.join(pluginDirectory, fileName));
-    if (backup) return backup.chatHistory;
-  }
-  return void 0;
-}
-async function readValidBackup(filePath) {
-  try {
-    const backup = JSON.parse(await import_node_fs4.default.promises.readFile(filePath, "utf8"));
-    if (
-      backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
-      backup.checksum !== checksum(backup.chatHistory)
-    ) {
-      return void 0;
-    }
-    return { ...backup, chatHistory: cloneHistory(backup.chatHistory) };
-  } catch {
-    return void 0;
-  }
-}
-function cloneHistory(history) {
-  if (!history || !Array.isArray(history.threads)) throw new Error(STRINGS.history.invalidBackup);
-  const cloned = JSON.parse(JSON.stringify(history));
-  if (
-    typeof cloned.currentThreadId !== "string" ||
-    cloned.threads.some(
-      (thread) =>
-        !thread ||
-        typeof thread.id !== "string" ||
-        typeof thread.title !== "string" ||
-        !Array.isArray(thread.messages)
-    )
-  ) {
-    throw new Error(STRINGS.history.invalidBackup);
-  }
-  return cloned;
-}
-function checksum(history) {
-  return import_node_crypto.default
-    .createHash("sha256")
-    .update(JSON.stringify(history))
-    .digest("hex");
-}
-async function copyAtomic(sourcePath, destinationPath) {
-  const temporaryPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
-  await import_node_fs4.default.promises.copyFile(sourcePath, temporaryPath);
-  try {
-    await replaceFile(temporaryPath, destinationPath);
-  } finally {
-    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
-  }
-}
-async function replaceFile(sourcePath, destinationPath) {
-  try {
-    await import_node_fs4.default.promises.rename(sourcePath, destinationPath);
-  } catch (error) {
-    const code =
-      /** @type {NodeJS.ErrnoException} */
-      error?.code;
-    if (code !== "EEXIST" && code !== "EPERM") throw error;
-    await import_node_fs4.default.promises.rm(destinationPath, { force: true });
-    await import_node_fs4.default.promises.rename(sourcePath, destinationPath);
-  }
-}
-
 // src/threads/chat-history-import.mjs
 var import_node_fs5 = __toESM(require("node:fs"), 1);
 var import_node_path5 = __toESM(require("node:path"), 1);
@@ -11698,7 +11797,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.settings = DEFAULT_SETTINGS;
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
-    this.dataSaveChain = Promise.resolve();
+    this.store = this.createPluginStore();
     this.threadRunners = new ThreadRunnerRegistry(() => this.buildPiRunner());
     this.threads = this.buildThreadService();
     this.extensionUiHandler = void 0;
@@ -11838,9 +11937,10 @@ var PiAgentPlugin = class extends P.Plugin {
     this.annotationController?.destroy();
     this.cancelPiRun();
     this.threadRunners.disposeAll();
+    void this.store.flush();
   }
   async loadSettings() {
-    const rawData = (await this.loadData()) ?? {};
+    const rawData = await this.store.load();
     const {
       chatHistory,
       messages,
@@ -11874,7 +11974,7 @@ var PiAgentPlugin = class extends P.Plugin {
     let restoredHistory = importedHistory?.history;
     if (!restoredHistory && isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
     if (!restoredHistory) {
-      restoredHistory = await readChatHistoryBackup(this.getPluginDirectory());
+      restoredHistory = await this.store.readBackupHistory();
       if (restoredHistory) new P.Notice(STRINGS.plugin.historyRecovered);
     }
     this.settings = normalizeSettings(rawSettings);
@@ -12480,32 +12580,36 @@ var PiAgentPlugin = class extends P.Plugin {
       persist: () => this.saveThreadHistory()
     });
   }
-  saveThreadHistory() {
-    this.savePluginData().catch((error) => {
-      console.warn(STRINGS.plugin.historySaveFailed, error);
+  createPluginStore() {
+    return new PluginStore({
+      loadData: () => this.loadData(),
+      saveData: (data) => this.saveData(data),
+      getPluginDirectory: () => this.getPluginDirectory(),
+      buildPayload: () => this.buildPluginData(),
+      onSaveError: (error) => console.warn(STRINGS.plugin.historySaveFailed, error)
     });
   }
-  saveAnnotations() {
-    this.savePluginData().catch(() => {
-      new P.Notice(STRINGS.plugin.annotationSaveFailed);
-    });
-  }
-  savePluginData() {
-    const history = sanitizeThreadHistory(this.threadHistory.toJSON());
-    const data = {
+  buildPluginData() {
+    return {
       ...this.settings,
-      chatHistory: history,
+      chatHistory: sanitizeThreadHistory(this.threadHistory.toJSON()),
       localPromptQueue: this.localPromptQueue,
       localPromptSteering: this.localPromptSteering,
       annotationData: this.annotationStore.toJSON()
     };
-    this.dataSaveChain = this.dataSaveChain
-      .catch(() => {})
-      .then(async () => {
-        await this.saveData(data);
-        await writeChatHistoryBackup(this.getPluginDirectory(), history);
-      });
-    return this.dataSaveChain;
+  }
+  /** Coalesced save for the frequent thread/queue mutations. */
+  saveThreadHistory() {
+    this.store.schedule();
+  }
+  saveAnnotations() {
+    this.store.saveNow().catch(() => {
+      new P.Notice(STRINGS.plugin.annotationSaveFailed);
+    });
+  }
+  /** Immediate serialized write (settings, model catalog, import verification). */
+  savePluginData() {
+    return this.store.saveNow();
   }
   refreshCurrentContextFile() {
     this.setCurrentContextFile(this.app.workspace.getActiveFile());

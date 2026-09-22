@@ -59,7 +59,6 @@ function createPluginDouble({ dir, data, history, annotationData } = {}) {
     annotationStore: new AnnotationStore(annotationData),
     localPromptQueue: [],
     localPromptSteering: [],
-    dataSaveChain: Promise.resolve(),
     saved: undefined,
     threadRunners: {
       dispose: vi.fn(),
@@ -76,6 +75,7 @@ function createPluginDouble({ dir, data, history, annotationData } = {}) {
     getVaultBasePath: () => undefined,
     withSessionRunner: async () => undefined
   });
+  plugin.store = plugin.createPluginStore();
   plugin.threads = plugin.buildThreadService();
   return plugin;
 }
@@ -231,14 +231,14 @@ describe("golden path 4: message -> persist -> reload", () => {
     plugin.threads.archiveThread(newThread.id);
     expect(plugin.threads.switchThread(currentId)).toBe(true);
 
-    await plugin.dataSaveChain;
+    await plugin.store.flush();
 
     const persisted = plugin.saved.chatHistory.threads.find((thread) => thread.id === newThread.id);
     expect(persisted).toMatchObject({ title: "Renamed log", favorite: true, archived: true });
     expect(plugin.saved.chatHistory.currentThreadId).toBe(currentId);
 
     expect(plugin.threads.deleteThread(newThread.id)).toBe(true);
-    await plugin.dataSaveChain;
+    await plugin.store.flush();
     expect(plugin.saved.chatHistory.threads.some((thread) => thread.id === newThread.id)).toBe(
       false
     );

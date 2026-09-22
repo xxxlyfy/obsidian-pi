@@ -2,6 +2,7 @@ import { STRINGS } from "../shared/strings.mjs";
 import * as P from "obsidian";
 import { AgentRuntime } from "../agent/agent-runtime.mjs";
 import { ThreadService } from "../threads/thread-service.mjs";
+import { PluginStore } from "../persistence/plugin-store.mjs";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
 import { ContextBuilder } from "../context/context-builder.mjs";
@@ -29,7 +30,6 @@ import { PiAgentView } from "../ui/PiAgentView.mjs";
 import { requestDesktopNotificationPermission } from "../ui/desktop-notifications.mjs";
 import { previewFrontmatterPatch } from "../shared/frontmatter.mjs";
 import { sanitizeThreadHistory } from "../shared/thread-history.mjs";
-import { readChatHistoryBackup, writeChatHistoryBackup } from "../threads/chat-history-backup.mjs";
 import {
   importVaultChatHistory,
   removeImportedVaultChatHistory
@@ -136,7 +136,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.settings = DEFAULT_SETTINGS;
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
-    this.dataSaveChain = Promise.resolve();
+    this.store = this.createPluginStore();
     this.threadRunners = new ThreadRunnerRegistry(() => this.buildPiRunner());
     this.threads = this.buildThreadService();
     /** @type {any} */
@@ -286,9 +286,12 @@ export class PiAgentPlugin extends P.Plugin {
     this.annotationController?.destroy();
     this.cancelPiRun();
     this.threadRunners.disposeAll();
+    // Obsidian cannot await unload; this is a best-effort write of anything the
+    // debounced save still holds. The debounce window is short on purpose.
+    void this.store.flush();
   }
   async loadSettings() {
-    const rawData = (await this.loadData()) ?? {};
+    const rawData = await this.store.load();
     const {
       chatHistory,
       messages,
@@ -323,7 +326,7 @@ export class PiAgentPlugin extends P.Plugin {
     let restoredHistory = importedHistory?.history;
     if (!restoredHistory && isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
     if (!restoredHistory) {
-      restoredHistory = await readChatHistoryBackup(this.getPluginDirectory());
+      restoredHistory = await this.store.readBackupHistory();
       if (restoredHistory) new P.Notice(STRINGS.plugin.historyRecovered);
     }
 
@@ -935,32 +938,36 @@ export class PiAgentPlugin extends P.Plugin {
       persist: () => this.saveThreadHistory()
     });
   }
-  saveThreadHistory() {
-    this.savePluginData().catch((error) => {
-      console.warn(STRINGS.plugin.historySaveFailed, error);
+  createPluginStore() {
+    return new PluginStore({
+      loadData: () => this.loadData(),
+      saveData: (data) => this.saveData(data),
+      getPluginDirectory: () => this.getPluginDirectory(),
+      buildPayload: () => this.buildPluginData(),
+      onSaveError: (error) => console.warn(STRINGS.plugin.historySaveFailed, error)
     });
   }
-  saveAnnotations() {
-    this.savePluginData().catch(() => {
-      new P.Notice(STRINGS.plugin.annotationSaveFailed);
-    });
-  }
-  savePluginData() {
-    const history = sanitizeThreadHistory(this.threadHistory.toJSON());
-    const data = {
+  buildPluginData() {
+    return {
       ...this.settings,
-      chatHistory: history,
+      chatHistory: sanitizeThreadHistory(this.threadHistory.toJSON()),
       localPromptQueue: this.localPromptQueue,
       localPromptSteering: this.localPromptSteering,
       annotationData: this.annotationStore.toJSON()
     };
-    this.dataSaveChain = this.dataSaveChain
-      .catch(() => {})
-      .then(async () => {
-        await this.saveData(data);
-        await writeChatHistoryBackup(this.getPluginDirectory(), history);
-      });
-    return this.dataSaveChain;
+  }
+  /** Coalesced save for the frequent thread/queue mutations. */
+  saveThreadHistory() {
+    this.store.schedule();
+  }
+  saveAnnotations() {
+    this.store.saveNow().catch(() => {
+      new P.Notice(STRINGS.plugin.annotationSaveFailed);
+    });
+  }
+  /** Immediate serialized write (settings, model catalog, import verification). */
+  savePluginData() {
+    return this.store.saveNow();
   }
   refreshCurrentContextFile() {
     this.setCurrentContextFile(this.app.workspace.getActiveFile());
