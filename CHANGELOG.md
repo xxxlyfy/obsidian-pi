@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.44
+
+- A force-stopped runner (cancel watchdog) is now retired instead of being reused: it is marked invalid, refuses every later run, and the thread runner registry disposes and replaces it. The replacement starts its own Pi process, so the previous run's late cleanup and late events can only touch the retired runner and can never disturb the chat that now owns it.
+- This replaces the per-execution token from 0.0.42 with a single invalidation rule, so force termination, cancellation, timeout recovery, and process death keep one coherent lifecycle instead of two overlapping guards.
+- Lifecycle tests were reworked around the real thread runner registry: force-terminate then replace (different runner object and different RPC client), late finalizer and late RPC events with a newer run active, the compaction path, cancel-timeout retry, and process-death recovery.
+
 ## 0.0.43
 
 - Closing a chat view no longer starts work it can no longer show: the view stops draining its prompt queue, and the two remaining asynchronous continuations are guarded too (a prompt whose context was still being prepared is dropped instead of starting a run, and a queued "Steer now" no longer pushes a steering prompt into the agent). Queued prompts stay stored and are available again when that chat is reopened.
