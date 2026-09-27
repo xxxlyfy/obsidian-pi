@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({
   FuzzySuggestModal: class {},
+  Modal: class {},
   Notice: class {},
+  Setting: class {},
   SuggestModal: class {},
   setIcon: vi.fn()
 }));
@@ -48,17 +50,25 @@ describe("compact composer run settings", () => {
     expect(runSettingsSource).toContain(
       'createSpan({ cls: "pi-agent-control-label", text: label })'
     );
-    expect(runSettingsSource.match(/this\.plugin\.refreshOpenModelControls\(\)/g)).toHaveLength(2);
+    expect(runSettingsSource.match(/this\.plugin\.refreshOpenModelControls\(\)/g)).toHaveLength(3);
     expect(`${viewSource}\n${threadListSource}`).not.toMatch(
       /composerBarExpanded|composerBarExpandEl|updateComposerBarExpansion/
     );
   });
 
+  it("adds a tool mode picker with the write-risk confirmation and mode colors", () => {
+    expect(runSettingsSource).toContain('"Tool mode"');
+    expect(runSettingsSource).toContain("ToolModePickerModal");
+    expect(runSettingsSource).toContain("getToolModeShortLabel(this.plugin.settings.sandboxMode)");
+    expect(runSettingsSource).toContain('"Enable write tools?"');
+    expect(runSettingsSource).toContain("confirmWithModal(this.plugin.app");
+    expect(runSettingsSource).toContain("pi-agent-run-setting-mode-write");
+    expect(runSettingsSource).toContain("pi-agent-run-setting-mode-full");
+  });
+
   it("keeps compact labels visible while run settings can wrap, shrink, and ellipsize", () => {
     expect(styles).toMatch(/\.pi-agent-run-settings \{[^}]*flex-wrap: wrap;/);
-    expect(styles).toMatch(
-      /button\.pi-agent-run-setting \{[^}]*flex: 0 1 auto;[^}]*min-width: 0;/
-    );
+    expect(styles).toMatch(/button\.pi-agent-run-setting \{[^}]*flex: 0 1 auto;[^}]*min-width: 0;/);
     expect(styles).toMatch(/\.pi-agent-composer-bar \{[^}]*flex-wrap: wrap;/);
     expect(styles).toMatch(
       /\.pi-agent-control-label \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/

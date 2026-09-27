@@ -131,6 +131,23 @@ export function getToolModeOptions() {
   };
 }
 
+export function getToolModePickerItems() {
+  return Object.entries(getToolModeOptions()).map(([value, label]) => {
+    const separatorIndex = label.indexOf(" — ");
+    return separatorIndex === -1
+      ? { value, primary: label, secondary: "" }
+      : {
+          value,
+          primary: label.slice(0, separatorIndex),
+          secondary: label.slice(separatorIndex + 3)
+        };
+  });
+}
+
+export function getToolModeShortLabel(value) {
+  return getToolModePickerItems().find((item) => item.value === value)?.primary ?? "";
+}
+
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }

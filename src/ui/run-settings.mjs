@@ -2,9 +2,12 @@ import { Notice, setIcon } from "obsidian";
 import {
   CUSTOM_MODEL_VALUE,
   getResolvedReasoning,
-  getSelectedModelInfo
+  getSelectedModelInfo,
+  getToolModeShortLabel
 } from "../plugin/settings.mjs";
 import { ModelPickerModal, ThinkingPickerModal } from "./modals/model-picker-modal.mjs";
+import { ToolModePickerModal } from "./modals/tool-mode-picker-modal.mjs";
+import { confirmWithModal } from "./modals/confirm-modal.mjs";
 import { renderProviderIcon } from "./provider-icons.mjs";
 
 export class RunSettingsControls {
@@ -52,11 +55,24 @@ export class RunSettingsControls {
         });
       }
     );
+
+    this.addPickerSetting(
+      containerEl,
+      "Tool mode",
+      "shield",
+      getToolModeShortLabel(this.plugin.settings.sandboxMode),
+      async () => {
+        new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
+          await this.applyToolMode(value);
+        }).open();
+      },
+      this.getToolModeClass()
+    );
   }
 
-  addPickerSetting(containerEl, name, icon, label, onClick) {
+  addPickerSetting(containerEl, name, icon, label, onClick, extraClass) {
     const buttonEl = containerEl.createEl("button", {
-      cls: "clickable-icon pi-agent-run-setting",
+      cls: `clickable-icon pi-agent-run-setting${extraClass ? ` ${extraClass}` : ""}`,
       attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
     });
     if (icon?.provider) renderProviderIcon(buttonEl, icon.provider);
@@ -120,5 +136,33 @@ export class RunSettingsControls {
 
   formatReasoningLabel(reasoning) {
     return reasoning === "xhigh" ? "XHigh" : reasoning.charAt(0).toUpperCase() + reasoning.slice(1);
+  }
+
+  getToolModeClass() {
+    const mode = this.plugin.settings.sandboxMode;
+    if (mode === "edit" || mode === "workspace-write") return "pi-agent-run-setting-mode-write";
+    if (mode === "full-agent") return "pi-agent-run-setting-mode-full";
+    return "pi-agent-run-setting-mode-read";
+  }
+
+  async applyToolMode(value) {
+    const writeModes = ["edit", "full-agent", "workspace-write"];
+    if (writeModes.includes(value) && !this.plugin.settings.acknowledgedToolRisk) {
+      const confirmed = await confirmWithModal(this.plugin.app, {
+        title: "Enable write tools?",
+        message:
+          "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
+        confirmText: "Enable tools",
+        warning: true
+      });
+      if (!confirmed) return;
+    }
+
+    this.plugin.settings.sandboxMode = value;
+    if (writeModes.includes(value)) {
+      this.plugin.settings.acknowledgedToolRisk = true;
+    }
+    await this.plugin.saveSettings();
+    this.plugin.refreshOpenModelControls();
   }
 }
