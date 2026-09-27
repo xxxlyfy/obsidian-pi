@@ -188,17 +188,10 @@
 
 .pi-agent-run-setting-speed-fast,
 .pi-agent-run-setting-speed-default,
-.pi-agent-run-setting-mode-read {
-  color: var(--text-normal);
-}
-
-.pi-agent-run-setting-mode-write {
-  color: var(--text-warning);
-}
-
+.pi-agent-run-setting-mode-read,
+.pi-agent-run-setting-mode-write,
 .pi-agent-run-setting-mode-full {
-  color: var(--text-error);
-  font-weight: 700;
+  color: var(--text-normal);
 }
 
 .pi-agent-control-label {

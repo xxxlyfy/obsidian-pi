@@ -74,6 +74,14 @@ describe("compact composer run settings", () => {
     expect(runSettingsSource).not.toContain('"shield"');
   });
 
+  it("keeps every tool mode label visually identical", () => {
+    expect(styles).toMatch(
+      /\.pi-agent-run-setting-mode-read,\s*\.pi-agent-run-setting-mode-write,\s*\.pi-agent-run-setting-mode-full \{[^}]*color: var\(--text-normal\);/
+    );
+    expect(styles).not.toMatch(/mode-(write|full) \{[^}]*font-weight/);
+    expect(styles).not.toMatch(/mode-(write|full) \{[^}]*color: var\(--text-(warning|error)\)/);
+  });
+
   it("keeps compact labels visible while run settings can wrap, shrink, and ellipsize", () => {
     expect(styles).toMatch(/\.pi-agent-run-settings \{[^}]*flex-wrap: wrap;/);
     expect(styles).toMatch(/button\.pi-agent-run-setting \{[^}]*flex: 0 1 auto;[^}]*min-width: 0;/);
