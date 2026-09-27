@@ -248,7 +248,9 @@ export class VaultGraph {
   }
 
   getActiveFile() {
-    const file = this.getCurrentContextFile?.() ?? this.app.workspace.getActiveFile();
+    const file = this.getCurrentContextFile
+      ? this.getCurrentContextFile()
+      : this.app.workspace.getActiveFile();
     return file && file.extension === "md" && this.isPathAllowed(file.path) ? file : undefined;
   }
 

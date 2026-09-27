@@ -513,6 +513,7 @@ export class PiAgentPlugin extends P.Plugin {
   }
   startNewThread(e) {
     let t = this.threadHistory.startNewThread(e);
+    this.clearExcludedContextFile();
     return (this.syncCurrentThreadState(), this.saveThreadHistory(), t);
   }
   async forkCurrentThread() {
@@ -537,7 +538,12 @@ export class PiAgentPlugin extends P.Plugin {
     }
 
     const fork = this.threadHistory.forkCurrentThread(clonedSession);
-    return fork ? (this.syncCurrentThreadState(), this.saveThreadHistory(), fork) : undefined;
+    return fork
+      ? (this.clearExcludedContextFile(),
+        this.syncCurrentThreadState(),
+        this.saveThreadHistory(),
+        fork)
+      : undefined;
   }
   getCurrentThread() {
     return this.threadHistory.getCurrentThread();
@@ -595,7 +601,10 @@ export class PiAgentPlugin extends P.Plugin {
   }
   switchThread(e) {
     return this.threadHistory.switchThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), !0)
+      ? (this.clearExcludedContextFile(),
+        this.syncCurrentThreadState(),
+        this.saveThreadHistory(),
+        !0)
       : !1;
   }
   archiveThread(e = this.threadHistory.currentThreadId) {
@@ -652,7 +661,10 @@ export class PiAgentPlugin extends P.Plugin {
     }
 
     return this.threadHistory.deleteThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      ? (this.clearExcludedContextFile(),
+        this.syncCurrentThreadState(),
+        this.saveThreadHistory(),
+        true)
       : false;
   }
   deleteThreads(threadIds) {
@@ -931,7 +943,8 @@ export class PiAgentPlugin extends P.Plugin {
     return this.contextBuilder.inspectContext(e, this.getEditorSelection());
   }
   getCurrentContextFile() {
-    return (this.refreshCurrentContextFile(), this.currentContextFile);
+    this.refreshCurrentContextFile();
+    return this.isExcludedContextFile(this.currentContextFile) ? void 0 : this.currentContextFile;
   }
   cancelPiRun(e) {
     var t;
@@ -1082,6 +1095,21 @@ export class PiAgentPlugin extends P.Plugin {
   }
   setCurrentContextFile(e) {
     this.currentContextFile = e && e.extension === "md" ? e : void 0;
+    if (
+      this.excludedContextPath &&
+      this.currentContextFile &&
+      this.currentContextFile.path !== this.excludedContextPath
+    )
+      this.excludedContextPath = void 0;
+  }
+  excludeContextFile(path) {
+    this.excludedContextPath = path || void 0;
+  }
+  clearExcludedContextFile() {
+    this.excludedContextPath = void 0;
+  }
+  isExcludedContextFile(file) {
+    return Boolean(file && this.excludedContextPath && file.path === this.excludedContextPath);
   }
   runWithActiveMarkdownNote(e, t) {
     let n = this.app.workspace.getActiveFile(),

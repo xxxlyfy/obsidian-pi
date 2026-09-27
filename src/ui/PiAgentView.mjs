@@ -365,7 +365,15 @@ export class PiAgentView extends f.ItemView {
       attr: { role: "list", "aria-label": "Pending prompt context" }
     });
     const contextFile = this.plugin.getCurrentContextFile();
-    if (contextFile) this.renderPendingBadge(badges, contextFile.name, { title: contextFile.path });
+    if (contextFile)
+      this.renderPendingBadge(badges, contextFile.name, {
+        title: contextFile.path,
+        removeLabel: `Remove ${contextFile.name} from context`,
+        onRemove: () => {
+          this.plugin.excludeContextFile(contextFile.path);
+          this.renderToolBadges();
+        }
+      });
     for (const image of this.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
         removeLabel: `Remove ${image.fileName || "image"}`,
