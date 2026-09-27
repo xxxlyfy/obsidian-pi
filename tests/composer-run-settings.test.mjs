@@ -66,6 +66,14 @@ describe("compact composer run settings", () => {
     expect(runSettingsSource).toContain("pi-agent-run-setting-mode-full");
   });
 
+  it("uses a distinct icon per tool mode", () => {
+    expect(runSettingsSource).toContain('"message-square"');
+    expect(runSettingsSource).toContain('"book-open"');
+    expect(runSettingsSource).toContain('"file-pen"');
+    expect(runSettingsSource).toContain('"terminal"');
+    expect(runSettingsSource).not.toContain('"shield"');
+  });
+
   it("keeps compact labels visible while run settings can wrap, shrink, and ellipsize", () => {
     expect(styles).toMatch(/\.pi-agent-run-settings \{[^}]*flex-wrap: wrap;/);
     expect(styles).toMatch(/button\.pi-agent-run-setting \{[^}]*flex: 0 1 auto;[^}]*min-width: 0;/);

@@ -59,7 +59,7 @@ export class RunSettingsControls {
     this.addPickerSetting(
       containerEl,
       "Tool mode",
-      "shield",
+      this.getToolModeIcon(),
       getToolModeShortLabel(this.plugin.settings.sandboxMode),
       async () => {
         new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
@@ -136,6 +136,14 @@ export class RunSettingsControls {
 
   formatReasoningLabel(reasoning) {
     return reasoning === "xhigh" ? "XHigh" : reasoning.charAt(0).toUpperCase() + reasoning.slice(1);
+  }
+
+  getToolModeIcon() {
+    const mode = this.plugin.settings.sandboxMode;
+    if (mode === "chat") return "message-square";
+    if (mode === "edit" || mode === "workspace-write") return "file-pen";
+    if (mode === "full-agent") return "terminal";
+    return "book-open";
   }
 
   getToolModeClass() {
