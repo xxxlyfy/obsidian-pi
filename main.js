@@ -1969,6 +1969,21 @@ function getToolModeOptions() {
     "full-agent": "Full agent \u2014 edit/write and shell"
   };
 }
+function getToolModePickerItems() {
+  return Object.entries(getToolModeOptions()).map(([value, label]) => {
+    const separatorIndex = label.indexOf(" \u2014 ");
+    return separatorIndex === -1
+      ? { value, primary: label, secondary: "" }
+      : {
+          value,
+          primary: label.slice(0, separatorIndex),
+          secondary: label.slice(separatorIndex + 3)
+        };
+  });
+}
+function getToolModeShortLabel(value) {
+  return getToolModePickerItems().find((item) => item.value === value)?.primary ?? "";
+}
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -2766,7 +2781,9 @@ var VaultGraph = class {
     return notes.slice(0, CONTEXT_RESULT_LIMIT);
   }
   getActiveFile() {
-    const file = this.getCurrentContextFile?.() ?? this.app.workspace.getActiveFile();
+    const file = this.getCurrentContextFile
+      ? this.getCurrentContextFile()
+      : this.app.workspace.getActiveFile();
     return file && file.extension === "md" && this.isPathAllowed(file.path) ? file : void 0;
   }
   async readVaultFile(filePath) {
@@ -7648,7 +7665,50 @@ function formatActiveToolStatus() {
 }
 
 // src/ui/run-settings.mjs
+var import_obsidian16 = require("obsidian");
+
+// src/ui/modals/tool-mode-picker-modal.mjs
 var import_obsidian15 = require("obsidian");
+var ToolModePickerModal = class extends import_obsidian15.SuggestModal {
+  constructor(app, settings, onChoose) {
+    super(app);
+    this.settings = settings;
+    this.onChoose = onChoose;
+    this.emptyStateText = "No tool modes available.";
+    this.setPlaceholder("Choose tool mode\u2026");
+    this.setInstructions([
+      { command: "\u2191\u2193", purpose: "navigate" },
+      { command: "\u21B5", purpose: "select" },
+      { command: "esc", purpose: "close" }
+    ]);
+  }
+  getSuggestions(query) {
+    const normalized = query.trim().toLowerCase();
+    return this.getItems().filter((item) =>
+      `${item.primary} ${item.secondary}`.toLowerCase().includes(normalized)
+    );
+  }
+  getItems() {
+    return getToolModePickerItems();
+  }
+  renderSuggestion(item, el) {
+    el.createDiv({ cls: "pi-agent-suggestion-title", text: item.primary });
+    if (item.secondary) {
+      el.createDiv({ cls: "pi-agent-suggestion-detail", text: item.secondary });
+    }
+    el.setAttribute(
+      "aria-label",
+      `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${this.settings.sandboxMode === item.value ? ", selected" : ""}`
+    );
+  }
+  onChooseSuggestion(item) {
+    Promise.resolve(this.onChoose(item.value)).catch((error) => {
+      new import_obsidian15.Notice(error instanceof Error ? error.message : String(error));
+    });
+  }
+};
+
+// src/ui/run-settings.mjs
 var RunSettingsControls = class {
   constructor(plugin) {
     this.plugin = plugin;
@@ -7690,14 +7750,26 @@ var RunSettingsControls = class {
         });
       }
     );
+    this.addPickerSetting(
+      containerEl,
+      "Tool mode",
+      "shield",
+      getToolModeShortLabel(this.plugin.settings.sandboxMode),
+      async () => {
+        new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
+          await this.applyToolMode(value);
+        }).open();
+      },
+      this.getToolModeClass()
+    );
   }
-  addPickerSetting(containerEl, name, icon, label, onClick) {
+  addPickerSetting(containerEl, name, icon, label, onClick, extraClass) {
     const buttonEl = containerEl.createEl("button", {
-      cls: "clickable-icon pi-agent-run-setting",
+      cls: `clickable-icon pi-agent-run-setting${extraClass ? ` ${extraClass}` : ""}`,
       attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
     });
     if (icon?.provider) renderProviderIcon(buttonEl, icon.provider);
-    else (0, import_obsidian15.setIcon)(buttonEl, icon);
+    else (0, import_obsidian16.setIcon)(buttonEl, icon);
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
     buttonEl.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -7706,7 +7778,7 @@ var RunSettingsControls = class {
       try {
         await onClick();
       } catch (error) {
-        new import_obsidian15.Notice(error instanceof Error ? error.message : String(error));
+        new import_obsidian16.Notice(error instanceof Error ? error.message : String(error));
       } finally {
         if (buttonEl.isConnected) {
           buttonEl.disabled = false;
@@ -7754,6 +7826,31 @@ var RunSettingsControls = class {
   }
   formatReasoningLabel(reasoning) {
     return reasoning === "xhigh" ? "XHigh" : reasoning.charAt(0).toUpperCase() + reasoning.slice(1);
+  }
+  getToolModeClass() {
+    const mode = this.plugin.settings.sandboxMode;
+    if (mode === "edit" || mode === "workspace-write") return "pi-agent-run-setting-mode-write";
+    if (mode === "full-agent") return "pi-agent-run-setting-mode-full";
+    return "pi-agent-run-setting-mode-read";
+  }
+  async applyToolMode(value) {
+    const writeModes = ["edit", "full-agent", "workspace-write"];
+    if (writeModes.includes(value) && !this.plugin.settings.acknowledgedToolRisk) {
+      const confirmed = await confirmWithModal(this.plugin.app, {
+        title: "Enable write tools?",
+        message:
+          "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
+        confirmText: "Enable tools",
+        warning: true
+      });
+      if (!confirmed) return;
+    }
+    this.plugin.settings.sandboxMode = value;
+    if (writeModes.includes(value)) {
+      this.plugin.settings.acknowledgedToolRisk = true;
+    }
+    await this.plugin.saveSettings();
+    this.plugin.refreshOpenModelControls();
   }
 };
 
@@ -7962,7 +8059,7 @@ var ComposerSuggestions = class {
 };
 
 // src/ui/thread-actions.mjs
-var import_obsidian16 = require("obsidian");
+var import_obsidian17 = require("obsidian");
 var ThreadActions = class {
   constructor(plugin, callbacks) {
     this.plugin = plugin;
@@ -7984,10 +8081,10 @@ var ThreadActions = class {
         this.callbacks.renderMessages();
         this.callbacks.renderToolBadges?.();
       } else {
-        new import_obsidian16.Notice("Nothing to fork yet.");
+        new import_obsidian17.Notice("Nothing to fork yet.");
       }
     } catch (error) {
-      new import_obsidian16.Notice(error instanceof Error ? error.message : String(error));
+      new import_obsidian17.Notice(error instanceof Error ? error.message : String(error));
     }
   }
 };
@@ -8453,7 +8550,15 @@ var PiAgentView = class extends f4.ItemView {
       attr: { role: "list", "aria-label": "Pending prompt context" }
     });
     const contextFile = this.plugin.getCurrentContextFile();
-    if (contextFile) this.renderPendingBadge(badges, contextFile.name, { title: contextFile.path });
+    if (contextFile)
+      this.renderPendingBadge(badges, contextFile.name, {
+        title: contextFile.path,
+        removeLabel: `Remove ${contextFile.name} from context`,
+        onRemove: () => {
+          this.plugin.excludeContextFile(contextFile.path);
+          this.renderToolBadges();
+        }
+      });
     for (const image of this.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
         removeLabel: `Remove ${image.fileName || "image"}`,
@@ -10493,6 +10598,7 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   startNewThread(e) {
     let t = this.threadHistory.startNewThread(e);
+    this.clearExcludedContextFile();
     return (this.syncCurrentThreadState(), this.saveThreadHistory(), t);
   }
   async forkCurrentThread() {
@@ -10515,7 +10621,12 @@ var PiAgentPlugin = class extends P.Plugin {
       if (!clonedSession) return void 0;
     }
     const fork = this.threadHistory.forkCurrentThread(clonedSession);
-    return fork ? (this.syncCurrentThreadState(), this.saveThreadHistory(), fork) : void 0;
+    return fork
+      ? (this.clearExcludedContextFile(),
+        this.syncCurrentThreadState(),
+        this.saveThreadHistory(),
+        fork)
+      : void 0;
   }
   getCurrentThread() {
     return this.threadHistory.getCurrentThread();
@@ -10573,7 +10684,10 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   switchThread(e) {
     return this.threadHistory.switchThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      ? (this.clearExcludedContextFile(),
+        this.syncCurrentThreadState(),
+        this.saveThreadHistory(),
+        true)
       : false;
   }
   archiveThread(e = this.threadHistory.currentThreadId) {
@@ -10625,7 +10739,10 @@ var PiAgentPlugin = class extends P.Plugin {
       }
     }
     return this.threadHistory.deleteThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      ? (this.clearExcludedContextFile(),
+        this.syncCurrentThreadState(),
+        this.saveThreadHistory(),
+        true)
       : false;
   }
   deleteThreads(threadIds) {
@@ -10903,7 +11020,8 @@ var PiAgentPlugin = class extends P.Plugin {
     return this.contextBuilder.inspectContext(e, this.getEditorSelection());
   }
   getCurrentContextFile() {
-    return (this.refreshCurrentContextFile(), this.currentContextFile);
+    this.refreshCurrentContextFile();
+    return this.isExcludedContextFile(this.currentContextFile) ? void 0 : this.currentContextFile;
   }
   cancelPiRun(e) {
     var t;
@@ -11052,6 +11170,21 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   setCurrentContextFile(e) {
     this.currentContextFile = e && e.extension === "md" ? e : void 0;
+    if (
+      this.excludedContextPath &&
+      this.currentContextFile &&
+      this.currentContextFile.path !== this.excludedContextPath
+    )
+      this.excludedContextPath = void 0;
+  }
+  excludeContextFile(path6) {
+    this.excludedContextPath = path6 || void 0;
+  }
+  clearExcludedContextFile() {
+    this.excludedContextPath = void 0;
+  }
+  isExcludedContextFile(file) {
+    return Boolean(file && this.excludedContextPath && file.path === this.excludedContextPath);
   }
   runWithActiveMarkdownNote(e, t) {
     let n = this.app.workspace.getActiveFile(),

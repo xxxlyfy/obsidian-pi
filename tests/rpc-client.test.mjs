@@ -13,10 +13,7 @@ describe("PiRpcClient protocol framing", () => {
     client.handleStdoutChunk(bytes.subarray(17, 31));
     client.handleStdoutChunk(bytes.subarray(31));
 
-    expect(events).toEqual([
-      { type: "notice", text: "a b c" },
-      { type: "agent_settled" }
-    ]);
+    expect(events).toEqual([{ type: "notice", text: "a b c" }, { type: "agent_settled" }]);
   });
 
   it("correlates responses without emitting them as events", () => {

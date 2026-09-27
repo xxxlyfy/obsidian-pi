@@ -54,7 +54,7 @@ describe("Pi RPC command catalog", () => {
       "--no-tools",
       "--no-skills",
       "--skill",
-      path.join("/vault", "skills")
+      path.resolve("/vault", "skills")
     ]);
   });
 });

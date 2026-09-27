@@ -4,7 +4,10 @@ export function getCurrentRunMetadata(settings, runtimeState) {
   return {
     model: getDisplayedModel(settings, runtimeState),
     reasoning:
-      runtimeState?.thinkingLevel || settings.reasoningEffort || settings.effectiveReasoning || "Pi default",
+      runtimeState?.thinkingLevel ||
+      settings.reasoningEffort ||
+      settings.effectiveReasoning ||
+      "Pi default",
     toolMode: settings.sandboxMode,
     toolModeLabel: formatToolModeLabel(settings.sandboxMode)
   };

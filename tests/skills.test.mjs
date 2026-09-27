@@ -18,14 +18,14 @@ describe("configured skill paths", () => {
         { additionalSkillFolders: [".pi/skills", "/opt/trusted-skills"] },
         "/vault"
       )
-    ).toEqual([path.join("/vault", ".pi/skills"), path.normalize("/opt/trusted-skills")]);
+    ).toEqual([path.resolve("/vault", ".pi/skills"), path.normalize("/opt/trusted-skills")]);
   });
 
   it("rejects home expansion and vault-relative traversal", () => {
     expect(resolveSkillPath("~/skills", "/vault")).toBe("");
     expect(resolveSkillPath("../outside", "/vault")).toBe("");
     expect(resolveSkillPath("relative/skill", "/vault")).toBe(
-      path.join("/vault", "relative/skill")
+      path.resolve("/vault", "relative/skill")
     );
   });
 });

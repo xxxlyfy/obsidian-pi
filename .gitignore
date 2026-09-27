@@ -5,6 +5,9 @@ pi-sessions/
 # Local planning notes
 TODO.md
 
+# Local backup of the pre-modification plugin build
+_original-plugin-backup/
+
 # Dependencies, generated release files, and local tooling
 node_modules/
 release-notes.md
