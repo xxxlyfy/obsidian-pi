@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.0.16
+
+- Doubled the composer input height and made the current-note context chip removable; the note is re-attached after opening another note or switching chats.
+- Added a tool mode picker (Chat / Review / Edit / Full agent) to the composer bar with distinct per-mode icons and the same write-risk confirmation as the settings tab.
+- Show the full model name in composer pickers instead of a fixed-width ellipsis, and keep descenders (g/y/p) fully visible in control labels.
+- Removed the color and font-weight accents from the Edit and Full agent tool mode labels.
+- Normalized the repository to LF line endings and fixed Windows-only quality gate failures so `npm run ci` passes on both Windows and Linux.
+
 ## 0.0.15
 
 - Replaced broad annotation `:has()` selectors and avoidable `!important` overrides with native sibling selectors and narrowly scoped specificity, preserving keyboard focus, selected intent, and processing-mask behavior. (#85)
