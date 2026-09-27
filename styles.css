@@ -697,7 +697,7 @@
   color: var(--text-normal);
   line-height: var(--line-height-normal);
   max-height: 160px;
-  min-height: 38px;
+  min-height: 76px;
   overflow-y: auto;
   resize: none;
   width: 100%;
