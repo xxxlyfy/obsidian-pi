@@ -205,7 +205,7 @@
   color: currentColor;
   font-size: var(--font-ui-smaller);
   line-height: 1;
-  max-width: 78px;
+  max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

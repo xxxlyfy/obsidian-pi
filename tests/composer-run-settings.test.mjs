@@ -86,4 +86,9 @@ describe("compact composer run settings", () => {
     );
     expect(styles).not.toContain("is-expanded");
   });
+
+  it("lets picker labels show the full value instead of a fixed-width ellipsis", () => {
+    expect(styles).toMatch(/\.pi-agent-control-label \{[^}]*max-width: none;/);
+    expect(styles).not.toMatch(/\.pi-agent-control-label \{[^}]*max-width: 78px/);
+  });
 });
