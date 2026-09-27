@@ -99,4 +99,11 @@ describe("compact composer run settings", () => {
     expect(styles).toMatch(/\.pi-agent-control-label \{[^}]*max-width: none;/);
     expect(styles).not.toMatch(/\.pi-agent-control-label \{[^}]*max-width: 78px/);
   });
+
+  it("keeps control label glyphs fully visible", () => {
+    expect(styles).toMatch(
+      /\.pi-agent-control-label \{[^}]*line-height: var\(--line-height-normal\)/
+    );
+    expect(styles).not.toMatch(/\.pi-agent-control-label \{[^}]*line-height: 1;/);
+  });
 });

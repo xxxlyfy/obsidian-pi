@@ -197,7 +197,7 @@
 .pi-agent-control-label {
   color: currentColor;
   font-size: var(--font-ui-smaller);
-  line-height: 1;
+  line-height: var(--line-height-normal);
   max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;
