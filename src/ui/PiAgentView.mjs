@@ -1017,6 +1017,8 @@ export class PiAgentView extends f.ItemView {
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.stickToBottom = !0;
+    // PATCH 5 §8.1: heap samples for the run lifecycle (profiler-only).
+    performanceProfiler.markHeap("before");
     this.plugin.beginAnnotationProcessing(t, annotations);
     this.setRunningState(this.running);
     if (!queuedId) addUserMessage();
@@ -1160,6 +1162,7 @@ export class PiAgentView extends f.ItemView {
       this.syncCurrentRunFlags();
       this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
       this.canceling = this.getCurrentThreadRun()?.canceling === !0;
+      performanceProfiler.markHeap("after");
       this.clearCoalescedActivity();
       this.cancelStreamingFlush();
       this.streamingAssistantContent = "";

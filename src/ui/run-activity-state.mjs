@@ -309,6 +309,8 @@ export function handleRunEvent(e) {
     // for the next frame. A full re-render is only needed when there is no
     // connected streaming DOM to finalize.
     const finalizedStreaming = this.finalizeStreamingContent?.() === true;
+    // PATCH 5 §8.1: sample the heap while the run's UI state is still retained.
+    performanceProfiler.markHeap("during");
     this.activityText = "";
     this.activityDetail = "";
     this.activityStickyUntil = 0;

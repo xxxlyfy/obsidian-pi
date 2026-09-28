@@ -166,3 +166,32 @@
   - `finishCanceledRun()` 无调用方（历史遗留）；取消清理实际在 `finally` 中执行并已接入 PATCH 4 清理；是否删除该方法留作后续清理项。
   - 发现 #1/#2 仍未处理（范围外）。
 - 下一步入口条件：**已满足** → PATCH 5（Benchmark + Performance Regression + CI）。
+
+---
+
+### PATCH 5 — Benchmark + Performance Regression + CI
+
+- 状态：**完成**。
+- 改动文件：
+  - `src/shared/performance-profiler.mjs`：新增 `markHeap`（before / during 取峰值 / after）与 `maxRpcQueueDepth` / `maxRpcQueueBytes` / `heapUsedBefore` / `heapUsedDuring` / `heapUsedAfter` 指标。
+  - `src/pi/rpc-client.mjs`：`measureQueue()` 记录队列深度/字节（启用时，O(chunk) 扫描）；`handleLine` 在对象路径记录 `jsonLineBytes` 与单次 `jsonParse` 时长（§9「largest JSON line / longest JSON.parse」）。
+  - `src/ui/PiAgentView.mjs` / `src/ui/run-activity-state.mjs`：run 起点 / agent_end / finally 调用 `markHeap("before"|"during"|"after")`。
+  - `perf/tools/seed-test-vault.mjs`：新增 `--total=N`（默认 433；PATCH 5 基准用 10000）。
+  - 测试：新增 `tests/perf-synthetic.test.mjs`（Test C/F/G + CI burst 回归 + 队列埋点，5 项）；`tests/performance-profiler.test.mjs` 加 PATCH 5 指标。
+- 合成测试覆盖（§8.2/§8.3）：
+  - Test A/B/D/E 已有（`tests/rpc-cooperative-drain.test.mjs`：1k/10k burst、UTF-8 跨 chunk、半行跨 chunk、backlog 中 dispose）。
+  - Test C：20,000 次 track/finish + 2,000 并发 ActiveTools 关联零错、O(1)（<2s 宽松上界）。
+  - Test F：1,000 text deltas → 内容精确一致、flush ≤11（<< 1000）、finalize 后 markdown 恰 1 次、被取消的 pending 帧为 no-op（agent_end 顺序正确）。
+  - Test G：compaction success/abort/error 与 legacy scan 一致、0 告警。
+  - CI 回归：2,000-event burst 经 FakeYieldScheduler（注入 spy），0 丢失/重复/乱序、yield ≥ floor(2000/40)-1、单批同步处理 ≤40（无无限同步 drain）。
+- 真实 Vault Benchmark（§8.4，10,000 篇 / 8.92 MiB，详见 `perf/baseline.md`）：
+  - run 57.9s / 9,369 events；longtask **3 / 175ms**（52ms 起点 context、63ms agent_end finalize、60ms 完成 render）；**P95/P99 = 63/63ms**（PATCH 0：1,367 / 11,996ms、54 个 longtask / 31.1s）。
+  - max queue depth/bytes **44 / 98,052 B**；largest JSON line **98,051 B**；max JSON.parse **0.4ms**；max normalize **61.4ms**；max drain **62ms**。
+  - stream 4,307 → flush 1,102（0.26×）；markdown 10（0.23% of deltas）；activity flush 74（合并 41 → 12，3.4×）；heap 100.8 → 峰值 135.7（+36.6MB）→ 90.8 MiB。
+  - 响应性：运行中 rAF 40 帧 mean 6.9ms / max 7.1ms；完成后自动滚动到底（2910/2910）。
+- 验证：`npm run ci` 全绿（**57 files / 337 tests**）；dev:install → reload → 10,000 文件索引（`getMarkdownFiles() = 10000`）→ profiler 基准运行 → `dev:errors` 空；证据截图 `%TEMP%\opencode\patch5-benchmark.png`、原始快照 `%TEMP%\opencode\patch5-benchmark.txt`。
+- 风险与未决：
+  - 63ms 边界任务按 §9 属「serious（50–200ms）」，但为一次性最终 Markdown 渲染；streaming 期 0 longtask、每帧 ≤3.9ms。是否进一步降边界峰值作为 PATCH 6/7 决策输入（提供 profiling 依据）。
+  - `yieldCount 0` 属负载特性（队列峰值 44 < 批预算 64）；burst 场景由 CI 注入测试证明调度器可用。
+  - 发现 #1/#2 仍未处理（范围外）。
+- 下一步入口条件：**已满足** → 最终报告（规格 ch.14）+ PATCH 6/7 条件评估（届时读 1.md 第 10/11 章）。

@@ -118,6 +118,50 @@ describe("PerformanceProfiler", () => {
     expect(metrics.staleCallbackPrevented).toBe(2);
   });
 
+  it("reports PATCH 5 queue and heap metrics", () => {
+    profiler.enabled = true;
+    profiler.recordMax("rpcQueueDepth", 42);
+    profiler.recordMax("rpcQueueBytes", 65_536);
+
+    const original = globalThis.performance.memory;
+    try {
+      Object.defineProperty(globalThis.performance, "memory", {
+        value: { usedJSHeapSize: 1_000 },
+        configurable: true,
+        writable: true
+      });
+      profiler.markHeap("before");
+      Object.defineProperty(globalThis.performance, "memory", {
+        value: { usedJSHeapSize: 3_000 },
+        configurable: true,
+        writable: true
+      });
+      profiler.markHeap("during");
+      Object.defineProperty(globalThis.performance, "memory", {
+        value: { usedJSHeapSize: 2_000 },
+        configurable: true,
+        writable: true
+      });
+      profiler.markHeap("during");
+      Object.defineProperty(globalThis.performance, "memory", {
+        value: { usedJSHeapSize: 500 },
+        configurable: true,
+        writable: true
+      });
+      profiler.markHeap("after");
+
+      const { metrics } = profiler.snapshot();
+      expect(metrics.maxRpcQueueDepth).toBe(42);
+      expect(metrics.maxRpcQueueBytes).toBe(65_536);
+      expect(metrics.heapUsedBefore).toBe(1_000);
+      expect(metrics.heapUsedDuring).toBe(3_000);
+      expect(metrics.heapUsedAfter).toBe(500);
+    } finally {
+      if (original === undefined) delete globalThis.performance.memory;
+      else globalThis.performance.memory = original;
+    }
+  });
+
   it("reset clears counters, durations, maxima, and the time window", () => {
     vi.useFakeTimers();
     vi.setSystemTime(5_000);

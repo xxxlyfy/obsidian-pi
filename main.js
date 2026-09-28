@@ -3182,7 +3182,21 @@ var PerformanceProfiler = class {
     this.counters = /* @__PURE__ */ new Map();
     this.durations = /* @__PURE__ */ new Map();
     this.maxima = /* @__PURE__ */ new Map();
+    this.heap = {};
     this.startedAt = Date.now();
+  }
+  /**
+   * PATCH 5 §8.1: mark JS-heap samples for the run lifecycle. `before`/`after`
+   * store the latest sample, `during` keeps the peak between marks. Chromium
+   * exposes `performance.memory`; other hosts are silently ignored.
+   */
+  markHeap(stage) {
+    if (!this.enabled) return;
+    const used = globalThis.performance?.memory?.usedJSHeapSize;
+    if (!Number.isFinite(used)) return;
+    const key = String(stage);
+    if (key === "during") this.heap[key] = Math.max(this.heap[key] ?? 0, used);
+    else this.heap[key] = used;
   }
   incrementCounter(name, delta = 1) {
     if (!this.enabled || !Number.isFinite(delta)) return;
@@ -3255,7 +3269,13 @@ var PerformanceProfiler = class {
         activityCoalescedEvents: counters.activityCoalescedEvents ?? 0,
         activityCoalescedFlushes: counters.activityCoalescedFlushes ?? 0,
         maxActivityUpdateDuration: durations.activityUpdate?.max ?? 0,
-        staleCallbackPrevented: counters.staleCallbackPrevented ?? 0
+        staleCallbackPrevented: counters.staleCallbackPrevented ?? 0,
+        // PATCH 5 queue + heap metrics (spec §8.1).
+        maxRpcQueueDepth: maxima.rpcQueueDepth ?? 0,
+        maxRpcQueueBytes: maxima.rpcQueueBytes ?? 0,
+        heapUsedBefore: this.heap.before ?? 0,
+        heapUsedDuring: this.heap.during ?? 0,
+        heapUsedAfter: this.heap.after ?? 0
       }
     };
   }
@@ -3614,12 +3634,27 @@ var PiRpcClient = class {
   handleStdoutChunk(chunk) {
     if (this.disposed) return;
     this.stdoutBuffer += this.decoder.write(chunk);
+    this.measureQueue();
     this.scheduleDrain();
   }
   flushDecoder() {
     this.stdoutBuffer += this.decoder.end();
     this.stdoutEnded = true;
+    this.measureQueue();
     this.scheduleDrain();
+  }
+  // PATCH 5 §8.1: bounded queue observations (enabled-only; O(chunk) scan).
+  measureQueue() {
+    const profiler = performanceProfiler;
+    if (!profiler.enabled || !this.stdoutBuffer) return;
+    const buffer = this.stdoutBuffer;
+    let depth = 0;
+    for (let index = 0; index < buffer.length; index += 1) {
+      if (buffer.charCodeAt(index) === 10) depth += 1;
+    }
+    if (buffer.charCodeAt(buffer.length - 1) !== 10) depth += 1;
+    profiler.recordMax("rpcQueueDepth", depth);
+    profiler.recordMax("rpcQueueBytes", Buffer.byteLength(buffer, "utf8"));
   }
   // PATCH 1: at most one pending drain; new chunks only append to the parser
   // buffer. Batches are bounded by event count and time, and yields happen only
@@ -3688,12 +3723,19 @@ var PiRpcClient = class {
   }
   handleLine(line) {
     if (!line.trim()) return;
+    const profiler = performanceProfiler;
+    const profiling = profiler.enabled;
+    const parseStartedAt = profiling ? globalThis.performance.now() : 0;
     let message;
     try {
       message = JSON.parse(line);
     } catch {
       this.emit({ type: "rpc_parse_error", raw: line });
       return;
+    }
+    if (profiling) {
+      profiler.recordMax("jsonLineBytes", Buffer.byteLength(line, "utf8"));
+      profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
     }
     if (message.type === "response" && message.id) {
       const pending = this.pending.get(message.id);
@@ -8243,6 +8285,7 @@ function handleRunEvent(e) {
   if (t === "agent_end") {
     this.clearCoalescedActivity?.();
     const finalizedStreaming = this.finalizeStreamingContent?.() === true;
+    performanceProfiler.markHeap("during");
     this.activityText = "";
     this.activityDetail = "";
     this.activityStickyUntil = 0;
@@ -9829,6 +9872,7 @@ var PiAgentView = class extends f4.ItemView {
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.stickToBottom = true;
+    performanceProfiler.markHeap("before");
     this.plugin.beginAnnotationProcessing(t, annotations);
     this.setRunningState(this.running);
     if (!queuedId) addUserMessage();
@@ -9972,6 +10016,7 @@ var PiAgentView = class extends f4.ItemView {
       this.syncCurrentRunFlags();
       this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
       this.canceling = this.getCurrentThreadRun()?.canceling === true;
+      performanceProfiler.markHeap("after");
       this.clearCoalescedActivity();
       this.cancelStreamingFlush();
       this.streamingAssistantContent = "";

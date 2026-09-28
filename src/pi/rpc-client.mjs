@@ -200,13 +200,29 @@ export class PiRpcClient {
   handleStdoutChunk(chunk) {
     if (this.disposed) return;
     this.stdoutBuffer += this.decoder.write(chunk);
+    this.measureQueue();
     this.scheduleDrain();
   }
 
   flushDecoder() {
     this.stdoutBuffer += this.decoder.end();
     this.stdoutEnded = true;
+    this.measureQueue();
     this.scheduleDrain();
+  }
+
+  // PATCH 5 §8.1: bounded queue observations (enabled-only; O(chunk) scan).
+  measureQueue() {
+    const profiler = performanceProfiler;
+    if (!profiler.enabled || !this.stdoutBuffer) return;
+    const buffer = this.stdoutBuffer;
+    let depth = 0;
+    for (let index = 0; index < buffer.length; index += 1) {
+      if (buffer.charCodeAt(index) === 10) depth += 1;
+    }
+    if (buffer.charCodeAt(buffer.length - 1) !== 10) depth += 1;
+    profiler.recordMax("rpcQueueDepth", depth);
+    profiler.recordMax("rpcQueueBytes", Buffer.byteLength(buffer, "utf8"));
   }
 
   // PATCH 1: at most one pending drain; new chunks only append to the parser
@@ -283,12 +299,21 @@ export class PiRpcClient {
 
   handleLine(line) {
     if (!line.trim()) return;
+    // PATCH 5 §9: measure the unavoidable single JSON.parse and the raw line
+    // size on the object path too (enabled-only).
+    const profiler = performanceProfiler;
+    const profiling = profiler.enabled;
+    const parseStartedAt = profiling ? globalThis.performance.now() : 0;
     let message;
     try {
       message = JSON.parse(line);
     } catch {
       this.emit({ type: "rpc_parse_error", raw: line });
       return;
+    }
+    if (profiling) {
+      profiler.recordMax("jsonLineBytes", Buffer.byteLength(line, "utf8"));
+      profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
     }
 
     if (message.type === "response" && message.id) {

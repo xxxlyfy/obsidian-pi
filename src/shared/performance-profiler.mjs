@@ -20,7 +20,22 @@ export class PerformanceProfiler {
     this.counters = new Map();
     this.durations = new Map();
     this.maxima = new Map();
+    this.heap = {};
     this.startedAt = Date.now();
+  }
+
+  /**
+   * PATCH 5 §8.1: mark JS-heap samples for the run lifecycle. `before`/`after`
+   * store the latest sample, `during` keeps the peak between marks. Chromium
+   * exposes `performance.memory`; other hosts are silently ignored.
+   */
+  markHeap(stage) {
+    if (!this.enabled) return;
+    const used = globalThis.performance?.memory?.usedJSHeapSize;
+    if (!Number.isFinite(used)) return;
+    const key = String(stage);
+    if (key === "during") this.heap[key] = Math.max(this.heap[key] ?? 0, used);
+    else this.heap[key] = used;
   }
 
   incrementCounter(name, delta = 1) {
@@ -99,7 +114,13 @@ export class PerformanceProfiler {
         activityCoalescedEvents: counters.activityCoalescedEvents ?? 0,
         activityCoalescedFlushes: counters.activityCoalescedFlushes ?? 0,
         maxActivityUpdateDuration: durations.activityUpdate?.max ?? 0,
-        staleCallbackPrevented: counters.staleCallbackPrevented ?? 0
+        staleCallbackPrevented: counters.staleCallbackPrevented ?? 0,
+        // PATCH 5 queue + heap metrics (spec §8.1).
+        maxRpcQueueDepth: maxima.rpcQueueDepth ?? 0,
+        maxRpcQueueBytes: maxima.rpcQueueBytes ?? 0,
+        heapUsedBefore: this.heap.before ?? 0,
+        heapUsedDuring: this.heap.during ?? 0,
+        heapUsedAfter: this.heap.after ?? 0
       }
     };
   }

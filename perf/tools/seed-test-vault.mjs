@@ -1,20 +1,33 @@
 #!/usr/bin/env node
 // Deterministic synthetic vault generator for Pi Agent performance testing.
-// Usage: node perf/tools/seed-test-vault.mjs <vault-dir>
+// Usage: node perf/tools/seed-test-vault.mjs <vault-dir> [--total=N]
 //
 // Generates a fixed corpus (seed 20260928) of Markdown notes with frontmatter,
 // wiki links, tags, hub notes, and longform notes. Intended for the PATCH 0
 // baseline and later benchmark runs. Existing files are not removed; generated
 // note names are stable so re-running the script is idempotent.
+//
+// --total=N generates N notes in total (default 433): 15 hubs + 8 longform +
+// 60 daily + (N - 83) regular notes. PATCH 5 §8.4 uses --total=10000 for the
+// large-vault benchmark.
 
 import fs from "node:fs";
 import path from "node:path";
 
 const target = process.argv[2];
 if (!target) {
-  console.error("Usage: node perf/tools/seed-test-vault.mjs <vault-dir>");
+  console.error("Usage: node perf/tools/seed-test-vault.mjs <vault-dir> [--total=N]");
   process.exit(1);
 }
+
+const totalArg = process.argv.find((arg) => arg.startsWith("--total="));
+const requestedTotal = totalArg ? Number(totalArg.slice("--total=".length)) : 433;
+if (!Number.isFinite(requestedTotal) || requestedTotal < 433) {
+  console.error("--total must be a number >= 433");
+  process.exit(1);
+}
+const FIXED_NOTES = 15 + 8 + 60;
+const REGULAR_TARGET = Math.floor(requestedTotal) - FIXED_NOTES;
 
 const ROOT = path.resolve(target);
 const SEED = 20260928;
@@ -101,7 +114,7 @@ function frontmatter(title, tags) {
 }
 
 const notes = [];
-const NOTE_COUNT = 350;
+const NOTE_COUNT = REGULAR_TARGET;
 for (let i = 1; i <= NOTE_COUNT; i += 1) {
   const folder = `Notes/Area-${i % 8}`;
   const title = `note-${String(i).padStart(4, "0")}`;
@@ -152,7 +165,10 @@ for (let i = 0; i < notes.length; i += 1) {
       `- ${sentence()}\n- ${sentence()}\n- ${sentence()}\n\n` +
       `Refs: [[${pick(regularPool)}]] [[${pick(regularPool)}]]\n`;
   } else {
-    content = frontmatter(note.title, tagsFor(i)) + `# ${note.title}\n\n` + noteBody(i, NOTE_COUNT, regularPool);
+    content =
+      frontmatter(note.title, tagsFor(i)) +
+      `# ${note.title}\n\n` +
+      noteBody(i, NOTE_COUNT, regularPool);
   }
   const filePath = path.join(dir, `${note.title}.md`);
   fs.writeFileSync(filePath, content, "utf8");
@@ -161,4 +177,7 @@ for (let i = 0; i < notes.length; i += 1) {
 }
 
 console.log(`Seeded ${written} notes into ${ROOT}`);
+console.log(
+  `Corpus: ${NOTE_COUNT} regular + 15 hubs + 8 longform + 60 daily (requested total ${Math.floor(requestedTotal)})`
+);
 console.log(`Total Markdown bytes: ${bytes} (${(bytes / 1024 / 1024).toFixed(2)} MiB)`);

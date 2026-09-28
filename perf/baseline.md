@@ -272,6 +272,50 @@
 - `plugin:disable` → `plugin:enable` → `plugin:reload` 冒烟：`dev:errors` 空；`onunload` → `disposeThreadRunners()` → `PiRpcClient.dispose()`（含 `YieldScheduler.dispose()`）路径正常。
 - 生命周期审计全文：`perf/patch4-lifecycle-audit.md`。
 
+## PATCH 5 真实 Vault Benchmark（10,000 文件，规格 §8.4）
+
+> 执行时间 2026-09-28；语料：`perf/tools/seed-test-vault.mjs <vault> --total=10000` → **10,000 篇 Markdown / 8.92 MiB**（Notes/Area-0..7 ×9,917 + Hubs 15 + Longform 8 + Daily 60）；`obsidian reload` 后 `app.vault.getMarkdownFiles() = 10000`。固定 prompt（全库健康检查）；profiler + 1 Hz 外部 heap 采样 + longtask observer；窗口前台。本轮 9,369 RPC events、15 次 bash tool 调用、run 墙钟 **57.9s**（run 内 ≈161.8 events/s；快照窗口 125.3/s）。
+
+| 指标 | PATCH 0（433 文件） | PATCH 5（10,000 文件） | 说明 |
+| --- | --- | --- | --- |
+| total duration | 67.4s | **57.9s** | agent 用时；模型行为随机 |
+| longest main-thread task | 11,996ms | **63ms** | 3 个 ≥50ms 任务全部在运行首尾 |
+| longtask count / total | 54 / 31,105ms | **3 / 175ms** | 52ms 起点 context 构建、63ms agent_end finalize、60ms 完成整线程 render |
+| P95 / P99 task | 1,367 / 11,996ms | **63 / 63ms** | |
+| RPC events | unavailable | **9,369** | |
+| max queue depth / bytes（新增） | — | **44 行 / 98,052 B** | 未超 64-event 批预算 |
+| largest JSON line（新增） | unavailable | **98,051 B** | 对象路径 `jsonLineBytes` 埋点 |
+| max JSON.parse（新增对象路径） | unavailable | **0.4ms**（mean 0.006ms，9,374 次） | 单次 parse |
+| max normalization | — | **61.4ms**（mean 0.024ms） | = agent_end finalize |
+| max drain batch | — | **62ms**（mean 0.064ms，5,233 批） | 单事件成本主导 |
+| stream delta → flush | — | **4,307 → 1,102（0.26×）** | |
+| markdown render | 基线每 delta 1 次 | **10（0.23% of deltas）** | |
+| activity flush | — | **74**；合并 41 events → 12 flushes（3.4×） | maxActivityUpdate 0.2ms |
+| max UI callback | 基线最长任务级 | **61.2ms**（agent_end；mean 0.0146ms，11,355 次） | |
+| stream flush max / mean | — | **3.9ms / 1.41ms** | 每帧纯文本更新 |
+| yieldCount / latency | — | 0 / 0 | 队列峰值 44 < 64 批预算，未触发 yield；burst 场景由 CI 测试覆盖 |
+| heap first → peak → last | 41.2→79.9MB（433 文件） | **100.8MB → 135.7MB（峰值 +36.6MB / +34.9MiB）→ 90.8MB** | 1 Hz 外部采样；profiler mark 为 100.8 / 85.0 / 85.0 MiB（during 为 agent_end 单点，非峰值） |
+| diagnostic buffer / retained | — | 500 / 0 | |
+| compaction 告警 / 错误 | 0 | 0 / 0（`dev:errors` 空） | |
+| 证据 | — | 截图 `%TEMP%\opencode\patch5-benchmark.png`；原始快照 `%TEMP%\opencode\patch5-benchmark.txt` | |
+
+### §9 诊断分级（PATCH 5 基准）
+
+| 任务 | 时长 | 等级 |
+| --- | --- | --- |
+| streaming 事件处理（最大 flush） | 3.9ms | 正常（<16ms） |
+| 起点 context 构建 | 52ms | serious（50–200ms，一次性） |
+| agent_end finalize（最终 Markdown） | 63ms | serious（一次性） |
+| 完成整线程 render | 60ms | serious（一次性） |
+
+结论：高 event volume 下**不存在持续数百毫秒/数秒的无界同步 RPC processing**——PATCH 0 的 11,996ms 持续阻塞已变为最大 63ms 的一次性边界渲染；57.9s 运行期（工具扫描 + 流式）**0 longtask**。
+
+### 响应性探测（10,000 文件，另一轮运行）
+
+- 运行中 rAF 连续 40 帧：total 271ms、**max gap 7.1ms、mean 6.9ms**（144Hz 正常刷新，无阻塞）；后续 30 帧 max 7.2ms；完成后 max 12.4ms。
+- 自动滚动：报告流式/完成后 `scrollTop == scrollHeight − clientHeight`（2910/2910）；同轮 longtask 仅 2 个（52ms 起点、66ms 边界）。
+- 手动滚动/线程切换/取消语义已在 PATCH 3/4 行为验证中覆盖（同代码路径）。
+
 ## 环境问题与处置记录
 
 | 问题 | 现象 | 根因 | 处置 |
