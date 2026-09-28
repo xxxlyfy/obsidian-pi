@@ -5,29 +5,29 @@
 
 ## Environment
 
-| 项 | 值 | 来源 |
-| --- | --- | --- |
-| Obsidian | 1.13.7（installer 1.13.7） | `obsidian version` |
-| Electron | 43.3.0 | `obsidian eval` |
-| Chromium | 150.0.7871.212 | `obsidian eval` |
-| Pi | 0.87.1 | `pi --version` |
-| Plugin | 0.0.16（`main.js` 由 `npm run build` 生成，禁止手改） | `manifest.json` |
-| OS | Windows 11 专业版 10.0.26200 | `Win32_OperatingSystem` |
-| 宿主 Node / Electron 内建 Node | v24.21.0 / 24.18.1 | `node --version` / `obsidian eval` |
-| 测试 Vault | `C:\Users\zcooo\Desktop\3\test-vault`（专用；PATCH 0-4 语料 433 篇，PATCH 5 扩至 **10,000 篇 / 8.92 MiB**） | `seed-test-vault.mjs` |
+| 项                             | 值                                                                                                          | 来源                               |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| Obsidian                       | 1.13.7（installer 1.13.7）                                                                                  | `obsidian version`                 |
+| Electron                       | 43.3.0                                                                                                      | `obsidian eval`                    |
+| Chromium                       | 150.0.7871.212                                                                                              | `obsidian eval`                    |
+| Pi                             | 0.87.1                                                                                                      | `pi --version`                     |
+| Plugin                         | 0.0.16（`main.js` 由 `npm run build` 生成，禁止手改）                                                       | `manifest.json`                    |
+| OS                             | Windows 11 专业版 10.0.26200                                                                                | `Win32_OperatingSystem`            |
+| 宿主 Node / Electron 内建 Node | v24.21.0 / 24.18.1                                                                                          | `node --version` / `obsidian eval` |
+| 测试 Vault                     | `C:\Users\zcooo\Desktop\3\test-vault`（专用；PATCH 0-4 语料 433 篇，PATCH 5 扩至 **10,000 篇 / 8.92 MiB**） | `seed-test-vault.mjs`              |
 
 ## Baseline（PATCH 0，433 文件 / 0.48 MiB，未修改的 0.0.16）
 
-| 指标 | 值 |
-| --- | --- |
-| Longest Task | **11,996 ms** |
-| P95 | 1,367 ms |
-| P99 | 11,996 ms |
-| longtask 数量 / 总时长 | 54 / 31,105 ms（占全程 46%） |
-| Heap | 41.2 → 79.9 MB（+38.7 MB） |
-| Events/sec | unavailable（无计数器） |
-| Markdown renders | unavailable（基线为每 delta 调 `MarkdownRenderer.render`） |
-| 人工复现 | 全库健康检查（固定 prompt）67.35s、0 错误 |
+| 指标                   | 值                                                         |
+| ---------------------- | ---------------------------------------------------------- |
+| Longest Task           | **11,996 ms**                                              |
+| P95                    | 1,367 ms                                                   |
+| P99                    | 11,996 ms                                                  |
+| longtask 数量 / 总时长 | 54 / 31,105 ms（占全程 46%）                               |
+| Heap                   | 41.2 → 79.9 MB（+38.7 MB）                                 |
+| Events/sec             | unavailable（无计数器）                                    |
+| Markdown renders       | unavailable（基线为每 delta 调 `MarkdownRenderer.render`） |
+| 人工复现               | 全库健康检查（固定 prompt）67.35s、0 错误                  |
 
 ## 每个 Patch
 
@@ -103,19 +103,19 @@
 
 ## Before / After
 
-| 指标 | Baseline（PATCH 0） | PATCH 5（10,000 文件） | 改善 |
-| --- | --- | --- | --- |
-| Longest main-thread task | 11,996 ms | **63 ms** | ~190× |
-| P95 task duration | 1,367 ms | **63 ms** | ~22× |
-| P99 task duration | 11,996 ms | **63 ms** | ~190× |
-| Max drain duration | 无界（单批全量） | **62 ms**（含 61ms 单事件） | 有界 |
-| Max JSON.parse | 1.9 ms（PATCH 1，往返） | **0.4 ms**（单次 parse；PATCH 2 已消除往返） | 消除重复解析 |
-| RPC event throughput | unavailable | **161.8/s**（run 内；PATCH 2 记录 118.2/s） | 可测且稳定 |
-| Stream flush count | 每 delta 1 次 Markdown | **1,102**（4,307 deltas 的 0.26×） | 线性 → 合并 |
-| Markdown render count | 每 delta + 历史消息 | **10**（0.23% of deltas） | 线性 → 常数级 |
-| Activity flush count | 随事件线性 | **74**（events 的 0.7%；合并 41 → 12） | 线性 → 合并 |
-| Heap growth | +38.7 MB（433 文件） | **峰值 +36.6 MB → 回落到低于起点**（10k 文件） | 无持续增长 |
-| longtask 数 / 总时长 | 54 / 31,105 ms | **3 / 175 ms**（全部首尾边界） | 持续阻塞 → 一次性边界 |
+| 指标                     | Baseline（PATCH 0）     | PATCH 5（10,000 文件）                         | 改善                  |
+| ------------------------ | ----------------------- | ---------------------------------------------- | --------------------- |
+| Longest main-thread task | 11,996 ms               | **63 ms**                                      | ~190×                 |
+| P95 task duration        | 1,367 ms                | **63 ms**                                      | ~22×                  |
+| P99 task duration        | 11,996 ms               | **63 ms**                                      | ~190×                 |
+| Max drain duration       | 无界（单批全量）        | **62 ms**（含 61ms 单事件）                    | 有界                  |
+| Max JSON.parse           | 1.9 ms（PATCH 1，往返） | **0.4 ms**（单次 parse；PATCH 2 已消除往返）   | 消除重复解析          |
+| RPC event throughput     | unavailable             | **161.8/s**（run 内；PATCH 2 记录 118.2/s）    | 可测且稳定            |
+| Stream flush count       | 每 delta 1 次 Markdown  | **1,102**（4,307 deltas 的 0.26×）             | 线性 → 合并           |
+| Markdown render count    | 每 delta + 历史消息     | **10**（0.23% of deltas）                      | 线性 → 常数级         |
+| Activity flush count     | 随事件线性              | **74**（events 的 0.7%；合并 41 → 12）         | 线性 → 合并           |
+| Heap growth              | +38.7 MB（433 文件）    | **峰值 +36.6 MB → 回落到低于起点**（10k 文件） | 无持续增长            |
+| longtask 数 / 总时长     | 54 / 31,105 ms          | **3 / 175 ms**（全部首尾边界）                 | 持续阻塞 → 一次性边界 |
 
 ## Conditional Patch
 
@@ -142,19 +142,19 @@
 
 ## 最终成功标准对照（规格 §16）
 
-| 标准 | 结果 |
-| --- | --- |
-| Pi 可以高吞吐工作 | ✅ 10,000 文件扫描 + 15 次 bash，57.9s 完成 |
-| RPC 可以高吞吐传输 | ✅ 9,369 events / 57.9s（~162/s），队列有界（44 行 / 96 KiB） |
-| Renderer 不会同步无限消费 RPC events | ✅ 有界 drain（64 events / 6ms 预算）+ 单事件成本 ≤63ms 且仅边界 |
-| UI Rendering 不跟 RPC event frequency 线性增长 | ✅ stream flush 0.26× deltas、markdown 0.23%、activity 0.7% |
-| 高强度全库健康检查期间 Obsidian 保持可交互 | ✅ 运行中 rAF mean 6.9ms / max 7.1ms；边界外 0 longtask |
+| 标准                                                                                                                  | 结果                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Pi 可以高吞吐工作                                                                                                     | ✅ 10,000 文件扫描 + 15 次 bash，57.9s 完成                                              |
+| RPC 可以高吞吐传输                                                                                                    | ✅ 9,369 events / 57.9s（~162/s），队列有界（44 行 / 96 KiB）                            |
+| Renderer 不会同步无限消费 RPC events                                                                                  | ✅ 有界 drain（64 events / 6ms 预算）+ 单事件成本 ≤63ms 且仅边界                         |
+| UI Rendering 不跟 RPC event frequency 线性增长                                                                        | ✅ stream flush 0.26× deltas、markdown 0.23%、activity 0.7%                              |
+| 高强度全库健康检查期间 Obsidian 保持可交互                                                                            | ✅ 运行中 rAF mean 6.9ms / max 7.1ms；边界外 0 longtask                                  |
 | 不改变 RPC protocol / ordering / correlation / cancellation / compaction / session persistence / tool 能力 / 最终答案 | ✅ 全部约束由回归测试与真实运行覆盖（0 丢失/重复/乱序、取消/切换/compaction 一致性测试） |
 
 ## 遗留事项（不在本任务范围）
 
 1. **发现 #1**：空 Vault 未配置模型时打开 Pi 视图抛 `e.startsWith is not a function`（`src/ui/run-settings.mjs`），建议单独 issue。
 2. **发现 #2**：Windows `cmd.exe /c` 多行参数截断导致 `--tools` 等丢失、工具模式失效，建议单独 issue（修法方向已记录在 `perf/baseline.md`）。
-3. legacy compaction 断言门禁已达 **3/3**（0 告警），断言代码可后续清理（归属 PATCH 2 退出条件）。
-4. `finishCanceledRun()` 无调用方（历史遗留），可后续清理。
-5. 63ms 边界渲染（finalize/完成 render）为一次性成本；若未来改变「final = 完整 Markdown」语义可继续优化。
+3. ~~legacy compaction 断言门禁 3/3 后可清理~~ → **已清理**（Cleanup 轮）：门禁 3/3 达成后按 §12.2 移除断言、`state.events` 保留区与 `retainedEvents` 指标，compaction 三态语义由单测继续覆盖。
+4. ~~`finishCanceledRun()` 无调用方（历史遗留）~~ → **已清理**（Cleanup 轮）：死代码移除，取消清理保持于 `runPrompt` `finally` 与 `cancelCurrentRun`。
+5. 63ms 边界渲染（finalize/完成 render）为一次性成本；若未来改变「final = 完整 Markdown」语义可继续优化（本项目未做，PATCH 6/7 决策不因此改变）。

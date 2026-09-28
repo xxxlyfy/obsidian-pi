@@ -3257,7 +3257,6 @@ var PerformanceProfiler = class {
         maxNormalizeDuration: durations.normalize?.max ?? 0,
         maxRunStateDuration: durations.runState?.max ?? 0,
         diagnosticBufferSize: maxima.diagnosticsSize ?? 0,
-        retainedEvents: maxima.retainedEvents ?? 0,
         // PATCH 3 streaming rendering metrics (spec §6.9).
         streamDeltaCount: counters.streamDeltaCount ?? 0,
         streamFlushCount: counters.streamFlushCount ?? 0,
@@ -4090,7 +4089,6 @@ function createRunState() {
     lastCompactionEnd: void 0,
     activeTools: /* @__PURE__ */ new Map(),
     diagnostics: new DiagnosticRing(),
-    events: [],
     toolSequence: 0,
     warnedToolIdFallback: false,
     warnedToolIdAmbiguous: false
@@ -4110,16 +4108,10 @@ function retainEvent(state, event) {
   }
   if (event.toolArgs !== void 0) copy.toolArgs = event.toolArgs;
   if (event.assistantEvent?.type) copy.assistantEventType = event.assistantEvent.type;
-  if (normalizeCompactionEventType(String(event.type ?? "")) === "compaction_end") {
-    copy.compactionError = event.raw?.errorMessage;
-    copy.compactionAborted = event.raw?.aborted === true;
-    state.events.push(copy);
-  }
   state.diagnostics.push(copy);
   const profiler = performanceProfiler;
   if (profiler.enabled) {
     profiler.recordMax("diagnosticsSize", state.diagnostics.size);
-    profiler.recordMax("retainedEvents", state.events.length);
     profiler.recordMax("activeTools", state.activeTools.size);
   }
 }
@@ -4210,24 +4202,6 @@ function applyCompactionEnd(state, rawEvent) {
   const successful = !end.errorMessage && !end.aborted;
   if (successful) state.sawSuccessfulCompaction = true;
   if (end.aborted) state.sawAbortedCompaction = true;
-  assertCompactionConsistency(state);
-}
-function legacySawSuccessfulCompaction(events) {
-  return events.some(
-    (entry) =>
-      normalizeCompactionEventType(String(entry.type ?? "")) === "compaction_end" &&
-      !entry.compactionError &&
-      !entry.compactionAborted
-  );
-}
-function assertCompactionConsistency(state) {
-  const legacy = legacySawSuccessfulCompaction(state.events);
-  if (legacy === state.sawSuccessfulCompaction) return;
-  performanceProfiler.incrementCounter("compactionAssertionWarnings");
-  console.warn("Pi Agent: compaction RunState assertion mismatch", {
-    incremental: state.sawSuccessfulCompaction,
-    legacy
-  });
 }
 
 // src/pi/events.mjs
@@ -9432,34 +9406,6 @@ var PiAgentView = class extends f4.ItemView {
       this.setRunningState(true);
       this.renderThreadListIfVisible();
     }
-  }
-  finishCanceledRun() {
-    this.running = false;
-    this.canceling = false;
-    this.clearCoalescedActivity();
-    this.cancelStreamingFlush();
-    this.streamingAssistantContent = "";
-    this.streamingAnswerDirty = false;
-    this.streamingThinkingContent = "";
-    this.streamingThinkingDirty = false;
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.streamingItemEl = void 0;
-    this.streamingTextEl = void 0;
-    this.activityText = "";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
-    this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
-    if (this.runningThreadId) this.plugin.endAnnotationProcessingForThread(this.runningThreadId);
-    this.runningThreadId = void 0;
-    this.plugin.cancelPiRun();
-    this.renderPromptQueue();
-    this.setRunningState(false);
-    this.renderMessages();
-    this.renderToolBadges();
   }
   cleanupComposerBarObserver() {
     if (this.composerBarCleanup) {

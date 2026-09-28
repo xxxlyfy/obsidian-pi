@@ -68,7 +68,6 @@ export function createRunState() {
     lastCompactionEnd: undefined,
     activeTools: new Map(),
     diagnostics: new DiagnosticRing(),
-    events: [],
     toolSequence: 0,
     warnedToolIdFallback: false,
     warnedToolIdAmbiguous: false
@@ -91,18 +90,10 @@ export function retainEvent(state, event) {
   if (event.toolArgs !== undefined) copy.toolArgs = event.toolArgs;
   if (event.assistantEvent?.type) copy.assistantEventType = event.assistantEvent.type;
 
-  if (normalizeCompactionEventType(String(event.type ?? "")) === "compaction_end") {
-    copy.compactionError = event.raw?.errorMessage;
-    copy.compactionAborted = event.raw?.aborted === true;
-    // Legacy assertion input: keep every compaction end event for this run.
-    state.events.push(copy);
-  }
-
   state.diagnostics.push(copy);
   const profiler = performanceProfiler;
   if (profiler.enabled) {
     profiler.recordMax("diagnosticsSize", state.diagnostics.size);
-    profiler.recordMax("retainedEvents", state.events.length);
     profiler.recordMax("activeTools", state.activeTools.size);
   }
 }
@@ -206,25 +197,4 @@ export function applyCompactionEnd(state, rawEvent) {
   const successful = !end.errorMessage && !end.aborted;
   if (successful) state.sawSuccessfulCompaction = true;
   if (end.aborted) state.sawAbortedCompaction = true;
-  assertCompactionConsistency(state);
-}
-
-export function legacySawSuccessfulCompaction(events) {
-  return events.some(
-    (entry) =>
-      normalizeCompactionEventType(String(entry.type ?? "")) === "compaction_end" &&
-      !entry.compactionError &&
-      !entry.compactionAborted
-  );
-}
-
-function assertCompactionConsistency(state) {
-  const legacy = legacySawSuccessfulCompaction(state.events);
-  if (legacy === state.sawSuccessfulCompaction) return;
-
-  performanceProfiler.incrementCounter("compactionAssertionWarnings");
-  console.warn("Pi Agent: compaction RunState assertion mismatch", {
-    incremental: state.sawSuccessfulCompaction,
-    legacy
-  });
 }

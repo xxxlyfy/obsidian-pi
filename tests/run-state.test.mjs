@@ -4,7 +4,6 @@ import {
   createRunState,
   DiagnosticRing,
   finishToolEvent,
-  legacySawSuccessfulCompaction,
   normalizeCompactionEventType,
   retainEvent,
   trackToolEvent
@@ -90,33 +89,26 @@ describe("compaction state", () => {
     expect(normalizeCompactionEventType("message_end")).toBe("message_end");
   });
 
-  it("flags successful and aborted compaction ends consistently", () => {
-    const state = createRunState();
+  it("tracks successful, aborted, and failed compaction ends", () => {
+    const success = createRunState();
+    applyCompactionEnd(success, { result: { tokensBefore: 12_345 } });
+    expect(success.sawSuccessfulCompaction).toBe(true);
+    expect(success.sawAbortedCompaction).toBe(false);
+    expect(success.lastCompactionEnd).toMatchObject({ result: { tokensBefore: 12_345 } });
 
-    retainEvent(state, { type: "auto_compaction_end", raw: { aborted: true } });
-    applyCompactionEnd(state, { aborted: true });
+    const aborted = createRunState();
+    applyCompactionEnd(aborted, { aborted: true });
+    expect(aborted.sawSuccessfulCompaction).toBe(false);
+    expect(aborted.sawAbortedCompaction).toBe(true);
+    expect(aborted.lastCompactionEnd).toMatchObject({ aborted: true });
 
-    expect(state.sawSuccessfulCompaction).toBe(false);
-    expect(state.sawAbortedCompaction).toBe(true);
-    expect(state.lastCompactionEnd).toMatchObject({ aborted: true });
-    expect(legacySawSuccessfulCompaction(state.events)).toBe(false);
+    const failed = createRunState();
+    applyCompactionEnd(failed, { errorMessage: "boom" });
+    expect(failed.sawSuccessfulCompaction).toBe(false);
+    expect(failed.lastCompactionEnd.errorMessage).toBe("boom");
   });
 
-  it("warns when incremental state and the legacy scan disagree", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const state = createRunState();
-    state.sawSuccessfulCompaction = true;
-
-    applyCompactionEnd(state, { aborted: true });
-
-    expect(warn).toHaveBeenCalledWith(
-      "Pi Agent: compaction RunState assertion mismatch",
-      expect.objectContaining({ incremental: true, legacy: false })
-    );
-    warn.mockRestore();
-  });
-
-  it("retains bounded copies without raw payloads", () => {
+  it("retains bounded diagnostic copies without raw payloads", () => {
     const state = createRunState();
 
     retainEvent(state, {
@@ -129,6 +121,5 @@ describe("compaction state", () => {
     const [retained] = state.diagnostics.snapshot();
     expect(retained).toMatchObject({ type: "tool_end", toolName: "bash", toolCallId: "c1" });
     expect(retained).not.toHaveProperty("raw");
-    expect(state.events).toHaveLength(0);
   });
 });

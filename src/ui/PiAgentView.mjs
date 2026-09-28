@@ -577,34 +577,6 @@ export class PiAgentView extends f.ItemView {
       this.renderThreadListIfVisible();
     }
   }
-  finishCanceledRun() {
-    this.running = !1;
-    this.canceling = !1;
-    this.clearCoalescedActivity();
-    this.cancelStreamingFlush();
-    this.streamingAssistantContent = "";
-    this.streamingAnswerDirty = false;
-    this.streamingThinkingContent = "";
-    this.streamingThinkingDirty = false;
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.streamingItemEl = void 0;
-    this.streamingTextEl = void 0;
-    this.activityText = "";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
-    this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
-    if (this.runningThreadId) this.plugin.endAnnotationProcessingForThread(this.runningThreadId);
-    this.runningThreadId = void 0;
-    this.plugin.cancelPiRun();
-    this.renderPromptQueue();
-    this.setRunningState(!1);
-    this.renderMessages();
-    this.renderToolBadges();
-  }
   cleanupComposerBarObserver() {
     if (this.composerBarCleanup) {
       this.composerBarCleanup();

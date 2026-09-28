@@ -1,10 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createRunState,
-  finishToolEvent,
-  legacySawSuccessfulCompaction,
-  trackToolEvent
-} from "../src/pi/run-state.mjs";
+import { createRunState, finishToolEvent, trackToolEvent } from "../src/pi/run-state.mjs";
 import { handlePiEvent } from "../src/pi/events.mjs";
 import { PiRpcClient } from "../src/pi/rpc-client.mjs";
 import { performanceProfiler } from "../src/shared/performance-profiler.mjs";
@@ -206,30 +201,21 @@ describe("PATCH 5 synthetic tests", () => {
     }
   });
 
-  it("Test G: compaction success/abort/error stay consistent with the legacy scan", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const success = createRunState();
-      handlePiEvent({ type: "auto_compaction_end", result: { tokensBefore: 1_000 } }, success, {});
-      expect(success.sawSuccessfulCompaction).toBe(true);
-      expect(legacySawSuccessfulCompaction(success.events)).toBe(true);
+  it("Test G: compaction success/abort/error update RunState consistently", () => {
+    const success = createRunState();
+    handlePiEvent({ type: "auto_compaction_end", result: { tokensBefore: 1_000 } }, success, {});
+    expect(success.sawSuccessfulCompaction).toBe(true);
+    expect(success.lastCompactionEnd.result).toEqual({ tokensBefore: 1_000 });
 
-      const aborted = createRunState();
-      handlePiEvent({ type: "session_compact", aborted: true }, aborted, {});
-      expect(aborted.sawSuccessfulCompaction).toBe(false);
-      expect(aborted.sawAbortedCompaction).toBe(true);
-      expect(legacySawSuccessfulCompaction(aborted.events)).toBe(false);
+    const aborted = createRunState();
+    handlePiEvent({ type: "session_compact", aborted: true }, aborted, {});
+    expect(aborted.sawSuccessfulCompaction).toBe(false);
+    expect(aborted.sawAbortedCompaction).toBe(true);
 
-      const failed = createRunState();
-      handlePiEvent({ type: "auto_compaction_end", errorMessage: "compaction failed" }, failed, {});
-      expect(failed.sawSuccessfulCompaction).toBe(false);
-      expect(failed.lastCompactionEnd.errorMessage).toBe("compaction failed");
-      expect(legacySawSuccessfulCompaction(failed.events)).toBe(false);
-
-      expect(warn).not.toHaveBeenCalled();
-    } finally {
-      warn.mockRestore();
-    }
+    const failed = createRunState();
+    handlePiEvent({ type: "auto_compaction_end", errorMessage: "compaction failed" }, failed, {});
+    expect(failed.sawSuccessfulCompaction).toBe(false);
+    expect(failed.lastCompactionEnd.errorMessage).toBe("compaction failed");
   });
 
   it("CI regression: a 2,000-event burst yields within the batch budget without loss", async () => {

@@ -218,7 +218,7 @@ describe("Pi event helpers", () => {
     expect(state.tokenUsage).toMatchObject({ input: 10 });
   });
 
-  it("retains compaction ends for the legacy assertion without raw payloads", () => {
+  it("keeps compaction ends in the bounded diagnostics ring without raw payloads", () => {
     const { state, callbacks, onEvent } = createContext();
 
     handlePiEvent(
@@ -228,12 +228,9 @@ describe("Pi event helpers", () => {
     );
 
     expect(state.sawSuccessfulCompaction).toBe(true);
-    expect(state.events).toHaveLength(1);
-    expect(state.events[0]).toMatchObject({
-      type: "auto_compaction_end",
-      compactionAborted: false
-    });
-    expect(state.events[0]).not.toHaveProperty("raw");
+    const [retained] = state.diagnostics.snapshot();
+    expect(retained).toMatchObject({ type: "auto_compaction_end" });
+    expect(retained).not.toHaveProperty("raw");
 
     handlePiEvent(
       {
@@ -243,7 +240,7 @@ describe("Pi event helpers", () => {
       state,
       callbacks
     );
-    expect(state.events).toHaveLength(1);
+    expect(state.diagnostics.snapshot()).toHaveLength(2);
     expect(onEvent).toHaveBeenCalledTimes(2);
   });
 });

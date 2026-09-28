@@ -267,8 +267,7 @@ describe("PATCH 3 streaming renderer", () => {
     expect(viewSource).toMatch(
       /resetTransientRunUiState\(\) \{[\s\S]*?this\.cancelStreamingFlush\(\)/
     );
-    expect(viewSource).toMatch(/finishCanceledRun\(\) \{[\s\S]*?this\.cancelStreamingFlush\(\)/);
-    expect(viewSource.match(/this\.cancelStreamingFlush\(\)/g)?.length).toBeGreaterThanOrEqual(5);
+    expect(viewSource.match(/this\.cancelStreamingFlush\(\)/g)?.length).toBeGreaterThanOrEqual(4);
     expect(activitySource).toContain("this.finalizeStreamingContent?.() === true");
   });
 

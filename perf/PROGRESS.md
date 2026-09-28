@@ -208,3 +208,17 @@
 - 验证：`npm run ci` 全绿（57 files / 337 tests，PATCH 5 最终状态）；报告全部数据来自 PATCH 0-5 受控真实运行（见 `perf/baseline.md`）。
 - 未决：见报告「遗留事项」——发现 #1/#2（范围外）、legacy compaction 断言门禁 3/3 可清理、`finishCanceledRun()` 死代码、63ms 边界渲染可选优化。
 - 下一步：项目规格内步骤全部完成；如需继续可跟进遗留事项或按要求发布到 fork。
+
+---
+
+### Cleanup — legacy compaction 断言与死代码移除
+
+- 状态：**完成**（规格 §12.2 门禁达成后的清理；无行为变化）。
+- 背景：legacy compaction 一致性断言需「≥3 次真实全库健康检查 + 0 告警」才可删除；门禁已于 PATCH 3/4 达到 **3/3**（session JSONL 无 compaction 事件、profiler 0 告警）。
+- 改动文件：
+  - `src/pi/run-state.mjs`：删除 `legacySawSuccessfulCompaction` / `assertCompactionConsistency` / `state.events` 保留区及其 compaction 专用字段拷贝；`retainEvent` 只维护有界 `DiagnosticRing`。`sawSuccessfulCompaction` / `sawAbortedCompaction` / `lastCompactionEnd` 语义不变。
+  - `src/shared/performance-profiler.mjs`：移除已无生产者的 `retainedEvents` 指标。
+  - `src/ui/PiAgentView.mjs`：删除无调用方的 `finishCanceledRun()`；取消清理保持在 `cancelCurrentRun` + `runPrompt` `finally`。
+  - 测试：`tests/run-state.test.mjs`（改为 success/abort/failed 三态跟踪，移除 legacy 告警用例）、`tests/events.test.mjs`（compaction 保留断言改为 diagnostics ring）、`tests/perf-synthetic.test.mjs` Test G、`tests/activity-coalescing.test.mjs` / `tests/streaming-renderer.test.mjs` 源断言同步。
+- 验证：`npm run ci` 全绿（57 files / **336 tests**，差值为删除的 legacy 告警测试）；dev:install → reload → `dev:errors` 空；短 prompt 真实运行：final answer Markdown ✅、stream 194 → flush 65、`diagnosticBufferSize 209`（有界）、metrics 不再含 `retainedEvents`、0 错误。
+- 未决：发现 #1/#2（范围外）；63ms 边界渲染可选优化（本项目未做，PATCH 6/7 决策不因此改变）。

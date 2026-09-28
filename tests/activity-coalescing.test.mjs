@@ -226,7 +226,6 @@ describe("PATCH 4 activity coalescing", () => {
     expect(viewSource).toMatch(
       /resetTransientRunUiState\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/
     );
-    expect(viewSource).toMatch(/finishCanceledRun\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
     expect(viewSource).toMatch(/cancelCurrentRun\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
     expect(viewSource).toContain("this.threadGeneration += 1");
     expect(viewSource).toContain("runGeneration: ++this.runGenerationCounter");
