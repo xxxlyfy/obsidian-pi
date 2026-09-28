@@ -1,22 +1,40 @@
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+import {
+  applyCompactionEnd,
+  finishToolEvent,
+  normalizeCompactionEventType,
+  retainEvent,
+  trackToolEvent
+} from "./run-state.mjs";
 import { normalizeTokenUsage } from "./token-usage.mjs";
 
-export function handlePiJsonEventLine(line, callbacks, events, appendText, updateRunState) {
+/**
+ * PATCH 2 object path: the persistent RPC client already delivers parsed
+ * objects, so no JSON.stringify -> JSON.parse round trip is needed (spec §5.3).
+ * `state` is a RunState instance from ./run-state.mjs.
+ */
+export function handlePiEvent(event, state, callbacks) {
   const profiler = performanceProfiler;
-  if (!profiler.enabled) {
-    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
-    return;
-  }
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const normalizeStartedAt = profiling ? globalThis.performance.now() : 0;
 
-  const startedAt = globalThis.performance.now();
+  if (profiling) profiler.incrementCounter("rpcEventsProcessed");
   try {
-    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
+    normalizePiEvent(event, state, callbacks);
   } finally {
-    profiler.recordDuration("event", globalThis.performance.now() - startedAt);
+    if (profiling) {
+      const now = globalThis.performance.now();
+      profiler.recordDuration("normalize", now - normalizeStartedAt);
+      profiler.recordDuration("event", now - startedAt);
+    }
   }
 }
 
-function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState) {
+/**
+ * String path for true JSONL sources (Pi CLI `--mode json` output and tests).
+ */
+export function handlePiJsonEventLine(line, state, callbacks) {
   if (!line.trim()) return;
 
   const profiler = performanceProfiler;
@@ -33,44 +51,92 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
     profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
   }
 
-  const type = String(event.type ?? "event");
-  const emit = (normalizedEvent) => {
-    events.push(normalizedEvent);
-    callbacks?.onEvent?.(normalizedEvent);
-  };
-  const captureRunState = (messageOrMessages) => {
-    const runState = getAssistantRunState(messageOrMessages);
-    if (runState) updateRunState(runState);
-  };
+  handlePiEvent(event, state, callbacks);
+}
 
-  if (event.message) captureRunState(event.message);
-  if (Array.isArray(event.messages)) captureRunState(event.messages);
+function publishEvent(state, callbacks, normalizedEvent) {
+  retainEvent(state, normalizedEvent);
+  callbacks?.onEvent?.(normalizedEvent);
+}
+
+function captureRunStateIfNeeded(state, event) {
+  if (!needsRunStateCapture(event)) return;
+
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  if (profiling) profiler.incrementCounter("runStateCaptures");
+
+  const runState = getAssistantRunState(event.message ?? event.messages);
+  if (runState) {
+    state.fallbackText = runState.fallbackText;
+    state.errorMessage = runState.errorMessage;
+    state.tokenUsage = runState.tokenUsage;
+  }
+
+  if (profiling) profiler.recordDuration("runState", globalThis.performance.now() - startedAt);
+}
+
+function needsRunStateCapture(event) {
+  if (Array.isArray(event.messages)) return true;
+
+  const message = event.message;
+  if (!message) return false;
+  if (message.usage || message.stopReason || message.errorMessage) return true;
+  // High-frequency streaming updates must not trigger full text extraction or
+  // token parsing on every delta (spec §5.7). Boundary events still capture.
+  return event.type !== "message_update";
+}
+
+function normalizePiEvent(event, state, callbacks) {
+  const type = String(event.type ?? "event");
+  captureRunStateIfNeeded(state, event);
 
   if (type === "tool_execution_start" || type === "tool_execution_update") {
-    emit({
+    const toolName = String(event.toolName ?? "tool");
+    const toolCallId = String(event.toolCallId ?? "");
+    const toolArgs = event.args ?? {};
+
+    const profiler = performanceProfiler;
+    const profiling = profiler.enabled;
+    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const toolKey = trackToolEvent(state, {
+      toolCallId,
+      toolName,
+      toolArgs,
+      isStart: type === "tool_execution_start"
+    });
+    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+
+    publishEvent(state, callbacks, {
       type: type === "tool_execution_start" ? "tool_start" : "tool_update",
-      raw: event,
-      message: String(event.toolName ?? "tool"),
-      toolName: String(event.toolName ?? "tool"),
-      toolCallId: String(event.toolCallId ?? ""),
-      toolArgs: event.args ?? {}
+      toolName,
+      toolCallId,
+      toolKey,
+      toolArgs
     });
     return;
   }
 
   if (type === "tool_execution_end") {
     const toolCallId = String(event.toolCallId ?? "");
-    const startedTool = events
-      .slice()
-      .reverse()
-      .find((candidate) => candidate.type === "tool_start" && candidate.toolCallId === toolCallId);
-    emit({
-      type: "tool_end",
-      raw: event,
-      message: String(event.toolName ?? startedTool?.toolName ?? "tool"),
-      toolName: String(event.toolName ?? startedTool?.toolName ?? "tool"),
+    const eventToolName = String(event.toolName ?? "tool");
+
+    const profiler = performanceProfiler;
+    const profiling = profiler.enabled;
+    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const { key: toolKey, entry } = finishToolEvent(state, {
       toolCallId,
-      toolArgs: event.args ?? startedTool?.toolArgs ?? {},
+      toolName: eventToolName
+    });
+    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+
+    publishEvent(state, callbacks, {
+      type: "tool_end",
+      toolName: String(event.toolName ?? entry?.toolName ?? "tool"),
+      toolCallId,
+      toolKey,
+      toolArgs: event.args ?? entry?.toolArgs ?? {},
       isError: event.isError === true,
       errorMessage:
         event.isError === true
@@ -84,15 +150,15 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
   if (type === "message_update" && assistantEvent) {
     if (assistantEvent.type === "text_delta") {
       const delta = assistantEvent.delta ?? "";
-      appendText(delta);
+      state.finalResponse += delta;
       const textEvent = { type: "text_delta", raw: event, textDelta: delta, assistantEvent };
-      emit(textEvent);
+      publishEvent(state, callbacks, textEvent);
       callbacks?.onTextDelta?.(delta, textEvent);
       return;
     }
 
     const toolCall = extractToolCallFromAssistantEvent(assistantEvent);
-    emit({
+    publishEvent(state, callbacks, {
       type: assistantEvent.type,
       raw: event,
       assistantEvent,
@@ -106,12 +172,20 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
   }
 
   if (type === "message_end") {
-    emit({ type: "message_end", raw: event, fallbackText: extractAssistantText(event.message) });
+    publishEvent(state, callbacks, {
+      type: "message_end",
+      raw: event,
+      fallbackText: extractAssistantText(event.message)
+    });
     return;
   }
 
   if (type === "turn_end") {
-    emit({ type: "turn_end", raw: event, fallbackText: extractAssistantText(event.message) });
+    publishEvent(state, callbacks, {
+      type: "turn_end",
+      raw: event,
+      fallbackText: extractAssistantText(event.message)
+    });
     return;
   }
 
@@ -121,12 +195,15 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
       raw: event,
       fallbackText: extractLatestAssistantText(event.messages)
     };
-    emit(agentEndEvent);
-    updateRunState({ fallbackText: agentEndEvent.fallbackText?.trim() ?? "" });
+    publishEvent(state, callbacks, agentEndEvent);
+    state.fallbackText = agentEndEvent.fallbackText?.trim() ?? "";
     return;
   }
 
-  emit({ type, raw: event });
+  publishEvent(state, callbacks, { type, raw: event });
+  if (normalizeCompactionEventType(type) === "compaction_end") {
+    applyCompactionEnd(state, event);
+  }
 }
 
 export function extractAssistantText(message) {

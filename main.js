@@ -3238,7 +3238,12 @@ var PerformanceProfiler = class {
         maxJsonParseDuration: durations.jsonParse?.max ?? 0,
         maxJsonLineBytes: maxima.jsonLineBytes ?? 0,
         yieldCount: counters.yieldCount ?? 0,
-        yieldLatency: durations.yield?.max ?? 0
+        yieldLatency: durations.yield?.max ?? 0,
+        maxToolLookupDuration: durations.toolLookup?.max ?? 0,
+        maxNormalizeDuration: durations.normalize?.max ?? 0,
+        maxRunStateDuration: durations.runState?.max ?? 0,
+        diagnosticBufferSize: maxima.diagnosticsSize ?? 0,
+        retainedEvents: maxima.retainedEvents ?? 0
       }
     };
   }
@@ -3978,21 +3983,217 @@ function formatCompactNumber(value) {
       : value.toFixed(1).replace(/\.0$/, "");
 }
 
-// src/pi/events.mjs
-function handlePiJsonEventLine(line, callbacks, events, appendText, updateRunState) {
-  const profiler = performanceProfiler;
-  if (!profiler.enabled) {
-    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
-    return;
+// src/pi/run-state.mjs
+var DIAGNOSTIC_RING_CAPACITY = 500;
+var DiagnosticRing = class {
+  constructor(capacity = DIAGNOSTIC_RING_CAPACITY) {
+    this.capacity = Math.max(1, Math.floor(capacity));
+    this.entries = new Array(this.capacity);
+    this.startIndex = 0;
+    this.count = 0;
   }
-  const startedAt = globalThis.performance.now();
-  try {
-    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
-  } finally {
-    profiler.recordDuration("event", globalThis.performance.now() - startedAt);
+  get size() {
+    return this.count;
+  }
+  push(entry) {
+    const index = (this.startIndex + this.count) % this.capacity;
+    this.entries[index] = entry;
+    if (this.count < this.capacity) this.count += 1;
+    else this.startIndex = (this.startIndex + 1) % this.capacity;
+  }
+  snapshot() {
+    const result = new Array(this.count);
+    for (let index = 0; index < this.count; index += 1) {
+      result[index] = this.entries[(this.startIndex + index) % this.capacity];
+    }
+    return result;
+  }
+  clear() {
+    this.startIndex = 0;
+    this.count = 0;
+  }
+};
+var RETAINED_EVENT_KEYS = [
+  "toolName",
+  "toolCallId",
+  "toolKey",
+  "isError",
+  "errorMessage",
+  "textDelta",
+  "thinkingDelta",
+  "fallbackText",
+  "method",
+  "error"
+];
+function createRunState() {
+  return {
+    fallbackText: "",
+    finalResponse: "",
+    tokenUsage: void 0,
+    errorMessage: void 0,
+    sawSuccessfulCompaction: false,
+    sawAbortedCompaction: false,
+    lastCompactionEnd: void 0,
+    activeTools: /* @__PURE__ */ new Map(),
+    diagnostics: new DiagnosticRing(),
+    events: [],
+    toolSequence: 0,
+    warnedToolIdFallback: false,
+    warnedToolIdAmbiguous: false
+  };
+}
+function normalizeCompactionEventType(type) {
+  return type === "auto_compaction_start" || type === "session_before_compact"
+    ? "compaction_start"
+    : type === "auto_compaction_end" || type === "session_compact"
+      ? "compaction_end"
+      : type;
+}
+function retainEvent(state, event) {
+  const copy = { type: event.type };
+  for (const key of RETAINED_EVENT_KEYS) {
+    if (event[key] !== void 0) copy[key] = event[key];
+  }
+  if (event.toolArgs !== void 0) copy.toolArgs = event.toolArgs;
+  if (event.assistantEvent?.type) copy.assistantEventType = event.assistantEvent.type;
+  if (normalizeCompactionEventType(String(event.type ?? "")) === "compaction_end") {
+    copy.compactionError = event.raw?.errorMessage;
+    copy.compactionAborted = event.raw?.aborted === true;
+    state.events.push(copy);
+  }
+  state.diagnostics.push(copy);
+  const profiler = performanceProfiler;
+  if (profiler.enabled) {
+    profiler.recordMax("diagnosticsSize", state.diagnostics.size);
+    profiler.recordMax("retainedEvents", state.events.length);
+    profiler.recordMax("activeTools", state.activeTools.size);
   }
 }
-function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState) {
+function fallbackToolKey(state) {
+  state.toolSequence += 1;
+  return `tool:${state.toolSequence}`;
+}
+function findUniqueActiveToolKey(state, toolName) {
+  let matchKey;
+  let matches = 0;
+  for (const [key, entry] of state.activeTools) {
+    if (entry.toolName !== toolName) continue;
+    matches += 1;
+    matchKey = key;
+  }
+  return matches === 1 ? matchKey : void 0;
+}
+function countActiveTools(state, toolName) {
+  let matches = 0;
+  for (const entry of state.activeTools.values()) {
+    if (entry.toolName === toolName) matches += 1;
+  }
+  return matches;
+}
+function warnToolIdFallback(state) {
+  if (state.warnedToolIdFallback) return;
+  state.warnedToolIdFallback = true;
+  console.warn(
+    "Pi Agent: tool event without toolCallId; using lifecycle fallback keys for correlation."
+  );
+}
+function warnToolIdAmbiguous(state, toolName) {
+  if (state.warnedToolIdAmbiguous) return;
+  state.warnedToolIdAmbiguous = true;
+  console.warn(
+    `Pi Agent: cannot correlate tool event without toolCallId (name: ${toolName}); no lifecycle relation was assumed.`
+  );
+}
+function trackToolEvent(state, { toolCallId, toolName, toolArgs, isStart = false }) {
+  const profiler = performanceProfiler;
+  if (!toolCallId) {
+    profiler.incrementCounter("toolIdFallbacks");
+    warnToolIdFallback(state);
+  }
+  const key = toolCallId
+    ? `id:${toolCallId}`
+    : isStart
+      ? fallbackToolKey(state)
+      : (findUniqueActiveToolKey(state, toolName) ?? fallbackToolKey(state));
+  const entry = state.activeTools.get(key);
+  if (entry) {
+    if (toolName !== void 0) entry.toolName = toolName;
+    if (toolArgs !== void 0) entry.toolArgs = toolArgs;
+  } else {
+    state.activeTools.set(key, { toolCallId, toolName, toolArgs });
+  }
+  return key;
+}
+function finishToolEvent(state, { toolCallId, toolName }) {
+  const profiler = performanceProfiler;
+  if (toolCallId) {
+    const key = `id:${toolCallId}`;
+    const entry = state.activeTools.get(key);
+    if (entry) state.activeTools.delete(key);
+    return { key, entry };
+  }
+  profiler.incrementCounter("toolIdFallbacks");
+  warnToolIdFallback(state);
+  const uniqueKey = findUniqueActiveToolKey(state, toolName);
+  if (uniqueKey) {
+    const entry = state.activeTools.get(uniqueKey);
+    state.activeTools.delete(uniqueKey);
+    return { key: uniqueKey, entry };
+  }
+  if (countActiveTools(state, toolName) > 1) {
+    profiler.incrementCounter("toolIdAmbiguous");
+    warnToolIdAmbiguous(state, toolName);
+  }
+  return { key: fallbackToolKey(state), entry: void 0 };
+}
+function applyCompactionEnd(state, rawEvent) {
+  const end = {
+    errorMessage: rawEvent?.errorMessage,
+    aborted: rawEvent?.aborted === true,
+    result: rawEvent?.result
+  };
+  state.lastCompactionEnd = end;
+  const successful = !end.errorMessage && !end.aborted;
+  if (successful) state.sawSuccessfulCompaction = true;
+  if (end.aborted) state.sawAbortedCompaction = true;
+  assertCompactionConsistency(state);
+}
+function legacySawSuccessfulCompaction(events) {
+  return events.some(
+    (entry) =>
+      normalizeCompactionEventType(String(entry.type ?? "")) === "compaction_end" &&
+      !entry.compactionError &&
+      !entry.compactionAborted
+  );
+}
+function assertCompactionConsistency(state) {
+  const legacy = legacySawSuccessfulCompaction(state.events);
+  if (legacy === state.sawSuccessfulCompaction) return;
+  performanceProfiler.incrementCounter("compactionAssertionWarnings");
+  console.warn("Pi Agent: compaction RunState assertion mismatch", {
+    incremental: state.sawSuccessfulCompaction,
+    legacy
+  });
+}
+
+// src/pi/events.mjs
+function handlePiEvent(event, state, callbacks) {
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const normalizeStartedAt = profiling ? globalThis.performance.now() : 0;
+  if (profiling) profiler.incrementCounter("rpcEventsProcessed");
+  try {
+    normalizePiEvent(event, state, callbacks);
+  } finally {
+    if (profiling) {
+      const now = globalThis.performance.now();
+      profiler.recordDuration("normalize", now - normalizeStartedAt);
+      profiler.recordDuration("event", now - startedAt);
+    }
+  }
+}
+function handlePiJsonEventLine(line, state, callbacks) {
   if (!line.trim()) return;
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
@@ -4007,41 +4208,76 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
     profiler.recordJsonEvent(line);
     profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
   }
+  handlePiEvent(event, state, callbacks);
+}
+function publishEvent(state, callbacks, normalizedEvent) {
+  retainEvent(state, normalizedEvent);
+  callbacks?.onEvent?.(normalizedEvent);
+}
+function captureRunStateIfNeeded(state, event) {
+  if (!needsRunStateCapture(event)) return;
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  if (profiling) profiler.incrementCounter("runStateCaptures");
+  const runState = getAssistantRunState(event.message ?? event.messages);
+  if (runState) {
+    state.fallbackText = runState.fallbackText;
+    state.errorMessage = runState.errorMessage;
+    state.tokenUsage = runState.tokenUsage;
+  }
+  if (profiling) profiler.recordDuration("runState", globalThis.performance.now() - startedAt);
+}
+function needsRunStateCapture(event) {
+  if (Array.isArray(event.messages)) return true;
+  const message = event.message;
+  if (!message) return false;
+  if (message.usage || message.stopReason || message.errorMessage) return true;
+  return event.type !== "message_update";
+}
+function normalizePiEvent(event, state, callbacks) {
   const type = String(event.type ?? "event");
-  const emit = (normalizedEvent) => {
-    events.push(normalizedEvent);
-    callbacks?.onEvent?.(normalizedEvent);
-  };
-  const captureRunState = (messageOrMessages) => {
-    const runState = getAssistantRunState(messageOrMessages);
-    if (runState) updateRunState(runState);
-  };
-  if (event.message) captureRunState(event.message);
-  if (Array.isArray(event.messages)) captureRunState(event.messages);
+  captureRunStateIfNeeded(state, event);
   if (type === "tool_execution_start" || type === "tool_execution_update") {
-    emit({
+    const toolName = String(event.toolName ?? "tool");
+    const toolCallId = String(event.toolCallId ?? "");
+    const toolArgs = event.args ?? {};
+    const profiler = performanceProfiler;
+    const profiling = profiler.enabled;
+    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const toolKey = trackToolEvent(state, {
+      toolCallId,
+      toolName,
+      toolArgs,
+      isStart: type === "tool_execution_start"
+    });
+    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+    publishEvent(state, callbacks, {
       type: type === "tool_execution_start" ? "tool_start" : "tool_update",
-      raw: event,
-      message: String(event.toolName ?? "tool"),
-      toolName: String(event.toolName ?? "tool"),
-      toolCallId: String(event.toolCallId ?? ""),
-      toolArgs: event.args ?? {}
+      toolName,
+      toolCallId,
+      toolKey,
+      toolArgs
     });
     return;
   }
   if (type === "tool_execution_end") {
     const toolCallId = String(event.toolCallId ?? "");
-    const startedTool = events
-      .slice()
-      .reverse()
-      .find((candidate) => candidate.type === "tool_start" && candidate.toolCallId === toolCallId);
-    emit({
-      type: "tool_end",
-      raw: event,
-      message: String(event.toolName ?? startedTool?.toolName ?? "tool"),
-      toolName: String(event.toolName ?? startedTool?.toolName ?? "tool"),
+    const eventToolName = String(event.toolName ?? "tool");
+    const profiler = performanceProfiler;
+    const profiling = profiler.enabled;
+    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const { key: toolKey, entry } = finishToolEvent(state, {
       toolCallId,
-      toolArgs: event.args ?? startedTool?.toolArgs ?? {},
+      toolName: eventToolName
+    });
+    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+    publishEvent(state, callbacks, {
+      type: "tool_end",
+      toolName: String(event.toolName ?? entry?.toolName ?? "tool"),
+      toolCallId,
+      toolKey,
+      toolArgs: event.args ?? entry?.toolArgs ?? {},
       isError: event.isError === true,
       errorMessage:
         event.isError === true
@@ -4054,14 +4290,14 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
   if (type === "message_update" && assistantEvent) {
     if (assistantEvent.type === "text_delta") {
       const delta = assistantEvent.delta ?? "";
-      appendText(delta);
+      state.finalResponse += delta;
       const textEvent = { type: "text_delta", raw: event, textDelta: delta, assistantEvent };
-      emit(textEvent);
+      publishEvent(state, callbacks, textEvent);
       callbacks?.onTextDelta?.(delta, textEvent);
       return;
     }
     const toolCall = extractToolCallFromAssistantEvent(assistantEvent);
-    emit({
+    publishEvent(state, callbacks, {
       type: assistantEvent.type,
       raw: event,
       assistantEvent,
@@ -4074,11 +4310,19 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
     return;
   }
   if (type === "message_end") {
-    emit({ type: "message_end", raw: event, fallbackText: extractAssistantText(event.message) });
+    publishEvent(state, callbacks, {
+      type: "message_end",
+      raw: event,
+      fallbackText: extractAssistantText(event.message)
+    });
     return;
   }
   if (type === "turn_end") {
-    emit({ type: "turn_end", raw: event, fallbackText: extractAssistantText(event.message) });
+    publishEvent(state, callbacks, {
+      type: "turn_end",
+      raw: event,
+      fallbackText: extractAssistantText(event.message)
+    });
     return;
   }
   if (type === "agent_end") {
@@ -4087,11 +4331,14 @@ function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateR
       raw: event,
       fallbackText: extractLatestAssistantText(event.messages)
     };
-    emit(agentEndEvent);
-    updateRunState({ fallbackText: agentEndEvent.fallbackText?.trim() ?? "" });
+    publishEvent(state, callbacks, agentEndEvent);
+    state.fallbackText = agentEndEvent.fallbackText?.trim() ?? "";
     return;
   }
-  emit({ type, raw: event });
+  publishEvent(state, callbacks, { type, raw: event });
+  if (normalizeCompactionEventType(type) === "compaction_end") {
+    applyCompactionEnd(state, event);
+  }
 }
 function extractAssistantText(message) {
   if (!message || message.role !== "assistant") return "";
@@ -4610,8 +4857,7 @@ var PiRunner = class {
       ? {
           finalResponse: this.formatDryRunResponse(prompt, context),
           sessionId,
-          threadId: sessionId,
-          events: []
+          threadId: sessionId
         }
       : this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
   }
@@ -4695,9 +4941,7 @@ var PiRunner = class {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       const runtimeState = await client.request("get_state").catch(() => void 0);
-      const events = [];
-      let finalResponse = "";
-      let runState;
+      const state = createRunState();
       let settled = false;
       let settleRun;
       let rejectRun;
@@ -4705,23 +4949,12 @@ var PiRunner = class {
         settleRun = resolve;
         rejectRun = reject;
       });
-      const updateRunState = (nextRunState) => {
-        if (nextRunState) runState = { ...runState, ...nextRunState };
-      };
       unsubscribe = client.subscribe((event) => {
         if (event.type === "rpc_exit") {
           if (!settled) rejectRun(new Error(event.error || "Pi RPC process stopped."));
           return;
         }
-        handlePiJsonEventLine(
-          JSON.stringify(event),
-          callbacks,
-          events,
-          (delta) => {
-            finalResponse += delta;
-          },
-          updateRunState
-        );
+        handlePiEvent(event, state, callbacks);
         if (event.type === "agent_settled" && !settled) {
           settled = true;
           settleRun();
@@ -4740,16 +4973,16 @@ var PiRunner = class {
       callbacks?.onPromptAccepted?.();
       await completion;
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
-      if (runState?.errorMessage) throw new Error(runState.errorMessage);
+      if (state.errorMessage) throw new Error(state.errorMessage);
       return {
-        finalResponse: this.getFinalResponse(finalResponse, runState?.fallbackText, events),
+        finalResponse: this.getFinalResponse(state),
         sessionId: session.reference,
         threadId: session.reference,
-        events,
-        contextUsage: this.getRunContextUsage(runState?.tokenUsage, events),
-        contextCompacted: this.didCompactContext(events),
-        tokenUsage: runState?.tokenUsage ?? void 0,
-        runtimeState
+        contextUsage: this.getRunContextUsage(state.tokenUsage, state),
+        contextCompacted: state.sawSuccessfulCompaction,
+        tokenUsage: state.tokenUsage ?? void 0,
+        runtimeState,
+        diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
       if (this.cancelRequested || callbacks?.isCanceled?.())
@@ -4796,49 +5029,26 @@ var PiRunner = class {
       });
       let stdoutBuffer = "";
       let stderr = "";
-      let finalResponse = "";
       let settled = false;
-      const events = [];
-      let runState;
-      const updateRunState = (nextRunState) => {
-        if (nextRunState) runState = { ...runState, ...nextRunState };
-      };
+      const state = createRunState();
       const failOnce = (error) => {
         if (!settled) {
           settled = true;
           reject(error);
         }
       };
+      const handleLine = (line) => handlePiJsonEventLine(line, state, callbacks);
       const flushStdoutBuffer = () => {
         if (!stdoutBuffer.trim()) return;
-        handlePiJsonEventLine(
-          stdoutBuffer.trim(),
-          callbacks,
-          events,
-          (delta) => {
-            finalResponse += delta;
-          },
-          updateRunState
-        );
+        handleLine(stdoutBuffer.trim());
         stdoutBuffer = "";
       };
-      const getErrorText = () =>
-        runState?.errorMessage ?? stderr.trim() ?? runState?.fallbackText?.trim();
+      const getErrorText = () => state.errorMessage ?? stderr.trim() ?? state.fallbackText.trim();
       child.stdout.on("data", (chunk) => {
         stdoutBuffer += chunk.toString("utf8");
         const lines = stdoutBuffer.split(/\r?\n/);
         stdoutBuffer = lines.pop() ?? "";
-        for (const line of lines) {
-          handlePiJsonEventLine(
-            line,
-            callbacks,
-            events,
-            (delta) => {
-              finalResponse += delta;
-            },
-            updateRunState
-          );
-        }
+        for (const line of lines) handleLine(line);
       });
       child.stderr.on("data", (chunk) => {
         stderr += chunk.toString("utf8");
@@ -4862,24 +5072,19 @@ var PiRunner = class {
           );
           return;
         }
-        if (runState?.errorMessage) {
-          failOnce(new Error(runState.errorMessage));
+        if (state.errorMessage) {
+          failOnce(new Error(state.errorMessage));
           return;
         }
         settled = true;
         resolve({
-          finalResponse: this.getFinalResponse(
-            finalResponse,
-            runState?.fallbackText,
-            events,
-            isPiCliCommandPrompt(prompt)
-          ),
+          finalResponse: this.getFinalResponse(state, isPiCliCommandPrompt(prompt)),
           sessionId: session.reference,
           threadId: session.reference,
-          events,
-          contextUsage: this.getRunContextUsage(runState?.tokenUsage, events),
-          contextCompacted: this.didCompactContext(events),
-          tokenUsage: runState?.tokenUsage ?? void 0
+          contextUsage: this.getRunContextUsage(state.tokenUsage, state),
+          contextCompacted: state.sawSuccessfulCompaction,
+          tokenUsage: state.tokenUsage ?? void 0,
+          diagnostics: state.diagnostics.snapshot()
         });
       });
       child.stdin.write(prompt);
@@ -4895,15 +5100,9 @@ var PiRunner = class {
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
-      const events = [];
+      const state = createRunState();
       unsubscribe = client.subscribe((event) => {
-        handlePiJsonEventLine(
-          JSON.stringify(event),
-          callbacks,
-          events,
-          () => {},
-          () => {}
-        );
+        handlePiEvent(event, state, callbacks);
       });
       const result = await client.request(
         "compact",
@@ -4917,11 +5116,11 @@ var PiRunner = class {
         finalResponse: "Context compacted.",
         sessionId: session.reference,
         threadId: session.reference,
-        events,
         contextUsage: void 0,
         contextCompacted: true,
         tokenUsage: void 0,
-        compactionResult: result
+        compactionResult: result,
+        diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
       if (this.cancelRequested || callbacks?.isCanceled?.())
@@ -4933,36 +5132,21 @@ var PiRunner = class {
       unsubscribe();
     }
   }
-  getFinalResponse(finalResponse, fallbackText, events, isCommandPrompt = false) {
-    const response = (finalResponse.trim() || (fallbackText || "").trim()).trim();
+  getFinalResponse(state, isCommandPrompt = false) {
+    const response = (state.finalResponse.trim() || (state.fallbackText || "").trim()).trim();
     if (response) return response;
-    const compactionEnd = [...events]
-      .reverse()
-      .find((event) => this.normalizeCompactionEventType(event.type) === "compaction_end");
-    if (!compactionEnd || !isCommandPrompt) return response;
-    if (compactionEnd.raw?.errorMessage)
-      return `Context compaction failed: ${String(compactionEnd.raw.errorMessage)}`;
-    if (compactionEnd.raw?.aborted) return "Context compaction skipped.";
+    const lastCompactionEnd = state.lastCompactionEnd;
+    if (!lastCompactionEnd || !isCommandPrompt) return response;
+    if (lastCompactionEnd.errorMessage)
+      return `Context compaction failed: ${String(lastCompactionEnd.errorMessage)}`;
+    if (lastCompactionEnd.aborted) return "Context compaction skipped.";
     return "Context compacted.";
   }
-  getRunContextUsage(tokenUsage, events = []) {
-    if (this.didCompactContext(events)) return void 0;
+  getRunContextUsage(tokenUsage, state) {
+    if (state?.sawSuccessfulCompaction) return void 0;
     const model = this.getModelInfoForTokenUsage(tokenUsage) ?? this.getSelectedModelInfo();
     const contextWindow = model?.contextWindow ?? tokenUsage?.contextWindow ?? 0;
     return createContextUsage(tokenUsage, contextWindow);
-  }
-  didCompactContext(events = []) {
-    return events.some((event) => {
-      if (this.normalizeCompactionEventType(event.type) !== "compaction_end") return false;
-      return !event.raw?.errorMessage && !event.raw?.aborted;
-    });
-  }
-  normalizeCompactionEventType(type) {
-    return type === "auto_compaction_start" || type === "session_before_compact"
-      ? "compaction_start"
-      : type === "auto_compaction_end" || type === "session_compact"
-        ? "compaction_end"
-        : type;
   }
   getModelInfoForTokenUsage(tokenUsage) {
     if (!tokenUsage) return void 0;
@@ -5098,7 +5282,6 @@ var PiRunner = class {
       finalResponse: "Dry run: context would be compacted.",
       sessionId,
       threadId: sessionId,
-      events: [],
       contextCompacted: true
     };
   }
@@ -7546,13 +7729,7 @@ function getSkillCommandName(prompt) {
     .match(/^\/skill:([a-z0-9-]+)(?:\s|$)/i)?.[1];
 }
 function getToolEventKey(event) {
-  return String(
-    event.toolCallId ||
-      `${event.toolName || event.message || "tool"}:${JSON.stringify(event.toolArgs || {}).slice(
-        0,
-        80
-      )}`
-  );
+  return String(event.toolKey || event.toolCallId || event.toolName || event.message || "tool");
 }
 function getThinkingDelta(event) {
   if (event?.type !== "thinking_delta") return "";

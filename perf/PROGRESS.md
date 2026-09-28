@@ -103,3 +103,22 @@
   - 真实运行受模型随机性影响（tool calls 23 vs 12），跨 patch 对比以“主线程阻塞/事件级指标”为准。
   - 发现 #1/#2 仍未处理（范围外）。
 - 下一步入口条件：**已满足** → PATCH 2（Event Algorithm + RunState + Retention）。
+
+---
+
+### PATCH 2 — Event Algorithm + RunState + Retention
+
+- 状态：**完成**。
+- 改动文件：
+  - 新增 `src/pi/run-state.mjs`：RunState（fallbackText / finalResponse / tokenUsage / errorMessage / compaction 状态）、ActiveTools Map（`toolCallId → state`；无 id 时仅唯一同名匹配，不确定时**不伪造关系**并 warning）、`DiagnosticRing`（容量 500 环形缓冲）、保留策略（高频事件只留最小字段，tool raw/大结果不进保留区）、compaction 一致性断言（incremental vs legacy `events.some`）。
+  - `src/pi/events.mjs`：新增 `handlePiEvent(eventObject, state, callbacks)`；RPC 路径彻底消除 `JSON.stringify → JSON.parse` 往返（实测 `maxJsonParseDuration = 0`）；`handlePiJsonEventLine` 仅服务真正的字符串路径（CLI JSON / 测试）；§5.7 gating（`message_update` 无 usage/stop 不再触发全文提取与 token 解析）。
+  - `src/pi/runner.mjs`：三处 run 路径改用 RunState；`getFinalResponse` / `getRunContextUsage` / compaction 判定全部状态化；结果移除无消费者的 `events` 字段、新增有界 `diagnostics` 快照。
+  - `src/ui/activity.mjs`：`getToolEventKey` 改用生命周期 `toolKey`，删除 `JSON.stringify(toolArgs)` 高频 fallback（§5.2）。
+  - 测试：新增 `tests/run-state.test.mjs`（8）；重写 `tests/events.test.mjs`（10）。
+- 关键测量（详见 `perf/baseline.md`）：同负载真实运行 18,188 events 下 **longtask 0 个**（PATCH 1：3 个 / 176ms）；`maxEventDuration` 63.1 → **28.2ms**；RunState 更新 max 0.2ms（18k 事件仅 108 次捕获）；tool lookup max 0.1ms；诊断缓冲有界 500；compaction 断言 0 告警（**gate 1/3**）；0 错误/告警。
+- 验证：`npm run ci` 全绿（**54 files / 312 tests**）；合成微基准给出 tool lookup before/after（10k 事件：0.012–0.071ms → 0.00001ms）。
+- 风险与未决：
+  - `maxDrainDuration` 仍可能被单事件成本抬到 ~28ms（>6ms 预算）——预算只能在事件之间暂停；单事件成本（UI 回调/DOM 更新）留给 PATCH 3。
+  - legacy compaction 断言按规格保留，**删除前不得移除**；需 3 次真实运行 0 告警，当前 1/3（本轮无 compaction 事件）。
+  - 发现 #1/#2 仍未处理（范围外）。
+- 下一步入口条件：**已满足** → PATCH 3（Streaming Rendering）。

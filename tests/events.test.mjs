@@ -4,8 +4,17 @@ import {
   extractEventTokenUsage,
   extractToolCallFromAssistantEvent,
   getAssistantRunState,
+  handlePiEvent,
   handlePiJsonEventLine
 } from "../src/pi/events.mjs";
+import { createRunState } from "../src/pi/run-state.mjs";
+
+function createContext() {
+  const state = createRunState();
+  const onEvent = vi.fn();
+  const onTextDelta = vi.fn();
+  return { state, callbacks: { onEvent, onTextDelta }, onEvent, onTextDelta };
+}
 
 describe("Pi event helpers", () => {
   it("extracts assistant text from string and structured content", () => {
@@ -51,96 +60,121 @@ describe("Pi event helpers", () => {
     });
   });
 
-  it("emits text deltas", () => {
-    const events = [];
-    const appendText = vi.fn();
-    const onTextDelta = vi.fn();
+  it("emits text deltas through the string path and accumulates the final response", () => {
+    const { state, callbacks, onEvent, onTextDelta } = createContext();
 
     handlePiJsonEventLine(
       JSON.stringify({
         type: "message_update",
+        message: { role: "assistant", content: [] },
         assistantMessageEvent: { type: "text_delta", delta: "hi" }
       }),
-      { onTextDelta },
-      events,
-      appendText,
-      vi.fn()
+      state,
+      callbacks
     );
 
-    expect(appendText).toHaveBeenCalledWith("hi");
+    expect(state.finalResponse).toBe("hi");
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "text_delta", textDelta: "hi" })
+    );
     expect(onTextDelta).toHaveBeenCalledWith("hi", expect.objectContaining({ type: "text_delta" }));
-    expect(events[0]).toMatchObject({ type: "text_delta", textDelta: "hi" });
   });
 
   it("emits thinking deltas without treating them as answer text", () => {
-    const events = [];
-    const appendText = vi.fn();
+    const { state, callbacks, onEvent } = createContext();
 
-    handlePiJsonEventLine(
-      JSON.stringify({
+    handlePiEvent(
+      {
         type: "message_update",
         assistantMessageEvent: { type: "thinking_delta", delta: "reasoning" }
-      }),
-      undefined,
-      events,
-      appendText,
-      vi.fn()
+      },
+      state,
+      callbacks
     );
 
-    expect(appendText).not.toHaveBeenCalled();
-    expect(events[0]).toMatchObject({ type: "thinking_delta", thinkingDelta: "reasoning" });
+    expect(state.finalResponse).toBe("");
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "thinking_delta", thinkingDelta: "reasoning" })
+    );
   });
 
-  it("emits tool execution events", () => {
-    const events = [];
+  it("emits tool execution events and tracks active tools by id", () => {
+    const { state, callbacks, onEvent } = createContext();
 
-    handlePiJsonEventLine(
-      JSON.stringify({
-        type: "tool_execution_start",
-        toolName: "read",
-        toolCallId: "1",
-        args: { path: "a.md" }
-      }),
-      undefined,
-      events,
-      vi.fn(),
-      vi.fn()
+    handlePiEvent(
+      { type: "tool_execution_start", toolName: "read", toolCallId: "1", args: { path: "a.md" } },
+      state,
+      callbacks
     );
 
-    expect(events[0]).toMatchObject({
-      type: "tool_start",
-      toolName: "read",
-      toolCallId: "1",
-      toolArgs: { path: "a.md" }
-    });
+    expect(state.activeTools.size).toBe(1);
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool_start",
+        toolName: "read",
+        toolCallId: "1",
+        toolKey: "id:1",
+        toolArgs: { path: "a.md" }
+      })
+    );
   });
 
   it("carries start arguments into tool completion events that omit them", () => {
-    const events = [];
-    const emit = (event) =>
-      handlePiJsonEventLine(JSON.stringify(event), undefined, events, vi.fn(), vi.fn());
+    const { state, callbacks, onEvent } = createContext();
+    const edits = [{ oldText: "old", newText: "new" }];
 
-    emit({
-      type: "tool_execution_start",
-      toolName: "edit",
-      toolCallId: "edit-1",
-      args: { path: "Note.md", edits: [{ oldText: "old", newText: "new" }] }
-    });
-    emit({
-      type: "tool_execution_end",
-      toolName: "edit",
-      toolCallId: "edit-1",
-      result: { content: [{ type: "text", text: "Successfully replaced 1 block." }] },
-      isError: false
-    });
+    handlePiEvent(
+      {
+        type: "tool_execution_start",
+        toolName: "edit",
+        toolCallId: "edit-1",
+        args: { path: "Note.md", edits }
+      },
+      state,
+      callbacks
+    );
+    handlePiEvent(
+      {
+        type: "tool_execution_end",
+        toolName: "edit",
+        toolCallId: "edit-1",
+        result: { content: [{ type: "text", text: "Successfully replaced 1 block." }] },
+        isError: false
+      },
+      state,
+      callbacks
+    );
 
-    expect(events[1]).toMatchObject({
+    expect(state.activeTools.size).toBe(0);
+    expect(onEvent.mock.calls[1][0]).toMatchObject({
       type: "tool_end",
       toolName: "edit",
       toolCallId: "edit-1",
-      toolArgs: { path: "Note.md", edits: [{ oldText: "old", newText: "new" }] },
+      toolKey: "id:edit-1",
+      toolArgs: { path: "Note.md", edits },
       isError: false
     });
+  });
+
+  it("correlates tool events without ids through the lifecycle map", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { state, callbacks, onEvent } = createContext();
+
+    handlePiEvent(
+      { type: "tool_execution_start", toolName: "bash", args: { command: "ls" } },
+      state,
+      callbacks
+    );
+    handlePiEvent({ type: "tool_execution_end", toolName: "bash" }, state, callbacks);
+
+    expect(onEvent.mock.calls[1][0]).toMatchObject({
+      type: "tool_end",
+      toolName: "bash",
+      toolArgs: { command: "ls" }
+    });
+    expect(onEvent.mock.calls[1][0].toolKey).toBe(onEvent.mock.calls[0][0].toolKey);
+    expect(state.activeTools.size).toBe(0);
+    warn.mockRestore();
   });
 
   it("extracts tool calls from assistant events", () => {
@@ -152,5 +186,64 @@ describe("Pi event helpers", () => {
         contentIndex: 0
       })
     ).toEqual({ id: "call", name: "read", arguments: { path: "a.md" } });
+  });
+
+  it("gates run-state capture away from high-frequency streaming updates", () => {
+    const { state, callbacks } = createContext();
+
+    handlePiEvent(
+      {
+        type: "message_update",
+        message: { role: "assistant", content: "partial answer" },
+        assistantMessageEvent: { type: "text_delta", delta: "partial" }
+      },
+      state,
+      callbacks
+    );
+    expect(state.fallbackText).toBe("");
+
+    handlePiEvent(
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: "final answer",
+          usage: { input: 10, output: 2 }
+        }
+      },
+      state,
+      callbacks
+    );
+    expect(state.fallbackText).toBe("final answer");
+    expect(state.tokenUsage).toMatchObject({ input: 10 });
+  });
+
+  it("retains compaction ends for the legacy assertion without raw payloads", () => {
+    const { state, callbacks, onEvent } = createContext();
+
+    handlePiEvent(
+      { type: "auto_compaction_end", aborted: false, result: { tokensBefore: 12345 } },
+      state,
+      callbacks
+    );
+
+    expect(state.sawSuccessfulCompaction).toBe(true);
+    expect(state.events).toHaveLength(1);
+    expect(state.events[0]).toMatchObject({
+      type: "auto_compaction_end",
+      compactionAborted: false
+    });
+    expect(state.events[0]).not.toHaveProperty("raw");
+
+    handlePiEvent(
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "x" }
+      },
+      state,
+      callbacks
+    );
+    expect(state.events).toHaveLength(1);
+    expect(onEvent).toHaveBeenCalledTimes(2);
   });
 });

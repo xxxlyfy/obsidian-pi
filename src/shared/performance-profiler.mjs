@@ -82,7 +82,12 @@ export class PerformanceProfiler {
         maxJsonParseDuration: durations.jsonParse?.max ?? 0,
         maxJsonLineBytes: maxima.jsonLineBytes ?? 0,
         yieldCount: counters.yieldCount ?? 0,
-        yieldLatency: durations.yield?.max ?? 0
+        yieldLatency: durations.yield?.max ?? 0,
+        maxToolLookupDuration: durations.toolLookup?.max ?? 0,
+        maxNormalizeDuration: durations.normalize?.max ?? 0,
+        maxRunStateDuration: durations.runState?.max ?? 0,
+        diagnosticBufferSize: maxima.diagnosticsSize ?? 0,
+        retainedEvents: maxima.retainedEvents ?? 0
       }
     };
   }

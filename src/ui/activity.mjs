@@ -77,13 +77,10 @@ export function getSkillCommandName(prompt) {
 }
 
 export function getToolEventKey(event) {
-  return String(
-    event.toolCallId ||
-      `${event.toolName || event.message || "tool"}:${JSON.stringify(event.toolArgs || {}).slice(
-        0,
-        80
-      )}`
-  );
+  // PATCH 2: normalized tool events carry a lifecycle `toolKey` (stable
+  // toolCallId, or an internal fallback key assigned by the ActiveTools map).
+  // No JSON.stringify(toolArgs) as a high-frequency key (spec §5.2).
+  return String(event.toolKey || event.toolCallId || event.toolName || event.message || "tool");
 }
 
 export function getThinkingDelta(event) {

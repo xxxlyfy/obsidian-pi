@@ -6,7 +6,8 @@ import { CUSTOM_MODEL_VALUE } from "../plugin/settings.mjs";
 import { createContextUsage } from "./token-usage.mjs";
 import { createPiCliError, formatPiCliFailure } from "./diagnostics.mjs";
 import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
-import { handlePiJsonEventLine } from "./events.mjs";
+import { handlePiEvent, handlePiJsonEventLine } from "./events.mjs";
+import { createRunState } from "./run-state.mjs";
 import { PiRpcClient } from "./rpc-client.mjs";
 import { toRpcImages } from "../ui/prompt-payload.mjs";
 
@@ -57,8 +58,7 @@ export class PiRunner {
       ? {
           finalResponse: this.formatDryRunResponse(prompt, context),
           sessionId,
-          threadId: sessionId,
-          events: []
+          threadId: sessionId
         }
       : this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
   }
@@ -150,9 +150,7 @@ export class PiRunner {
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
       const runtimeState = await client.request("get_state").catch(() => undefined);
-      const events = [];
-      let finalResponse = "";
-      let runState;
+      const state = createRunState();
       let settled = false;
       let settleRun;
       let rejectRun;
@@ -160,23 +158,14 @@ export class PiRunner {
         settleRun = resolve;
         rejectRun = reject;
       });
-      const updateRunState = (nextRunState) => {
-        if (nextRunState) runState = { ...runState, ...nextRunState };
-      };
       unsubscribe = client.subscribe((event) => {
         if (event.type === "rpc_exit") {
           if (!settled) rejectRun(new Error(event.error || "Pi RPC process stopped."));
           return;
         }
-        handlePiJsonEventLine(
-          JSON.stringify(event),
-          callbacks,
-          events,
-          (delta) => {
-            finalResponse += delta;
-          },
-          updateRunState
-        );
+        // PATCH 2: parsed objects flow straight into the event handler; no
+        // JSON.stringify -> JSON.parse round trip on the persistent RPC path.
+        handlePiEvent(event, state, callbacks);
         if (event.type === "agent_settled" && !settled) {
           settled = true;
           settleRun();
@@ -197,16 +186,16 @@ export class PiRunner {
       callbacks?.onPromptAccepted?.();
       await completion;
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
-      if (runState?.errorMessage) throw new Error(runState.errorMessage);
+      if (state.errorMessage) throw new Error(state.errorMessage);
       return {
-        finalResponse: this.getFinalResponse(finalResponse, runState?.fallbackText, events),
+        finalResponse: this.getFinalResponse(state),
         sessionId: session.reference,
         threadId: session.reference,
-        events,
-        contextUsage: this.getRunContextUsage(runState?.tokenUsage, events),
-        contextCompacted: this.didCompactContext(events),
-        tokenUsage: runState?.tokenUsage ?? undefined,
-        runtimeState
+        contextUsage: this.getRunContextUsage(state.tokenUsage, state),
+        contextCompacted: state.sawSuccessfulCompaction,
+        tokenUsage: state.tokenUsage ?? undefined,
+        runtimeState,
+        diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
       if (this.cancelRequested || callbacks?.isCanceled?.())
@@ -254,52 +243,29 @@ export class PiRunner {
 
       let stdoutBuffer = "";
       let stderr = "";
-      let finalResponse = "";
       let settled = false;
-      const events = [];
-      let runState;
-      const updateRunState = (nextRunState) => {
-        if (nextRunState) runState = { ...runState, ...nextRunState };
-      };
+      const state = createRunState();
       const failOnce = (error) => {
         if (!settled) {
           settled = true;
           reject(error);
         }
       };
+      const handleLine = (line) => handlePiJsonEventLine(line, state, callbacks);
       const flushStdoutBuffer = () => {
         if (!stdoutBuffer.trim()) return;
 
-        handlePiJsonEventLine(
-          stdoutBuffer.trim(),
-          callbacks,
-          events,
-          (delta) => {
-            finalResponse += delta;
-          },
-          updateRunState
-        );
+        handleLine(stdoutBuffer.trim());
         stdoutBuffer = "";
       };
-      const getErrorText = () =>
-        runState?.errorMessage ?? stderr.trim() ?? runState?.fallbackText?.trim();
+      const getErrorText = () => state.errorMessage ?? stderr.trim() ?? state.fallbackText.trim();
 
       child.stdout.on("data", (chunk) => {
         stdoutBuffer += chunk.toString("utf8");
         const lines = stdoutBuffer.split(/\r?\n/);
         stdoutBuffer = lines.pop() ?? "";
 
-        for (const line of lines) {
-          handlePiJsonEventLine(
-            line,
-            callbacks,
-            events,
-            (delta) => {
-              finalResponse += delta;
-            },
-            updateRunState
-          );
-        }
+        for (const line of lines) handleLine(line);
       });
       child.stderr.on("data", (chunk) => {
         stderr += chunk.toString("utf8");
@@ -325,25 +291,20 @@ export class PiRunner {
           );
           return;
         }
-        if (runState?.errorMessage) {
-          failOnce(new Error(runState.errorMessage));
+        if (state.errorMessage) {
+          failOnce(new Error(state.errorMessage));
           return;
         }
 
         settled = true;
         resolve({
-          finalResponse: this.getFinalResponse(
-            finalResponse,
-            runState?.fallbackText,
-            events,
-            isPiCliCommandPrompt(prompt)
-          ),
+          finalResponse: this.getFinalResponse(state, isPiCliCommandPrompt(prompt)),
           sessionId: session.reference,
           threadId: session.reference,
-          events,
-          contextUsage: this.getRunContextUsage(runState?.tokenUsage, events),
-          contextCompacted: this.didCompactContext(events),
-          tokenUsage: runState?.tokenUsage ?? undefined
+          contextUsage: this.getRunContextUsage(state.tokenUsage, state),
+          contextCompacted: state.sawSuccessfulCompaction,
+          tokenUsage: state.tokenUsage ?? undefined,
+          diagnostics: state.diagnostics.snapshot()
         });
       });
 
@@ -363,15 +324,9 @@ export class PiRunner {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
       if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
-      const events = [];
+      const state = createRunState();
       unsubscribe = client.subscribe((event) => {
-        handlePiJsonEventLine(
-          JSON.stringify(event),
-          callbacks,
-          events,
-          () => {},
-          () => {}
-        );
+        handlePiEvent(event, state, callbacks);
       });
       const result = await client.request(
         "compact",
@@ -385,11 +340,11 @@ export class PiRunner {
         finalResponse: "Context compacted.",
         sessionId: session.reference,
         threadId: session.reference,
-        events,
         contextUsage: undefined,
         contextCompacted: true,
         tokenUsage: undefined,
-        compactionResult: result
+        compactionResult: result,
+        diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
       if (this.cancelRequested || callbacks?.isCanceled?.())
@@ -402,41 +357,24 @@ export class PiRunner {
     }
   }
 
-  getFinalResponse(finalResponse, fallbackText, events, isCommandPrompt = false) {
-    const response = (finalResponse.trim() || (fallbackText || "").trim()).trim();
+  getFinalResponse(state, isCommandPrompt = false) {
+    const response = (state.finalResponse.trim() || (state.fallbackText || "").trim()).trim();
     if (response) return response;
 
-    const compactionEnd = [...events]
-      .reverse()
-      .find((event) => this.normalizeCompactionEventType(event.type) === "compaction_end");
-    if (!compactionEnd || !isCommandPrompt) return response;
-    if (compactionEnd.raw?.errorMessage)
-      return `Context compaction failed: ${String(compactionEnd.raw.errorMessage)}`;
-    if (compactionEnd.raw?.aborted) return "Context compaction skipped.";
+    const lastCompactionEnd = state.lastCompactionEnd;
+    if (!lastCompactionEnd || !isCommandPrompt) return response;
+    if (lastCompactionEnd.errorMessage)
+      return `Context compaction failed: ${String(lastCompactionEnd.errorMessage)}`;
+    if (lastCompactionEnd.aborted) return "Context compaction skipped.";
     return "Context compacted.";
   }
 
-  getRunContextUsage(tokenUsage, events = []) {
-    if (this.didCompactContext(events)) return undefined;
+  getRunContextUsage(tokenUsage, state) {
+    if (state?.sawSuccessfulCompaction) return undefined;
 
     const model = this.getModelInfoForTokenUsage(tokenUsage) ?? this.getSelectedModelInfo();
     const contextWindow = model?.contextWindow ?? tokenUsage?.contextWindow ?? 0;
     return createContextUsage(tokenUsage, contextWindow);
-  }
-
-  didCompactContext(events = []) {
-    return events.some((event) => {
-      if (this.normalizeCompactionEventType(event.type) !== "compaction_end") return false;
-      return !event.raw?.errorMessage && !event.raw?.aborted;
-    });
-  }
-
-  normalizeCompactionEventType(type) {
-    return type === "auto_compaction_start" || type === "session_before_compact"
-      ? "compaction_start"
-      : type === "auto_compaction_end" || type === "session_compact"
-        ? "compaction_end"
-        : type;
   }
 
   getModelInfoForTokenUsage(tokenUsage) {
@@ -598,7 +536,6 @@ export class PiRunner {
       finalResponse: "Dry run: context would be compacted.",
       sessionId,
       threadId: sessionId,
-      events: [],
       contextCompacted: true
     };
   }

@@ -169,6 +169,37 @@
 
 结论：主线程最长阻塞从 11.9s 级降到 **63ms 级**，且是在更高事件负载下取得；预算因单事件成本高而常退化为 1–2 事件/批，配合 `scheduler.yield`（Chromium 150）仍保持可响应。单事件处理成本留给 PATCH 2（RunState/coalescing）与 PATCH 3（streaming rendering）。
 
+## PATCH 2 验证运行（Event Algorithm + RunState + Retention）
+
+> 同一测试 Vault、同一 prompt。本轮 18,188 events（PATCH 1：19,497）。
+
+| 指标 | PATCH 1 | PATCH 2 | 说明 |
+| --- | --- | --- | --- |
+| longest main-thread task | 63 ms | **无 ≥50ms 任务（longtask 0）** | |
+| longtask 数量 / 总时长 | 3 / 176 ms | **0 / 0 ms** | |
+| maxEventDuration | 63.1 ms | **28.2 ms** | 单事件处理（含 UI 回调） |
+| maxNormalizeDuration | —（未埋点） | 28.2 ms（mean 3.3 ms） | 事件归一化（排除 parse） |
+| maxJsonParseDuration | 1.9 ms | **0**（RPC 路径不再 parse） | §5.3 往返消除生效 |
+| maxJsonLineBytes | 221,914 | 0（RPC 对象路径） | |
+| maxRunStateDuration | — | **0.2 ms**（mean 0.009；108 次捕获） | §5.7 gating：18k 事件仅 108 次捕获 |
+| maxToolLookupDuration | — | **0.1 ms**（mean 0.008；112 次） | ActiveTools Map |
+| diagnosticBufferSize（max） | — | 500（有界环形，饱和） | §5.9 |
+| retainedEvents（max） | 无界（≈事件数） | **0**（本轮无 compaction 事件） | §5.8；仅保留 compaction end 供断言 |
+| yieldCount / max latency | 8,846 / 16.2 ms | 5,479 / 3.6 ms（mean 0.23） | |
+| rpcEventsProcessed | 19,497 | 18,188（118.2 events/sec） | |
+| 错误 / 告警 | 0 | 0（无 compaction 断言告警、无 tool id 告警） | legacy 断言 gate：1/3 |
+
+### tool lookup 前后对比（合成微基准，Node 24，500 次均值）
+
+| 事件数 | 旧实现 best（命中最近） | 旧实现 worst（命中最早） | 新实现 Map.get |
+| --- | --- | --- | --- |
+| 100 | 0.0004 ms | 0.0017 ms | 0.00004 ms |
+| 1,000 | 0.0021 ms | 0.0076 ms | 0.00003 ms |
+| 10,000 | **0.0122 ms** | **0.0711 ms** | **0.00001 ms** |
+
+> 旧实现每次还额外执行 `events.slice().reverse()`（O(N) 复制、每次数十 KB 级分配，10k 事件时）；新实现 O(1) 且无分配。
+> legacy compaction 断言（§5.6）仍在运行：需累计 **3 次真实全库健康检查、0 次告警**后才可删除，当前 **1/3**。
+
 ## 环境问题与处置记录
 
 | 问题 | 现象 | 根因 | 处置 |
