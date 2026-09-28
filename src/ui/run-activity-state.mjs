@@ -224,13 +224,18 @@ export function handleRunEvent(e) {
     return;
   }
   if (t === "agent_end") {
+    // PATCH 3 §6.4: cancel the pending rAF and flush the streaming state
+    // synchronously (single source -> one final Markdown render). Never wait
+    // for the next frame. A full re-render is only needed when there is no
+    // connected streaming DOM to finalize.
+    const finalizedStreaming = this.finalizeStreamingContent?.() === true;
     this.activityText = "";
     this.activityDetail = "";
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
     this.activeToolCalls.clear();
-    this.renderMessages();
+    if (!finalizedStreaming) this.renderMessages();
   }
 }
 

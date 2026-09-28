@@ -36,6 +36,7 @@ import {
   refreshOpenMarkdownViews
 } from "./editor-file-refresh.mjs";
 import { openNotificationThread, showDesktopRunNotification } from "./desktop-notifications.mjs";
+import { performanceProfiler } from "../shared/performance-profiler.mjs";
 
 export class PiAgentView extends f.ItemView {
   constructor(e, t) {
@@ -54,6 +55,9 @@ export class PiAgentView extends f.ItemView {
     this.currentRunContextUsage = void 0;
     this.invalidatedContextThreadIds = new Set();
     this.streamingAssistantContent = "";
+    this.streamingAnswerDirty = false;
+    this.streamingThinkingDirty = false;
+    this.streamingFlushRaf = undefined;
     this.promptQueue = this.plugin.getLocalPromptQueue();
     this.composerImages = [];
     this.composerAttachments = [];
@@ -329,6 +333,7 @@ export class PiAgentView extends f.ItemView {
     this.threadFavoriteEl = void 0;
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
+    this.cancelStreamingFlush();
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
     this.noteActions = void 0;
@@ -566,8 +571,11 @@ export class PiAgentView extends f.ItemView {
   finishCanceledRun() {
     this.running = !1;
     this.canceling = !1;
+    this.cancelStreamingFlush();
     this.streamingAssistantContent = "";
+    this.streamingAnswerDirty = false;
     this.streamingThinkingContent = "";
+    this.streamingThinkingDirty = false;
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.streamingItemEl = void 0;
@@ -808,8 +816,11 @@ export class PiAgentView extends f.ItemView {
     this.clearPendingActivityTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
+    this.cancelStreamingFlush();
     this.streamingAssistantContent = "";
+    this.streamingAnswerDirty = false;
     this.streamingThinkingContent = "";
+    this.streamingThinkingDirty = false;
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.streamingItemEl = void 0;
@@ -978,31 +989,53 @@ export class PiAgentView extends f.ItemView {
         {
           isCanceled: () => n.canceling,
           onEvent: (o) => {
-            const thinkingDelta = getThinkingDelta(o);
-            if (thinkingDelta) {
-              n.thinking += thinkingDelta;
-              if (!n.thinkingUserSet) n.thinkingExpanded = true;
-            }
-            const toolError = formatToolError(o);
-            if (toolError && n.toolErrors[n.toolErrors.length - 1] !== toolError)
-              n.toolErrors.push(toolError);
-            this.handleSuccessfulToolMutation(o, t);
-            if (!this.isCurrentThread(t)) return;
-            this.streamingThinkingContent = n.thinking;
-            this.thinkingDisclosureExpanded = n.thinkingExpanded;
-            this.thinkingDisclosureUserSet = n.thinkingUserSet;
-            this.handleRunEvent(o);
-            if (thinkingDelta) {
-              this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-              this.appendStreamingThinkingDelta(thinkingDelta);
+            const profiling = performanceProfiler.enabled;
+            const startedAt = profiling ? globalThis.performance.now() : 0;
+            try {
+              const thinkingDelta = getThinkingDelta(o);
+              if (thinkingDelta) {
+                performanceProfiler.incrementCounter("streamDeltaCount");
+                n.thinking += thinkingDelta;
+                if (!n.thinkingUserSet) n.thinkingExpanded = true;
+              }
+              const toolError = formatToolError(o);
+              if (toolError && n.toolErrors[n.toolErrors.length - 1] !== toolError)
+                n.toolErrors.push(toolError);
+              this.handleSuccessfulToolMutation(o, t);
+              if (!this.isCurrentThread(t)) return;
+              this.streamingThinkingContent = n.thinking;
+              this.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.thinkingDisclosureUserSet = n.thinkingUserSet;
+              this.handleRunEvent(o);
+              if (thinkingDelta) {
+                this.liveThinkingSetExpanded?.(n.thinkingExpanded);
+                this.appendStreamingThinkingDelta(thinkingDelta);
+              }
+            } finally {
+              if (profiling)
+                performanceProfiler.recordDuration(
+                  "uiCallback",
+                  globalThis.performance.now() - startedAt
+                );
             }
           },
           onTextDelta: (o) => {
-            if (!n.thinkingUserSet) n.thinkingExpanded = false;
-            if (!this.isCurrentThread(t)) return;
-            this.thinkingDisclosureExpanded = n.thinkingExpanded;
-            this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-            this.appendStreamingDelta(o);
+            const profiling = performanceProfiler.enabled;
+            const startedAt = profiling ? globalThis.performance.now() : 0;
+            try {
+              performanceProfiler.incrementCounter("streamDeltaCount");
+              if (!n.thinkingUserSet) n.thinkingExpanded = false;
+              if (!this.isCurrentThread(t)) return;
+              this.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.liveThinkingSetExpanded?.(n.thinkingExpanded);
+              this.appendStreamingDelta(o);
+            } finally {
+              if (profiling)
+                performanceProfiler.recordDuration(
+                  "uiCallback",
+                  globalThis.performance.now() - startedAt
+                );
+            }
           },
           onPromptAccepted: acknowledgeQueuedDelivery
         },
@@ -1019,8 +1052,11 @@ export class PiAgentView extends f.ItemView {
         n.thinkingUserSet ? n.thinkingExpanded : false
       );
       const s = getCurrentRunMetadata(this.plugin.settings, a.runtimeState);
+      this.cancelStreamingFlush();
       this.streamingAssistantContent = "";
+      this.streamingAnswerDirty = false;
       this.streamingThinkingContent = "";
+      this.streamingThinkingDirty = false;
       this.streamingItemEl = void 0;
       this.streamingTextEl = void 0;
       this.plugin.addMessageToThread(t, {
@@ -1078,8 +1114,11 @@ export class PiAgentView extends f.ItemView {
       this.syncCurrentRunFlags();
       this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
       this.canceling = this.getCurrentThreadRun()?.canceling === !0;
+      this.cancelStreamingFlush();
       this.streamingAssistantContent = "";
+      this.streamingAnswerDirty = false;
       this.streamingThinkingContent = "";
+      this.streamingThinkingDirty = false;
       this.thinkingDisclosureExpanded = false;
       this.thinkingDisclosureUserSet = false;
       this.activityStickyUntil = 0;
@@ -1122,16 +1161,6 @@ export class PiAgentView extends f.ItemView {
       console.warn("Pi Agent: failed to refresh an externally changed Markdown file", error);
     });
   }
-  appendStreamingThinkingDelta(e) {
-    if (!e) return;
-    if (!this.liveThinkingTextEl || !this.liveThinkingTextEl.isConnected) {
-      this.renderMessages();
-      return;
-    }
-    this.renderPlainMessageContent(this.liveThinkingTextEl, this.streamingThinkingContent);
-    if (this.messagesEl && this.stickToBottom)
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-  }
   setLiveThinkingExpanded(expanded) {
     const run = this.getCurrentThreadRun();
     this.thinkingDisclosureExpanded = expanded;
@@ -1139,25 +1168,6 @@ export class PiAgentView extends f.ItemView {
     if (run) {
       run.thinkingExpanded = expanded;
       run.thinkingUserSet = true;
-    }
-  }
-  appendStreamingDelta(e) {
-    if (e) {
-      this.activityText = "Responding";
-      this.activityKind = "answer";
-      this.activityDetail = "";
-      this.activityStickyUntil = 0;
-      this.pendingActivity = void 0;
-      this.clearPendingActivityTimer();
-      this.streamingAssistantContent += e;
-      this.updateActivityDom();
-      if (!this.streamingTextEl) {
-        this.renderMessages();
-        return;
-      }
-      this.renderStreamingAnswer();
-      if (this.messagesEl && this.stickToBottom)
-        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     }
   }
   setRunningState(e) {

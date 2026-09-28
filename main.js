@@ -3243,7 +3243,13 @@ var PerformanceProfiler = class {
         maxNormalizeDuration: durations.normalize?.max ?? 0,
         maxRunStateDuration: durations.runState?.max ?? 0,
         diagnosticBufferSize: maxima.diagnosticsSize ?? 0,
-        retainedEvents: maxima.retainedEvents ?? 0
+        retainedEvents: maxima.retainedEvents ?? 0,
+        // PATCH 3 streaming rendering metrics (spec §6.9).
+        streamDeltaCount: counters.streamDeltaCount ?? 0,
+        streamFlushCount: counters.streamFlushCount ?? 0,
+        markdownRenderCount: counters.markdownRenderCount ?? 0,
+        maxUiCallbackDuration: durations.uiCallback?.max ?? 0,
+        maxStreamFlushDuration: durations.streamFlush?.max ?? 0
       }
     };
   }
@@ -7415,6 +7421,11 @@ async function openVaultPath(value, newLeaf = "tab") {
 // src/ui/message-renderer.mjs
 var message_renderer_exports = {};
 __export(message_renderer_exports, {
+  appendStreamingDelta: () => appendStreamingDelta,
+  appendStreamingThinkingDelta: () => appendStreamingThinkingDelta,
+  cancelStreamingFlush: () => cancelStreamingFlush,
+  finalizeStreamingContent: () => finalizeStreamingContent,
+  flushStreaming: () => flushStreaming,
   handleMessageLinkClick: () => handleMessageLinkClick,
   renderActivityMessage: () => renderActivityMessage,
   renderEmptyState: () => renderEmptyState,
@@ -7424,9 +7435,11 @@ __export(message_renderer_exports, {
   renderRoleLabel: () => renderRoleLabel,
   renderStreamingAnswer: () => renderStreamingAnswer,
   renderStreamingAssistantMessage: () => renderStreamingAssistantMessage,
+  renderStreamingThinking: () => renderStreamingThinking,
   renderThinkingDisclosure: () => renderThinkingDisclosure,
   renderToolErrors: () => renderToolErrors,
   restoreMessagesScroll: () => restoreMessagesScroll,
+  scheduleStreamingFlush: () => scheduleStreamingFlush,
   unloadMessageRenderComponents: () => unloadMessageRenderComponents
 });
 var f3 = __toESM(require("obsidian"), 1);
@@ -7554,6 +7567,7 @@ function handleMessageLinkClick(event) {
   return true;
 }
 function renderPlainMessageContent(container, content) {
+  performanceProfiler.incrementCounter("markdownRenderCount");
   container.empty();
   container.addClass("markdown-rendered");
   this.messageRenderComponentByElement ??= /* @__PURE__ */ new WeakMap();
@@ -7600,7 +7614,7 @@ function renderStreamingAssistantMessage() {
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
     this.activityText || "Responding",
-    (container, content) => this.renderPlainMessageContent(container, content),
+    void 0,
     true
   );
   this.activityDetailsEl = rendered.details;
@@ -7610,11 +7624,21 @@ function renderStreamingAssistantMessage() {
   this.liveThinkingSetExpanded = rendered.setExpanded;
   this.streamingTextEl = response.createDiv({ cls: "pi-agent-message-answer" });
   this.renderStreamingAnswer();
+  this.streamingAnswerDirty = false;
+  this.streamingThinkingDirty = false;
 }
 function renderStreamingAnswer() {
-  if (!this.streamingTextEl?.isConnected && this.streamingTextEl?.isConnected !== void 0) return;
-  this.renderPlainMessageContent(this.streamingTextEl, this.streamingAssistantContent);
-  this.streamingTextEl.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
+  const container = this.streamingTextEl;
+  if (!container || container.isConnected === false) return false;
+  container.setText(this.streamingAssistantContent || "");
+  container.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
+  return true;
+}
+function renderStreamingThinking() {
+  const container = this.liveThinkingTextEl;
+  if (!container || container.isConnected === false) return false;
+  container.setText(this.streamingThinkingContent || "");
+  return true;
 }
 function renderActivityMessage() {
   if (!this.messagesEl) return;
@@ -7631,13 +7655,100 @@ function renderActivityMessage() {
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
     this.activityText || "Thinking",
-    (container, content) => this.renderPlainMessageContent(container, content)
+    void 0
   );
   this.activityDetailsEl = rendered.details;
   this.activityLabelEl = rendered.label;
   this.liveThinkingDetailsEl = rendered.details;
   this.liveThinkingTextEl = rendered.text;
   this.liveThinkingSetExpanded = rendered.setExpanded;
+  this.streamingAnswerDirty = false;
+  this.streamingThinkingDirty = false;
+}
+function appendStreamingDelta(delta) {
+  if (!delta) return;
+  this.activityText = "Responding";
+  this.activityKind = "answer";
+  this.activityDetail = "";
+  this.activityStickyUntil = 0;
+  this.pendingActivity = void 0;
+  this.clearPendingActivityTimer();
+  this.streamingAssistantContent += delta;
+  this.streamingAnswerDirty = true;
+  this.updateActivityDom();
+  this.scheduleStreamingFlush();
+}
+function appendStreamingThinkingDelta(delta) {
+  if (!delta) return;
+  this.streamingThinkingDirty = true;
+  this.scheduleStreamingFlush();
+}
+function scheduleStreamingFlush() {
+  if (this.streamingFlushRaf !== void 0) return;
+  const requestFrame = globalThis.requestAnimationFrame;
+  if (typeof requestFrame !== "function") {
+    this.flushStreaming();
+    return;
+  }
+  this.streamingFlushRaf = requestFrame(() => {
+    this.streamingFlushRaf = void 0;
+    this.flushStreaming();
+  });
+}
+function cancelStreamingFlush() {
+  if (this.streamingFlushRaf === void 0) return;
+  globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
+  this.streamingFlushRaf = void 0;
+}
+function flushStreaming() {
+  if (!this.streamingAnswerDirty && !this.streamingThinkingDirty) return;
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  try {
+    if (this.streamingAnswerDirty && !this.renderStreamingAnswer()) {
+      this.renderMessages();
+      return;
+    }
+    if (this.streamingThinkingDirty && !this.renderStreamingThinking()) {
+      this.renderMessages();
+      return;
+    }
+    this.streamingAnswerDirty = false;
+    this.streamingThinkingDirty = false;
+    if (this.messagesEl && this.stickToBottom)
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  } finally {
+    if (profiling) {
+      profiler.incrementCounter("streamFlushCount");
+      profiler.recordDuration("streamFlush", globalThis.performance.now() - startedAt);
+    }
+  }
+}
+function finalizeStreamingContent() {
+  const answer = this.streamingAssistantContent || "";
+  const thinking = this.streamingThinkingContent || "";
+  this.cancelStreamingFlush();
+  if (!answer && !thinking) return false;
+  const answerContainer = this.streamingTextEl;
+  const thinkingContainer = this.liveThinkingTextEl;
+  const hasAnswerDom =
+    Boolean(answer) && Boolean(answerContainer) && answerContainer.isConnected !== false;
+  const hasThinkingDom =
+    Boolean(thinking) && Boolean(thinkingContainer) && thinkingContainer.isConnected !== false;
+  if (!hasAnswerDom && !hasThinkingDom) return false;
+  const messagesEl = this.messagesEl;
+  const previousScrollTop = messagesEl?.scrollTop;
+  if (hasThinkingDom) this.renderPlainMessageContent(thinkingContainer, thinking);
+  if (hasAnswerDom) this.renderPlainMessageContent(answerContainer, answer);
+  this.streamingAnswerDirty = false;
+  this.streamingThinkingDirty = false;
+  if (messagesEl) {
+    if (this.stickToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+    else if (previousScrollTop !== void 0)
+      messagesEl.scrollTop = Math.min(previousScrollTop, messagesEl.scrollHeight);
+  }
+  return true;
 }
 function renderRoleLabel(e, t, n, s) {
   let a = e.createDiv({ cls: "pi-agent-message-role" }),
@@ -8048,13 +8159,14 @@ function handleRunEvent(e) {
     return;
   }
   if (t === "agent_end") {
+    const finalizedStreaming = this.finalizeStreamingContent?.() === true;
     this.activityText = "";
     this.activityDetail = "";
     this.activityStickyUntil = 0;
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
     this.activeToolCalls.clear();
-    this.renderMessages();
+    if (!finalizedStreaming) this.renderMessages();
   }
 }
 function normalizeRunEventType(e) {
@@ -8673,6 +8785,9 @@ var PiAgentView = class extends f4.ItemView {
     this.currentRunContextUsage = void 0;
     this.invalidatedContextThreadIds = /* @__PURE__ */ new Set();
     this.streamingAssistantContent = "";
+    this.streamingAnswerDirty = false;
+    this.streamingThinkingDirty = false;
+    this.streamingFlushRaf = void 0;
     this.promptQueue = this.plugin.getLocalPromptQueue();
     this.composerImages = [];
     this.composerAttachments = [];
@@ -8948,6 +9063,7 @@ var PiAgentView = class extends f4.ItemView {
     this.threadFavoriteEl = void 0;
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
+    this.cancelStreamingFlush();
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
     this.noteActions = void 0;
@@ -9185,8 +9301,11 @@ var PiAgentView = class extends f4.ItemView {
   finishCanceledRun() {
     this.running = false;
     this.canceling = false;
+    this.cancelStreamingFlush();
     this.streamingAssistantContent = "";
+    this.streamingAnswerDirty = false;
     this.streamingThinkingContent = "";
+    this.streamingThinkingDirty = false;
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.streamingItemEl = void 0;
@@ -9428,8 +9547,11 @@ var PiAgentView = class extends f4.ItemView {
     this.clearPendingActivityTimer();
     this.activeToolCalls.clear();
     this.currentRunContextUsage = void 0;
+    this.cancelStreamingFlush();
     this.streamingAssistantContent = "";
+    this.streamingAnswerDirty = false;
     this.streamingThinkingContent = "";
+    this.streamingThinkingDirty = false;
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.streamingItemEl = void 0;
@@ -9598,31 +9720,53 @@ var PiAgentView = class extends f4.ItemView {
         {
           isCanceled: () => n.canceling,
           onEvent: (o) => {
-            const thinkingDelta = getThinkingDelta(o);
-            if (thinkingDelta) {
-              n.thinking += thinkingDelta;
-              if (!n.thinkingUserSet) n.thinkingExpanded = true;
-            }
-            const toolError = formatToolError(o);
-            if (toolError && n.toolErrors[n.toolErrors.length - 1] !== toolError)
-              n.toolErrors.push(toolError);
-            this.handleSuccessfulToolMutation(o, t);
-            if (!this.isCurrentThread(t)) return;
-            this.streamingThinkingContent = n.thinking;
-            this.thinkingDisclosureExpanded = n.thinkingExpanded;
-            this.thinkingDisclosureUserSet = n.thinkingUserSet;
-            this.handleRunEvent(o);
-            if (thinkingDelta) {
-              this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-              this.appendStreamingThinkingDelta(thinkingDelta);
+            const profiling = performanceProfiler.enabled;
+            const startedAt = profiling ? globalThis.performance.now() : 0;
+            try {
+              const thinkingDelta = getThinkingDelta(o);
+              if (thinkingDelta) {
+                performanceProfiler.incrementCounter("streamDeltaCount");
+                n.thinking += thinkingDelta;
+                if (!n.thinkingUserSet) n.thinkingExpanded = true;
+              }
+              const toolError = formatToolError(o);
+              if (toolError && n.toolErrors[n.toolErrors.length - 1] !== toolError)
+                n.toolErrors.push(toolError);
+              this.handleSuccessfulToolMutation(o, t);
+              if (!this.isCurrentThread(t)) return;
+              this.streamingThinkingContent = n.thinking;
+              this.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.thinkingDisclosureUserSet = n.thinkingUserSet;
+              this.handleRunEvent(o);
+              if (thinkingDelta) {
+                this.liveThinkingSetExpanded?.(n.thinkingExpanded);
+                this.appendStreamingThinkingDelta(thinkingDelta);
+              }
+            } finally {
+              if (profiling)
+                performanceProfiler.recordDuration(
+                  "uiCallback",
+                  globalThis.performance.now() - startedAt
+                );
             }
           },
           onTextDelta: (o) => {
-            if (!n.thinkingUserSet) n.thinkingExpanded = false;
-            if (!this.isCurrentThread(t)) return;
-            this.thinkingDisclosureExpanded = n.thinkingExpanded;
-            this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-            this.appendStreamingDelta(o);
+            const profiling = performanceProfiler.enabled;
+            const startedAt = profiling ? globalThis.performance.now() : 0;
+            try {
+              performanceProfiler.incrementCounter("streamDeltaCount");
+              if (!n.thinkingUserSet) n.thinkingExpanded = false;
+              if (!this.isCurrentThread(t)) return;
+              this.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.liveThinkingSetExpanded?.(n.thinkingExpanded);
+              this.appendStreamingDelta(o);
+            } finally {
+              if (profiling)
+                performanceProfiler.recordDuration(
+                  "uiCallback",
+                  globalThis.performance.now() - startedAt
+                );
+            }
           },
           onPromptAccepted: acknowledgeQueuedDelivery
         },
@@ -9639,8 +9783,11 @@ var PiAgentView = class extends f4.ItemView {
         n.thinkingUserSet ? n.thinkingExpanded : false
       );
       const s = getCurrentRunMetadata(this.plugin.settings, a.runtimeState);
+      this.cancelStreamingFlush();
       this.streamingAssistantContent = "";
+      this.streamingAnswerDirty = false;
       this.streamingThinkingContent = "";
+      this.streamingThinkingDirty = false;
       this.streamingItemEl = void 0;
       this.streamingTextEl = void 0;
       this.plugin.addMessageToThread(t, {
@@ -9698,8 +9845,11 @@ var PiAgentView = class extends f4.ItemView {
       this.syncCurrentRunFlags();
       this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
       this.canceling = this.getCurrentThreadRun()?.canceling === true;
+      this.cancelStreamingFlush();
       this.streamingAssistantContent = "";
+      this.streamingAnswerDirty = false;
       this.streamingThinkingContent = "";
+      this.streamingThinkingDirty = false;
       this.thinkingDisclosureExpanded = false;
       this.thinkingDisclosureUserSet = false;
       this.activityStickyUntil = 0;
@@ -9742,16 +9892,6 @@ var PiAgentView = class extends f4.ItemView {
       console.warn("Pi Agent: failed to refresh an externally changed Markdown file", error);
     });
   }
-  appendStreamingThinkingDelta(e) {
-    if (!e) return;
-    if (!this.liveThinkingTextEl || !this.liveThinkingTextEl.isConnected) {
-      this.renderMessages();
-      return;
-    }
-    this.renderPlainMessageContent(this.liveThinkingTextEl, this.streamingThinkingContent);
-    if (this.messagesEl && this.stickToBottom)
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-  }
   setLiveThinkingExpanded(expanded) {
     const run = this.getCurrentThreadRun();
     this.thinkingDisclosureExpanded = expanded;
@@ -9759,25 +9899,6 @@ var PiAgentView = class extends f4.ItemView {
     if (run) {
       run.thinkingExpanded = expanded;
       run.thinkingUserSet = true;
-    }
-  }
-  appendStreamingDelta(e) {
-    if (e) {
-      this.activityText = "Responding";
-      this.activityKind = "answer";
-      this.activityDetail = "";
-      this.activityStickyUntil = 0;
-      this.pendingActivity = void 0;
-      this.clearPendingActivityTimer();
-      this.streamingAssistantContent += e;
-      this.updateActivityDom();
-      if (!this.streamingTextEl) {
-        this.renderMessages();
-        return;
-      }
-      this.renderStreamingAnswer();
-      if (this.messagesEl && this.stickToBottom)
-        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     }
   }
   setRunningState(e) {

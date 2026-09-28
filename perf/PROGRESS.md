@@ -122,3 +122,25 @@
   - legacy compaction 断言按规格保留，**删除前不得移除**；需 3 次真实运行 0 告警，当前 1/3（本轮无 compaction 事件）。
   - 发现 #1/#2 仍未处理（范围外）。
 - 下一步入口条件：**已满足** → PATCH 3（Streaming Rendering）。
+
+---
+
+### PATCH 3 — Streaming Rendering
+
+- 状态：**完成**。
+- 改动文件：
+  - `src/ui/message-renderer.mjs`：流式阶段改纯文本 + rAF 合并。新增 `appendStreamingDelta` / `appendStreamingThinkingDelta`（只追加单真相源 + dirty 标记 + `scheduleStreamingFlush`；由 `Object.assign` 混入 View 原型，方法从 PiAgentView 移入）、`scheduleStreamingFlush` / `cancelStreamingFlush` / `flushStreaming`（每帧至多一次 `setText` 低开销更新，DOM 缺失时回退 `renderMessages`）、`finalizeStreamingContent`（取消 pending rAF → 同步 flush → 单真相源一次最终 Markdown render，完全替换纯文本容器，含滚动恢复）；`renderStreamingAnswer` / `renderStreamingThinking` 改纯文本；`renderActivityMessage` / `renderStreamingAssistantMessage` 的 live thinking 不再走 Markdown；`renderPlainMessageContent` 计 `markdownRenderCount`。
+  - `src/ui/PiAgentView.mjs`：onEvent/onTextDelta 包 uiCallback 计时并计 `streamDeltaCount`；onClose / resetTransientRunUiState（线程切换）/ finishCanceledRun / run 成功收尾 / finally 均调用 `cancelStreamingFlush` 并重置 dirty；新增 `streamingFlushRaf` 等字段。
+  - `src/ui/run-activity-state.mjs`：`agent_end` 先 `finalizeStreamingContent()`（§6.4），无可用 DOM 才回退 `renderMessages()`。
+  - `src/shared/performance-profiler.mjs`：新增 `streamDeltaCount` / `streamFlushCount` / `markdownRenderCount` / `maxUiCallbackDuration` / `maxStreamFlushDuration`。
+  - 测试：新增 `tests/streaming-renderer.test.mjs`（9，覆盖合并、agent_end 同步 finalize、回退、滚动、生命周期、profiler 计数）；更新 `tests/native-chat-polish.test.mjs`（流式纯文本契约）、`tests/performance-profiler.test.mjs`。
+- 关键测量（同 prompt 受控运行，详见 `perf/baseline.md`）：
+  - 15,636 RPC events / 71.5s；`streamDeltaCount` **6,949** → `streamFlushCount` **1,625**（0.23×；4.28 delta/flush）；`markdownRenderCount` **10**（0.14% of delta，基线为每 delta 一次）。
+  - streaming 阶段 longtask **0**、`maxStreamFlushDuration` 7.6ms（mean 2.2ms）、UI 回调 mean **0.011ms**；唯一 >1ms 回调为 agent_end finalize **57.6ms**（§6.4 同步要求），结束边界另有完成渲染 92ms longtask（均随最终文本 18.7k+4.0k 字符增长）。
+  - `maxEventDuration` 28.2 → 57.6ms（agent_end 同步 finalize 的代价）；`yieldCount` 0（本轮 stdout 批均 ~1.85 事件、批后无遗留，非回归）；compaction 告警 0。
+- 人工验证：`npm run ci` 全绿（**55 files / 322 tests**）；dev:install → `plugin:reload` → `dev:errors` 空；真实运行逐项验证 §12.3：final answer / thinking 完成态为 Markdown、流式为纯文本；自动滚动跟随；手动上滚不被拉回且结束后保持；线程切换（切走取消 rAF、切回恢复流式）；取消（content/rAF/dirty/activeRuns 清零）；agent_end 时间戳关联确认 59ms/92ms longtask 均在运行结束边界。截图 `%TEMP%\opencode\patch3-final.png`。
+- 风险与未决：
+  - agent_end 同步 finalize 按 §6.4 是硬要求，会产生一次性 57.6ms UI 回调 + 59ms longtask；随后完成路径整线程 render 为 92ms。二者都随最终文本长度增长，streaming 阶段仍 0 longtask；若要消除边界峰值需改变「final = 完整 Markdown」语义，建议后续独立评估。
+  - legacy compaction 断言门禁：PATCH 2 run（1）+ 本轮 run A / run E（session JSONL 无 compaction 事件、profiler 无告警）= **3/3**；断言代码仍保留未删（清理属 PATCH 2 退出条件，本步未触碰）。
+  - 发现 #1/#2 仍未处理（范围外）。
+- 下一步入口条件：**已满足** → PATCH 4（Activity UI + Global Lifecycle Audit）。

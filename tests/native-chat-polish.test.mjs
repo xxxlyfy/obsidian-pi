@@ -119,7 +119,7 @@ describe("native chat polish", () => {
     expect(onToggle).toHaveBeenCalledWith(true);
   });
 
-  it("renders tool activity inside the assistant response box instead of the Agent heading", () => {
+  it("renders tool activity inside the assistant response box as plain streaming thinking", () => {
     const messagesEl = new FakeElement("div");
     const view = {
       messagesEl,
@@ -142,13 +142,12 @@ describe("native chat polish", () => {
       .find((element) => element.cls === "pi-agent-thinking-label");
     expect(view.renderRoleLabel).toHaveBeenCalledWith(message, "pi");
     expect(label.text).toBe("EDITING NOTE.MD");
-    expect(view.renderPlainMessageContent).toHaveBeenCalledWith(
-      disclosure.children[1],
-      "**Updating** the note"
-    );
+    // PATCH 3: live thinking stays plain text until the final flush.
+    expect(disclosure.children[1].text).toBe("**Updating** the note");
+    expect(view.renderPlainMessageContent).not.toHaveBeenCalled();
   });
 
-  it("renders the live response through the same Markdown path as the completed answer", () => {
+  it("renders the live response as plain text and leaves Markdown to the final render", () => {
     const messagesEl = new FakeElement("div");
     const renderStreamingAnswer = vi.fn();
     const view = {
@@ -172,6 +171,13 @@ describe("native chat polish", () => {
     expect(disclosure.cls).toContain("is-live has-response");
     expect(view.streamingTextEl.cls).toBe("pi-agent-message-answer");
     expect(renderStreamingAnswer).toHaveBeenCalledOnce();
+    expect(view.renderPlainMessageContent).not.toHaveBeenCalled();
+    expect(messageRendererSource).toContain(
+      'container.setText(this.streamingAssistantContent || "")'
+    );
+    expect(messageRendererSource).toContain(
+      'container.setText(this.streamingThinkingContent || "")'
+    );
     expect(messageRendererSource).not.toContain("this.streamingTextEl.appendText");
     expect(viewSource).toMatch(
       /addEventListener\("click", \(event\) => this\.handleMessageLinkClick\(event\), true\)/

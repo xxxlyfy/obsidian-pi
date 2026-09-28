@@ -1,4 +1,5 @@
 import * as f from "obsidian";
+import { performanceProfiler } from "../shared/performance-profiler.mjs";
 
 export function renderMessages() {
   this.syncCurrentRunFlags();
@@ -131,6 +132,7 @@ export function handleMessageLinkClick(event) {
 }
 
 export function renderPlainMessageContent(container, content) {
+  performanceProfiler.incrementCounter("markdownRenderCount");
   container.empty();
   container.addClass("markdown-rendered");
 
@@ -175,6 +177,9 @@ export function renderStreamingAssistantMessage() {
   const response = item.createDiv({
     cls: "pi-agent-message-content pi-agent-message-content-streaming"
   });
+  // PATCH 3 (spec §6.2/§6.7): the streaming phase is plain text. No Markdown
+  // render, no per-delta Component churn; the final Markdown render happens
+  // once via finalizeStreamingContent when the run settles.
   const rendered = this.renderThinkingDisclosure(
     response,
     this.streamingThinkingContent,
@@ -182,7 +187,7 @@ export function renderStreamingAssistantMessage() {
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
     this.activityText || "Responding",
-    (container, content) => this.renderPlainMessageContent(container, content),
+    undefined,
     true
   );
   this.activityDetailsEl = rendered.details;
@@ -192,12 +197,24 @@ export function renderStreamingAssistantMessage() {
   this.liveThinkingSetExpanded = rendered.setExpanded;
   this.streamingTextEl = response.createDiv({ cls: "pi-agent-message-answer" });
   this.renderStreamingAnswer();
+  this.streamingAnswerDirty = false;
+  this.streamingThinkingDirty = false;
 }
 
 export function renderStreamingAnswer() {
-  if (!this.streamingTextEl?.isConnected && this.streamingTextEl?.isConnected !== undefined) return;
-  this.renderPlainMessageContent(this.streamingTextEl, this.streamingAssistantContent);
-  this.streamingTextEl.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
+  const container = this.streamingTextEl;
+  if (!container || container.isConnected === false) return false;
+  // Single source of truth: every flush paints the full accumulated text.
+  container.setText(this.streamingAssistantContent || "");
+  container.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
+  return true;
+}
+
+export function renderStreamingThinking() {
+  const container = this.liveThinkingTextEl;
+  if (!container || container.isConnected === false) return false;
+  container.setText(this.streamingThinkingContent || "");
+  return true;
 }
 
 export function renderActivityMessage() {
@@ -215,13 +232,125 @@ export function renderActivityMessage() {
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
     this.activityText || "Thinking",
-    (container, content) => this.renderPlainMessageContent(container, content)
+    undefined
   );
   this.activityDetailsEl = rendered.details;
   this.activityLabelEl = rendered.label;
   this.liveThinkingDetailsEl = rendered.details;
   this.liveThinkingTextEl = rendered.text;
   this.liveThinkingSetExpanded = rendered.setExpanded;
+  this.streamingAnswerDirty = false;
+  this.streamingThinkingDirty = false;
+}
+
+export function appendStreamingDelta(delta) {
+  if (!delta) return;
+  this.activityText = "Responding";
+  this.activityKind = "answer";
+  this.activityDetail = "";
+  this.activityStickyUntil = 0;
+  this.pendingActivity = void 0;
+  this.clearPendingActivityTimer();
+  // PATCH 3 §6.1/§6.2: the delta only appends to the single source of truth;
+  // the low-cost DOM update is coalesced into the next animation frame.
+  this.streamingAssistantContent += delta;
+  this.streamingAnswerDirty = true;
+  this.updateActivityDom();
+  this.scheduleStreamingFlush();
+}
+
+export function appendStreamingThinkingDelta(delta) {
+  if (!delta) return;
+  // PATCH 3 §6.3/§6.7: thinking uses the same single source -> rAF
+  // coalescing -> plain text pipeline as the assistant answer.
+  this.streamingThinkingDirty = true;
+  this.scheduleStreamingFlush();
+}
+
+/**
+ * PATCH 3 §6.3: at most one streaming flush per animation frame. Multiple
+ * deltas collapse into a single rAF, then a single low-cost text DOM update.
+ */
+export function scheduleStreamingFlush() {
+  if (this.streamingFlushRaf !== undefined) return;
+  const requestFrame = globalThis.requestAnimationFrame;
+  if (typeof requestFrame !== "function") {
+    this.flushStreaming();
+    return;
+  }
+  this.streamingFlushRaf = requestFrame(() => {
+    this.streamingFlushRaf = undefined;
+    this.flushStreaming();
+  });
+}
+
+export function cancelStreamingFlush() {
+  if (this.streamingFlushRaf === undefined) return;
+  globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
+  this.streamingFlushRaf = undefined;
+}
+
+export function flushStreaming() {
+  if (!this.streamingAnswerDirty && !this.streamingThinkingDirty) return;
+
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  try {
+    if (this.streamingAnswerDirty && !this.renderStreamingAnswer()) {
+      this.renderMessages();
+      return;
+    }
+    if (this.streamingThinkingDirty && !this.renderStreamingThinking()) {
+      this.renderMessages();
+      return;
+    }
+    this.streamingAnswerDirty = false;
+    this.streamingThinkingDirty = false;
+    if (this.messagesEl && this.stickToBottom)
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  } finally {
+    if (profiling) {
+      profiler.incrementCounter("streamFlushCount");
+      profiler.recordDuration("streamFlush", globalThis.performance.now() - startedAt);
+    }
+  }
+}
+
+/**
+ * PATCH 3 §6.4/§6.5: cancel the pending frame, flush synchronously and replace
+ * the plain-text streaming container with one final Markdown render based on
+ * the single source of truth. Never waits for the next frame.
+ *
+ * Returns false when there is no connected streaming DOM to finalize (the
+ * caller falls back to a full message re-render).
+ */
+export function finalizeStreamingContent() {
+  const answer = this.streamingAssistantContent || "";
+  const thinking = this.streamingThinkingContent || "";
+  this.cancelStreamingFlush();
+  if (!answer && !thinking) return false;
+
+  const answerContainer = this.streamingTextEl;
+  const thinkingContainer = this.liveThinkingTextEl;
+  const hasAnswerDom =
+    Boolean(answer) && Boolean(answerContainer) && answerContainer.isConnected !== false;
+  const hasThinkingDom =
+    Boolean(thinking) && Boolean(thinkingContainer) && thinkingContainer.isConnected !== false;
+  if (!hasAnswerDom && !hasThinkingDom) return false;
+
+  const messagesEl = this.messagesEl;
+  const previousScrollTop = messagesEl?.scrollTop;
+  if (hasThinkingDom) this.renderPlainMessageContent(thinkingContainer, thinking);
+  if (hasAnswerDom) this.renderPlainMessageContent(answerContainer, answer);
+  this.streamingAnswerDirty = false;
+  this.streamingThinkingDirty = false;
+  if (messagesEl) {
+    if (this.stickToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+    else if (previousScrollTop !== undefined)
+      messagesEl.scrollTop = Math.min(previousScrollTop, messagesEl.scrollHeight);
+  }
+  return true;
 }
 
 export function renderRoleLabel(e, t, n, s) {

@@ -200,6 +200,46 @@
 > 旧实现每次还额外执行 `events.slice().reverse()`（O(N) 复制、每次数十 KB 级分配，10k 事件时）；新实现 O(1) 且无分配。
 > legacy compaction 断言（§5.6）仍在运行：需累计 **3 次真实全库健康检查、0 次告警**后才可删除，当前 **1/3**。
 
+## PATCH 3 验证运行（Streaming Rendering）
+
+> 同一测试 Vault、同一固定 prompt（全库健康检查）；profiler 受控运行；窗口前台。本轮 RPC events **15,636**（run 墙钟 71.5s；agent 用 14 次 bash、未写 vault，session `1790597596178-pnwzdy0tfqe.jsonl`）。运行结束后 profiler 又空闲约 76s 才取快照，`rpcEventsPerSecond` 快照值 105.9 因此被低估；按 run 墙钟约为 219/s。
+
+| 指标 | PATCH 2 | PATCH 3 | 说明 |
+| --- | --- | --- | --- |
+| longest main-thread task | 0（无 ≥50ms） | streaming 阶段 **0**；结束边界 59ms + 92ms | 均为最终 Markdown 渲染（随最终文本大小增长） |
+| longtask 数量 / 总时长 | 0 / 0 | streaming **0**；结束边界 2 / 151ms | 本轮最终文本：thinking 18,723 + answer 3,995 字符 |
+| streamDeltaCount（新增） | unavailable | **6,949** | text + thinking delta |
+| streamFlushCount（新增） | unavailable | **1,625** | **0.23× delta**，4.28 delta/flush |
+| markdownRenderCount（新增） | 每 delta 1 次（未埋点） | **10** | **0.14% of delta**；运行中长文本流式期保持 1（仅用户消息） |
+| maxUiCallbackDuration（新增） | — | **57.6ms**（agent_end finalize；mean **0.011ms**，17,777 次） | 唯一 >1ms 的回调 |
+| maxStreamFlushDuration（新增） | — | **7.6ms**（mean 2.2ms，1,625 次，合计 3.57s） | 每帧纯文本更新 + 滚动 |
+| maxEventDuration / maxNormalizeDuration | 28.2 / 28.2ms | **57.6 / 57.6ms** | agent_end 同步 finalize（§6.4 要求） |
+| maxDrainDuration | — | 58.9ms | 预算只能事件间暂停；单事件成本主导 |
+| maxRunStateDuration | 0.2ms | 0.1ms（78 captures） | §5.7 gating |
+| maxToolLookupDuration | 0.1ms | 0.1ms | |
+| diagnosticBufferSize / retainedEvents | 500 / 0 | 500 / 0 | |
+| maxJsonParseDuration / maxJsonLineBytes | 0 / 0 | 0 / 0 | RPC 对象路径 |
+| yieldCount / yieldLatency | 5,479 / 3.6ms | **0 / 0** | 本轮 stdout 批均 ~1.85 事件、批后无遗留（`hasDrainWork=false`）；调度器未变，非回归 |
+| compaction 断言告警 | 0 | 0（counters 无 `compactionAssertionWarnings`） | legacy gate：1/3 → **3/3** |
+| 错误 / 告警 | 0 | 0（`dev:errors` 空） | |
+
+### 行为验证（规格 §12.3，2026-09-28，测试 Vault）
+
+| 场景 | 验证结果 | 证据 |
+| --- | --- | --- |
+| streaming 阶段 DOM | 回答/思考均为纯文本：`.pi-agent-message-content-streaming` 内无 `.markdown-rendered`（运行中 `markdownRenderCount` 保持 1，仅用户消息） | eval 采样（run A/E） |
+| final answer | 完成后 `.pi-agent-message-answer.markdown-rendered`，无 typing cursor、无 streaming 容器残留 | run A/E |
+| thinking | 流式纯文本、无 `markdown-rendered`；完成后 `details .pi-agent-thinking-content.markdown-rendered` | run A |
+| auto-scroll | stick=true 时 `scrollTop == scrollHeight − clientHeight`（实测 6374/6374） | run B（10,764 字符回答） |
+| manual scroll | 上滚后 `stickToBottom=false`，后续 delta 不再拉回（保持 scrollTop 0）；最终 render 后仍为 0 | run B |
+| thread switching | 切到新对话：pending rAF 取消、streaming 状态清空；切回运行中线程：streamingEl + cursor 恢复、无错误；完成后消息完整（7,734 字符） | run D |
+| cancellation | cancel 后 running=false；`streamingAssistantContent/ThinkingContent`、dirty 标记、rAF 句柄、`activeRuns` 全部清零，无 DOM 残留 | run C（全库 prompt 中途取消） |
+| agent_end | 同步 finalize（longtask 位于 `last.createdAt` 前 65ms 与 0ms）；activity 立即清空 | run D 时间戳关联 |
+| final Markdown render | 渲染发生在 agent_end（59ms longtask）与完成路径（92ms longtask），均不等待下一帧 | run E |
+
+- 证据截图：`%TEMP%\opencode\patch3-final.png`（运行结束后的 Pi 面板最终状态）。
+- 说明：`window.__patch3` 的 longtask observer 在多次运行间被重复注册，因此同一 longtask 会重复记录；上表已按 epoch/duration 去重。
+
 ## 环境问题与处置记录
 
 | 问题 | 现象 | 根因 | 处置 |

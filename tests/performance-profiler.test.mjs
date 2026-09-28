@@ -84,6 +84,23 @@ describe("PerformanceProfiler", () => {
     vi.useRealTimers();
   });
 
+  it("reports PATCH 3 streaming metrics", () => {
+    profiler.enabled = true;
+
+    profiler.incrementCounter("streamDeltaCount", 120);
+    profiler.incrementCounter("streamFlushCount", 3);
+    profiler.incrementCounter("markdownRenderCount", 2);
+    profiler.recordDuration("uiCallback", 12.5);
+    profiler.recordDuration("streamFlush", 4.5);
+
+    const { metrics } = profiler.snapshot();
+    expect(metrics.streamDeltaCount).toBe(120);
+    expect(metrics.streamFlushCount).toBe(3);
+    expect(metrics.markdownRenderCount).toBe(2);
+    expect(metrics.maxUiCallbackDuration).toBe(12.5);
+    expect(metrics.maxStreamFlushDuration).toBe(4.5);
+  });
+
   it("reset clears counters, durations, maxima, and the time window", () => {
     vi.useFakeTimers();
     vi.setSystemTime(5_000);

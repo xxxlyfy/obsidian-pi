@@ -87,7 +87,13 @@ export class PerformanceProfiler {
         maxNormalizeDuration: durations.normalize?.max ?? 0,
         maxRunStateDuration: durations.runState?.max ?? 0,
         diagnosticBufferSize: maxima.diagnosticsSize ?? 0,
-        retainedEvents: maxima.retainedEvents ?? 0
+        retainedEvents: maxima.retainedEvents ?? 0,
+        // PATCH 3 streaming rendering metrics (spec §6.9).
+        streamDeltaCount: counters.streamDeltaCount ?? 0,
+        streamFlushCount: counters.streamFlushCount ?? 0,
+        markdownRenderCount: counters.markdownRenderCount ?? 0,
+        maxUiCallbackDuration: durations.uiCallback?.max ?? 0,
+        maxStreamFlushDuration: durations.streamFlush?.max ?? 0
       }
     };
   }
