@@ -222,3 +222,17 @@
   - 测试：`tests/run-state.test.mjs`（改为 success/abort/failed 三态跟踪，移除 legacy 告警用例）、`tests/events.test.mjs`（compaction 保留断言改为 diagnostics ring）、`tests/perf-synthetic.test.mjs` Test G、`tests/activity-coalescing.test.mjs` / `tests/streaming-renderer.test.mjs` 源断言同步。
 - 验证：`npm run ci` 全绿（57 files / **336 tests**，差值为删除的 legacy 告警测试）；dev:install → reload → `dev:errors` 空；短 prompt 真实运行：final answer Markdown ✅、stream 194 → flush 65、`diagnosticBufferSize 209`（有界）、metrics 不再含 `retainedEvents`、0 错误。
 - 未决：发现 #1/#2（范围外）；63ms 边界渲染可选优化（本项目未做，PATCH 6/7 决策不因此改变）。
+
+---
+
+### Local fixes — 发现 #1 / #2（2026-09-28，本地自用分支）
+
+- 状态：**完成**；按用户确认（个人自用、不反馈上游、不同步上游）本地直接修复，无 issue。
+- 变更：
+  - `src/ui/run-settings.mjs`（发现 #1）：provider 对象一律走 `renderProviderIcon`（无 provider 时显示 AI monogram），不再把 `{ provider: "" }` 传给 `setIcon`；`getModelProvider` 对空 `effectiveModel` 加防护。
+  - `src/pi/environment.mjs`（发现 #2）：Windows 下 `buildPiProcessInvocation` 把多行 `--system-prompt` / `--append-system-prompt` 值改写为临时文件路径（Pi 对存在的路径读取文件内容，`resource-loader.resolvePromptInput`），避免 cmd.exe 按换行拆分 `/c` 命令导致后续参数（`--tools` / `--skill` / `--no-skills`）丢失；文件按内容 SHA-1 命名（幂等去重），写失败回退内联文本；POSIX 行为不变。
+  - 测试：`tests/environment.test.mjs`（多行改写 + 后续参数保留 + 单行/无关参数不动）、`tests/composer-run-settings.test.mjs`（无 provider 时 monogram、`setIcon` 仅接收字符串）。
+- 验证：`npm run ci` 全绿（57 files / **339 tests**）。
+  - #1 真实运行：清空 model/effectiveModel/availableModels 后刷新控件 → 3 控件正常、Model 显示 `AI` monogram、`dev:errors` 空；随后恢复 `deepseek/deepseek-flash`。
+  - #2 真实运行：read-only 模式执行「列出 vault 根目录结构」，session `1790600219097-b985irhbtw9.jsonl`：33 次工具调用全部为 `ls` / `find`（**0 bash、0 写入**；修复前 12/12 为 bash）；session 内含完整系统指令（`## Vault behavior`、`user-owned knowledge`），不再截断；结束答案 986 字符、0 错误。
+- 备注：临时文件位于 `%TEMP%\pi-agent-system-prompt-<hash>.md`，按内容去重、随系统临时目录清理；内容为插件 system 指令 + 用户「自定义指令」设置，不含 vault 笔记内容。

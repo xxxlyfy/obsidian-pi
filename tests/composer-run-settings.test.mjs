@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({
   FuzzySuggestModal: class {},
@@ -10,7 +10,65 @@ vi.mock("obsidian", () => ({
   setIcon: vi.fn()
 }));
 
+import { setIcon } from "obsidian";
 import { RunSettingsControls } from "../src/ui/run-settings.mjs";
+
+beforeEach(() => {
+  setIcon.mockClear();
+});
+
+function createFakeIconElement(options = {}) {
+  return {
+    cls: options.cls ?? "",
+    attr: options.attr ?? {},
+    text: options.text ?? "",
+    children: [],
+    setText(value) {
+      this.text = value ?? "";
+    },
+    append(child) {
+      this.children.push(child);
+    },
+    ownerDocument: {
+      createElementNS: () => {
+        const el = {
+          children: [],
+          setAttribute() {},
+          append(child) {
+            el.children.push(child);
+          }
+        };
+        return el;
+      }
+    }
+  };
+}
+
+function createIconHost() {
+  return {
+    children: [],
+    createSpan(options = {}) {
+      const span = createFakeIconElement(options);
+      this.children.push(span);
+      return span;
+    },
+    createEl(tag, options = {}) {
+      const el = createFakeIconElement(options);
+      el.tag = tag;
+      el.listeners = [];
+      el.disabled = false;
+      el.isConnected = true;
+      el.addEventListener = (type, listener) => el.listeners.push({ type, listener });
+      el.createSpan = (childOptions = {}) => {
+        const child = createFakeIconElement(childOptions);
+        el.children.push(child);
+        return child;
+      };
+      this.children.push(el);
+      return el;
+    }
+  };
+}
 
 const viewSource = readFileSync(new URL("../src/ui/PiAgentView.mjs", import.meta.url), "utf8");
 const threadListSource = readFileSync(
@@ -43,6 +101,31 @@ describe("compact composer run settings", () => {
 
     expect(controls.getModelLabel()).toBe("A very long readable model name");
     expect(controls.formatDefaultReasoningLabel()).toBe("XHigh");
+  });
+
+  it("renders an AI monogram instead of crashing when no model provider is configured", () => {
+    const controls = new RunSettingsControls({
+      settings: { model: "", customModel: "", effectiveModel: "", availableModels: [] }
+    });
+    const container = createIconHost();
+
+    expect(() =>
+      controls.addPickerSetting(
+        container,
+        "Model",
+        { provider: controls.getModelProvider() },
+        controls.getModelLabel(),
+        () => {}
+      )
+    ).not.toThrow();
+
+    const button = container.children[0];
+    const monogram = button.children.find((child) => child.text === "AI");
+    expect(monogram).toBeDefined();
+    expect(monogram.cls).toContain("is-monogram");
+    for (const call of setIcon.mock.calls) {
+      expect(typeof call[1]).toBe("string");
+    }
   });
 
   it("keeps accessible picker labels and refresh callbacks without dead expansion state", () => {

@@ -153,8 +153,8 @@
 
 ## 遗留事项（不在本任务范围）
 
-1. **发现 #1**：空 Vault 未配置模型时打开 Pi 视图抛 `e.startsWith is not a function`（`src/ui/run-settings.mjs`），建议单独 issue。
-2. **发现 #2**：Windows `cmd.exe /c` 多行参数截断导致 `--tools` 等丢失、工具模式失效，建议单独 issue（修法方向已记录在 `perf/baseline.md`）。
+1. ~~**发现 #1**：空 Vault 未配置模型时打开 Pi 视图抛 `e.startsWith is not a function`~~ → **已修复（Local fixes）**：provider 对象不再传给 `setIcon`，无模型时显示 AI monogram。
+2. ~~**发现 #2**：Windows `cmd.exe /c` 多行参数截断导致 `--tools` 等丢失、工具模式失效~~ → **已修复（Local fixes）**：多行 system prompt 改走临时文件（Pi 读取文件内容），read-only 实测 33 次调用全部 `ls`/`find`、0 bash。
 3. ~~legacy compaction 断言门禁 3/3 后可清理~~ → **已清理**（Cleanup 轮）：门禁 3/3 达成后按 §12.2 移除断言、`state.events` 保留区与 `retainedEvents` 指标，compaction 三态语义由单测继续覆盖。
 4. ~~`finishCanceledRun()` 无调用方（历史遗留）~~ → **已清理**（Cleanup 轮）：死代码移除，取消清理保持于 `runPrompt` `finally` 与 `cancelCurrentRun`。
 5. 63ms 边界渲染（finalize/完成 render）为一次性成本；若未来改变「final = 完整 Markdown」语义可继续优化（本项目未做，PATCH 6/7 决策不因此改变）。

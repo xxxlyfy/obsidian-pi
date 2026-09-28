@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const POSIX_PI_CANDIDATES = ["/opt/homebrew/bin/pi", "/usr/local/bin/pi", "/usr/bin/pi"];
@@ -74,12 +76,18 @@ function findPiNodeExecutable() {
 }
 
 export function buildPiProcessInvocation(piExecutable, args = [], options = {}) {
+  const useWindowsCommandShell = shouldUseWindowsCommandShell(piExecutable);
+  // cmd.exe treats newlines in /c as command separators, so a multi-line
+  // --append-system-prompt truncates the launch and silently drops every later
+  // argument. On Windows, hand Pi a file path instead (it reads existing paths
+  // as file contents).
+  const preparedArgs = useWindowsCommandShell ? materializeSystemPromptArguments(args) : args;
   const processOptions = buildPiProcessOptions(piExecutable, options);
 
-  return shouldUseWindowsCommandShell(piExecutable)
+  return useWindowsCommandShell
     ? {
         command: process.env.ComSpec || "cmd.exe",
-        args: ["/d", "/s", "/c", quoteWindowsCommand([piExecutable, ...args])],
+        args: ["/d", "/s", "/c", quoteWindowsCommand([piExecutable, ...preparedArgs])],
         options: {
           ...processOptions,
           windowsVerbatimArguments: true
@@ -90,6 +98,31 @@ export function buildPiProcessInvocation(piExecutable, args = [], options = {}) 
         args,
         options: processOptions
       };
+}
+
+const SYSTEM_PROMPT_FLAGS = new Set(["--system-prompt", "--append-system-prompt"]);
+
+export function materializeSystemPromptArguments(args = []) {
+  const result = [...args];
+  for (let index = 0; index < result.length - 1; index += 1) {
+    if (!SYSTEM_PROMPT_FLAGS.has(result[index])) continue;
+    const value = result[index + 1];
+    if (typeof value !== "string" || !/[\r\n]/.test(value)) continue;
+    const filePath = writeSystemPromptTempFile(value);
+    if (filePath) result[index + 1] = filePath;
+  }
+  return result;
+}
+
+function writeSystemPromptTempFile(contents) {
+  try {
+    const hash = createHash("sha1").update(contents, "utf8").digest("hex").slice(0, 16);
+    const filePath = path.join(os.tmpdir(), `pi-agent-system-prompt-${hash}.md`);
+    fs.writeFileSync(filePath, contents, "utf8");
+    return filePath;
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildPiProcessOptions(piExecutable = findPiExecutable(), options = {}) {

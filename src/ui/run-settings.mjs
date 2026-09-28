@@ -75,7 +75,9 @@ export class RunSettingsControls {
       cls: `clickable-icon pi-agent-run-setting${extraClass ? ` ${extraClass}` : ""}`,
       attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
     });
-    if (icon?.provider) renderProviderIcon(buttonEl, icon.provider);
+    // Provider objects must never reach setIcon, which expects a string name
+    // (an empty provider used to throw `startsWith is not a function`).
+    if (icon && typeof icon === "object") renderProviderIcon(buttonEl, icon.provider);
     else setIcon(buttonEl, icon);
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
     buttonEl.addEventListener("click", async (event) => {
@@ -125,7 +127,7 @@ export class RunSettingsControls {
       selected?.slug?.split("/")[0] ||
       effective?.provider ||
       effective?.slug?.split("/")[0] ||
-      this.plugin.settings.effectiveModel.split("/")[0]
+      (this.plugin.settings.effectiveModel || "").split("/")[0]
     );
   }
 

@@ -6,7 +6,8 @@ import {
   buildPiProcessEnv,
   buildPiProcessInvocation,
   buildPiProcessOptions,
-  findPiExecutable
+  findPiExecutable,
+  materializeSystemPromptArguments
 } from "../src/pi/environment.mjs";
 
 const originalEnv = {
@@ -101,5 +102,33 @@ describe("Pi process environment", () => {
     setPlatform("darwin");
 
     expect(buildPiProcessOptions("pi", { timeout: 1000 })).not.toHaveProperty("shell");
+  });
+
+  it("materializes multi-line system prompts to files on Windows so later args survive", () => {
+    setPlatform("win32");
+    const instructions = "# Pi Agent\n\nline one\nline two";
+
+    const original = ["--append-system-prompt", instructions, "--tools", "read,grep,find,ls"];
+    const prepared = materializeSystemPromptArguments(original);
+
+    expect(original[1]).toBe(instructions);
+    expect(prepared[1]).not.toBe(instructions);
+    expect(fs.existsSync(prepared[1])).toBe(true);
+    expect(fs.readFileSync(prepared[1], "utf8")).toBe(instructions);
+    expect(prepared[2]).toBe("--tools");
+    expect(prepared[3]).toBe("read,grep,find,ls");
+
+    const invocation = buildPiProcessInvocation("pi.cmd", prepared);
+    expect(invocation.args[3]).not.toMatch(/\r|\n/);
+    expect(invocation.args[3]).toContain('"--tools" "read,grep,find,ls"');
+    expect(invocation.args[3]).toContain(`"${prepared[1]}"`);
+  });
+
+  it("leaves single-line prompts and unrelated multi-line arguments untouched", () => {
+    const singleLine = materializeSystemPromptArguments(["--append-system-prompt", "one line"]);
+    expect(singleLine[1]).toBe("one line");
+
+    const unrelated = materializeSystemPromptArguments(["--message", "line one\nline two"]);
+    expect(unrelated[1]).toBe("line one\nline two");
   });
 });

@@ -2891,7 +2891,9 @@ function getErrorMessage(error) {
 }
 
 // src/pi/environment.mjs
+var import_node_crypto = require("node:crypto");
 var import_node_fs = __toESM(require("node:fs"), 1);
+var import_node_os = __toESM(require("node:os"), 1);
 var import_node_path2 = __toESM(require("node:path"), 1);
 var POSIX_PI_CANDIDATES = ["/opt/homebrew/bin/pi", "/usr/local/bin/pi", "/usr/bin/pi"];
 var WINDOWS_PI_CANDIDATES = ["pi.cmd", "pi.exe", "pi"];
@@ -2952,11 +2954,13 @@ function findPiNodeExecutable() {
   return null;
 }
 function buildPiProcessInvocation(piExecutable, args = [], options = {}) {
+  const useWindowsCommandShell = shouldUseWindowsCommandShell(piExecutable);
+  const preparedArgs = useWindowsCommandShell ? materializeSystemPromptArguments(args) : args;
   const processOptions = buildPiProcessOptions(piExecutable, options);
-  return shouldUseWindowsCommandShell(piExecutable)
+  return useWindowsCommandShell
     ? {
         command: process.env.ComSpec || "cmd.exe",
-        args: ["/d", "/s", "/c", quoteWindowsCommand([piExecutable, ...args])],
+        args: ["/d", "/s", "/c", quoteWindowsCommand([piExecutable, ...preparedArgs])],
         options: {
           ...processOptions,
           windowsVerbatimArguments: true
@@ -2967,6 +2971,34 @@ function buildPiProcessInvocation(piExecutable, args = [], options = {}) {
         args,
         options: processOptions
       };
+}
+var SYSTEM_PROMPT_FLAGS = /* @__PURE__ */ new Set(["--system-prompt", "--append-system-prompt"]);
+function materializeSystemPromptArguments(args = []) {
+  const result = [...args];
+  for (let index = 0; index < result.length - 1; index += 1) {
+    if (!SYSTEM_PROMPT_FLAGS.has(result[index])) continue;
+    const value = result[index + 1];
+    if (typeof value !== "string" || !/[\r\n]/.test(value)) continue;
+    const filePath = writeSystemPromptTempFile(value);
+    if (filePath) result[index + 1] = filePath;
+  }
+  return result;
+}
+function writeSystemPromptTempFile(contents) {
+  try {
+    const hash = (0, import_node_crypto.createHash)("sha1")
+      .update(contents, "utf8")
+      .digest("hex")
+      .slice(0, 16);
+    const filePath = import_node_path2.default.join(
+      import_node_os.default.tmpdir(),
+      `pi-agent-system-prompt-${hash}.md`
+    );
+    import_node_fs.default.writeFileSync(filePath, contents, "utf8");
+    return filePath;
+  } catch {
+    return void 0;
+  }
 }
 function buildPiProcessOptions(piExecutable = findPiExecutable(), options = {}) {
   return {
@@ -8407,7 +8439,7 @@ var RunSettingsControls = class {
       cls: `clickable-icon pi-agent-run-setting${extraClass ? ` ${extraClass}` : ""}`,
       attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
     });
-    if (icon?.provider) renderProviderIcon(buttonEl, icon.provider);
+    if (icon && typeof icon === "object") renderProviderIcon(buttonEl, icon.provider);
     else (0, import_obsidian16.setIcon)(buttonEl, icon);
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
     buttonEl.addEventListener("click", async (event) => {
@@ -8454,7 +8486,7 @@ var RunSettingsControls = class {
       selected?.slug?.split("/")[0] ||
       effective?.provider ||
       effective?.slug?.split("/")[0] ||
-      this.plugin.settings.effectiveModel.split("/")[0]
+      (this.plugin.settings.effectiveModel || "").split("/")[0]
     );
   }
   formatDefaultReasoningLabel() {
@@ -10100,7 +10132,7 @@ function sanitizeThreadHistory(history) {
 }
 
 // src/threads/chat-history-backup.mjs
-var import_node_crypto = __toESM(require("node:crypto"), 1);
+var import_node_crypto2 = __toESM(require("node:crypto"), 1);
 var import_node_fs3 = __toESM(require("node:fs"), 1);
 var import_node_path4 = __toESM(require("node:path"), 1);
 var BACKUP_SCHEMA_VERSION = 1;
@@ -10173,7 +10205,7 @@ function cloneHistory(history) {
   return cloned;
 }
 function checksum(history) {
-  return import_node_crypto.default
+  return import_node_crypto2.default
     .createHash("sha256")
     .update(JSON.stringify(history))
     .digest("hex");
