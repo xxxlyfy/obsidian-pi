@@ -240,6 +240,38 @@
 - 证据截图：`%TEMP%\opencode\patch3-final.png`（运行结束后的 Pi 面板最终状态）。
 - 说明：`window.__patch3` 的 longtask observer 在多次运行间被重复注册，因此同一 longtask 会重复记录；上表已按 epoch/duration 去重。
 
+## PATCH 4 验证运行（Activity UI + Global Lifecycle Audit）
+
+> 同一测试 Vault、同一固定 prompt（全库健康检查）；profiler 受控运行；窗口前台。本轮 RPC events **10,742**，run 墙钟 52.6s（session 记于测试 Vault `pi-sessions`）。另有一次短运行（8,716 events）作交叉验证。
+
+| 指标 | PATCH 3 | PATCH 4 | 说明 |
+| --- | --- | --- | --- |
+| RPC events / run 墙钟 | 15,636 / 71.5s | 10,742 / 52.6s | 工作负载随机波动 |
+| activityFlushCount（新增） | — | **50** | 活动 UI 实际应用次数 = RPC events 的 **0.47%**（§7.2 目标） |
+| activityCoalescedEvents（新增） | — | **30** | 被合并的 tool_update 数（0.57/s） |
+| activityCoalescedFlushes（新增） | — | **11** | 合并倍率 **2.73 events/flush** |
+| maxActivityUpdateDuration（新增） | — | **0.3ms**（mean 0.086ms；50 次合计 4.3ms） | 活动 DOM 更新 + 回退 renderMessages |
+| staleCallbackPrevented（新增） | — | **0** | 正常路径先显式清理；陈旧场景由单测强制触发并计数 |
+| streamDeltaCount → streamFlushCount | 6,949 → 1,625 | 5,323 → 1,345（0.25×） | PATCH 3 路径回归正常 |
+| markdownRenderCount | 10 | 10 | |
+| maxUiCallbackDuration | 57.6ms | 35.0ms（mean 0.013ms / 12,154 次） | 仍为 agent_end finalize |
+| maxStreamFlushDuration | 7.6ms | 4.2ms（mean 1.78ms） | |
+| longtask | 2（结束边界 59/92ms） | 1（完成路径整线程 render 60ms） | 本轮最终文本较小（thinking 13.4k + answer 2.7k） |
+| yieldCount / compaction 告警 / 错误 | 0 / 0 / 0 | 0 / 0 / 0 | `dev:errors` 空 |
+
+### 合并窗口决策（§7.1「最终窗口根据 profiler 数据决定」）
+
+- 初始实验窗口：**150ms**（规格区间 100–200ms 的中值）。
+- 数据：tool_update 仅 30 次 / 52.6s（0.57/s），合并倍率 2.73；`maxActivityUpdateDuration` 0.3ms——即使逐条更新成本也极低，窗口的价值在吸收突发与限制标签抖动，而非降本。
+- 决策：**最终保持 150ms**。理由：突发合并实测 ~2.7×；标签延迟 ≤150ms 不可感知；sticky UX `ACTIVITY_STICKY_MS = 1200` 未改；100ms 减少合并收益、200ms 只增加延迟，均无数据支持。
+
+### 运行时观察
+
+- 运行中 30s 采样：RPC events 6,655 vs 活动刷新 53 + 合并 24 → 「RPC event frequency != activity render frequency」成立。
+- 立即事件保持即时：tool_start / tool_end / error（含 compaction failed）/ agent_end / cancel；tool_update 只更新 ActiveTools 状态并调度合并窗口。
+- `plugin:disable` → `plugin:enable` → `plugin:reload` 冒烟：`dev:errors` 空；`onunload` → `disposeThreadRunners()` → `PiRpcClient.dispose()`（含 `YieldScheduler.dispose()`）路径正常。
+- 生命周期审计全文：`perf/patch4-lifecycle-audit.md`。
+
 ## 环境问题与处置记录
 
 | 问题 | 现象 | 根因 | 处置 |

@@ -144,3 +144,25 @@
   - legacy compaction 断言门禁：PATCH 2 run（1）+ 本轮 run A / run E（session JSONL 无 compaction 事件、profiler 无告警）= **3/3**；断言代码仍保留未删（清理属 PATCH 2 退出条件，本步未触碰）。
   - 发现 #1/#2 仍未处理（范围外）。
 - 下一步入口条件：**已满足** → PATCH 4（Activity UI + Global Lifecycle Audit）。
+
+---
+
+### PATCH 4 — Activity UI + Global Lifecycle Audit
+
+- 状态：**完成**。
+- 改动文件：
+  - `src/ui/run-activity-state.mjs`：`tool_update` 活动状态合并（`ACTIVITY_COALESCE_MS = 150`，规则见「合并窗口决策」）；`tool_start` / `tool_end` / error（含 compaction failed）/ `agent_end` / cancel 立即更新并清除 pending 合并；新增 `scheduleCoalescedActivity` / `flushCoalescedActivity` / `clearCoalescedActivity`；sticky 队列 timer 增加 generation 守卫；`applyActivity` 记 `activityFlushCount` / `activityUpdate`，守卫拒绝记 `staleCallbackPrevented`。
+  - `src/ui/PiAgentView.mjs`：`runGeneration`（每 run 分配）/ `threadGeneration`（线程重置 +1）与 `captureUiCallbackGuard` / `isStaleUiCallback` / `noteStaleUiCallback`；run 回调 UI 段增加 stale-run 检查；`onClose` / `resetTransientRunUiState` / `finishCanceledRun` / `cancelCurrentRun` / run `finally` 清理合并状态。
+  - `src/ui/message-renderer.mjs`：streaming rAF 增加同一 generation 守卫（陈旧帧丢弃并计数）。
+  - `src/shared/performance-profiler.mjs`：新增 `activityFlushCount` / `activityCoalescedEvents` / `activityCoalescedFlushes` / `maxActivityUpdateDuration` / `staleCallbackPrevented`。
+  - 新增 `perf/patch4-lifecycle-audit.md`；测试新增 `tests/activity-coalescing.test.mjs`（7），`tests/streaming-renderer.test.mjs` 加 stale 帧用例，`tests/performance-profiler.test.mjs` 加 PATCH 4 指标。
+- 关键测量（固定 prompt 受控运行，详见 `perf/baseline.md`）：
+  - 10,742 RPC events / 52.6s；`activityFlushCount` **50**（events 的 **0.47%**，§7.2 目标达成）；`activityCoalescedEvents` 30 → `activityCoalescedFlushes` **11**（2.73× 合并）；`maxActivityUpdateDuration` **0.3ms**（mean 0.086ms）；`staleCallbackPrevented` 0（正常路径先行清理，陈旧场景单测强制验证）。
+  - 窗口决策：初始 150ms（100–200 区间中值）→ 数据支持**保持 150ms**（合并 2.73×、单次更新 <0.5ms、tool_update 0.57/s、sticky 1200ms 未改）。
+  - 同轮回归：5,323 deltas → 1,345 flushes（0.25×）、markdownRenderCount 10、maxUiCallback 35ms（agent_end finalize）、stream flush max 4.2ms；longtask 1 × 60ms（完成路径整线程 render）。
+- 人工验证：`npm run ci` 全绿（**56 files / 331 tests**）；dev:install → reload → `dev:errors` 空；真实运行 + `plugin:disable → enable → reload` 冒烟（覆盖 `onClose`/`onunload` → `disposeThreadRunners()` → RPC/YieldScheduler 清理）；运行时 30s 采样确认活动刷新远低于事件频率。
+- 风险与未决：
+  - generation 守卫为第二道防线：正常取消/切换路径已显式清理，真实运行未触发 `staleCallbackPrevented`（=0）；仅在单测的人造陈旧场景中触发。
+  - `finishCanceledRun()` 无调用方（历史遗留）；取消清理实际在 `finally` 中执行并已接入 PATCH 4 清理；是否删除该方法留作后续清理项。
+  - 发现 #1/#2 仍未处理（范围外）。
+- 下一步入口条件：**已满足** → PATCH 5（Benchmark + Performance Regression + CI）。

@@ -278,16 +278,29 @@ export function scheduleStreamingFlush() {
     this.flushStreaming();
     return;
   }
+  // PATCH 4 §7.3: the delayed frame callback carries a run/thread generation
+  // guard so a settled run or switched thread cannot repaint stale content.
+  this.streamingFlushGuard = this.captureUiCallbackGuard?.();
   this.streamingFlushRaf = requestFrame(() => {
     this.streamingFlushRaf = undefined;
+    const guard = this.streamingFlushGuard;
+    this.streamingFlushGuard = undefined;
+    if (guard && this.isStaleUiCallback?.(guard)) {
+      this.streamingAnswerDirty = false;
+      this.streamingThinkingDirty = false;
+      this.noteStaleUiCallback?.();
+      return;
+    }
     this.flushStreaming();
   });
 }
 
 export function cancelStreamingFlush() {
-  if (this.streamingFlushRaf === undefined) return;
-  globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
-  this.streamingFlushRaf = undefined;
+  if (this.streamingFlushRaf !== undefined) {
+    globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
+    this.streamingFlushRaf = undefined;
+  }
+  this.streamingFlushGuard = undefined;
 }
 
 export function flushStreaming() {

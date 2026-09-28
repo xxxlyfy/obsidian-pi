@@ -4,6 +4,7 @@ import {
   formatContextUsageTitle,
   formatTokenCount
 } from "../pi/token-usage.mjs";
+import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import {
   formatRetryDetail,
   formatToolStatus,
@@ -13,6 +14,12 @@ import {
 } from "./activity.mjs";
 
 const ACTIVITY_STICKY_MS = 1200;
+
+// PATCH 4 §7.1: tool_update statuses are coalesced into one activity update per
+// window; tool_start/tool_end/error/agent_end/cancel stay immediate. The
+// initial experimental window is 100-200ms; the final value is chosen from
+// profiler data (see perf/PROGRESS.md and perf/baseline.md).
+const ACTIVITY_COALESCE_MS = 150;
 
 export function setActivity(e, t, n = "") {
   let s = Date.now(),
@@ -35,7 +42,16 @@ export function applyActivity(e, t, n = "", s = 0) {
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
   }
-  if (!a && !this.updateActivityDom()) this.renderMessages();
+  if (a) return;
+
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  if (!this.updateActivityDom()) this.renderMessages();
+  if (profiling) {
+    profiler.incrementCounter("activityFlushCount");
+    profiler.recordDuration("activityUpdate", globalThis.performance.now() - startedAt);
+  }
 }
 
 export function queuePendingActivity(e, t, n = "") {
@@ -45,6 +61,9 @@ export function queuePendingActivity(e, t, n = "") {
 
 export function schedulePendingActivity() {
   if (this.pendingActivityTimer) return;
+  // PATCH 4 §7.3: the sticky-window flush is a delayed callback; capture the
+  // run/thread generation so a settled run or switched thread cannot apply it.
+  this.pendingActivityGuard = this.captureUiCallbackGuard?.();
   let e = Math.max(0, this.activityStickyUntil - Date.now());
   this.pendingActivityTimer = window.setTimeout(() => {
     this.pendingActivityTimer = void 0;
@@ -55,20 +74,69 @@ export function schedulePendingActivity() {
 export function clearPendingActivityTimer() {
   if (this.pendingActivityTimer) window.clearTimeout(this.pendingActivityTimer);
   this.pendingActivityTimer = void 0;
+  this.pendingActivityGuard = void 0;
 }
 
 export function flushPendingActivity() {
+  if (this.isStaleUiCallback?.(this.pendingActivityGuard)) {
+    this.pendingActivity = void 0;
+    this.pendingActivityGuard = void 0;
+    this.noteStaleUiCallback?.();
+    return;
+  }
   if (!this.pendingActivity || Date.now() < this.activityStickyUntil) {
     this.pendingActivity && this.schedulePendingActivity();
     return;
   }
   if (!this.running || this.streamingAssistantContent || this.activeToolCalls.size > 0) {
     this.pendingActivity = void 0;
+    this.pendingActivityGuard = void 0;
     return;
   }
   let e = this.pendingActivity;
   this.pendingActivity = void 0;
+  this.pendingActivityGuard = void 0;
   this.applyActivity(e.text, e.kind, e.detail);
+}
+
+// PATCH 4 §7.1: coalesce tool_update activity status into one update per
+// ACTIVITY_COALESCE_MS window. Immediate events call clearCoalescedActivity()
+// because they already reflect the latest state.
+export function scheduleCoalescedActivity() {
+  performanceProfiler.incrementCounter("activityCoalescedEvents");
+  this.activityCoalescePending = true;
+  if (this.activityCoalesceTimer) return;
+  this.activityCoalesceGuard = this.captureUiCallbackGuard?.();
+  this.activityCoalesceTimer = window.setTimeout(() => {
+    this.activityCoalesceTimer = void 0;
+    this.flushCoalescedActivity();
+  }, ACTIVITY_COALESCE_MS);
+}
+
+export function clearCoalescedActivity() {
+  if (this.activityCoalesceTimer) window.clearTimeout(this.activityCoalesceTimer);
+  this.activityCoalesceTimer = void 0;
+  this.activityCoalescePending = false;
+  this.activityCoalesceGuard = void 0;
+}
+
+export function flushCoalescedActivity() {
+  if (this.activityCoalesceTimer) {
+    window.clearTimeout(this.activityCoalesceTimer);
+    this.activityCoalesceTimer = void 0;
+  }
+  const pending = this.activityCoalescePending === true;
+  const guard = this.activityCoalesceGuard;
+  this.activityCoalescePending = false;
+  this.activityCoalesceGuard = void 0;
+  if (!pending) return;
+  if (this.isStaleUiCallback?.(guard)) {
+    this.noteStaleUiCallback?.();
+    return;
+  }
+  performanceProfiler.incrementCounter("activityCoalescedFlushes");
+  const status = this.formatActiveToolStatus();
+  this.setActivity(status.label, status.kind, status.detail);
 }
 
 export function updateActivityDom() {
@@ -145,6 +213,7 @@ export function handleRunEvent(e) {
   }
   if (t === "compaction_end") {
     if (e.raw && e.raw.errorMessage) {
+      this.clearCoalescedActivity?.();
       this.setActivity("Compaction failed", "error", String(e.raw.errorMessage));
       return;
     }
@@ -171,6 +240,7 @@ export function handleRunEvent(e) {
     return;
   }
   if (t === "extension_error" || t === "extension_ui_error") {
+    this.clearCoalescedActivity?.();
     this.setActivity(
       "Extension failed",
       "error",
@@ -195,13 +265,22 @@ export function handleRunEvent(e) {
     this.setActivity(n.label, n.kind, n.detail);
     return;
   }
-  if (t === "tool_start" || t === "tool_update") {
+  if (t === "tool_start") {
+    this.clearCoalescedActivity?.();
     this.trackActiveTool(e);
     let n = this.formatActiveToolStatus();
     this.setActivity(n.label, n.kind, n.detail);
     return;
   }
+  if (t === "tool_update") {
+    // PATCH 4 §7.1/§7.2: only the tracked state updates per event; the status
+    // label is coalesced so RPC event frequency != activity render frequency.
+    this.trackActiveTool(e);
+    this.scheduleCoalescedActivity();
+    return;
+  }
   if (t === "tool_end") {
+    this.clearCoalescedActivity?.();
     this.untrackActiveTool(e);
     if (this.activeToolCalls.size > 0) {
       let n = this.formatActiveToolStatus();
@@ -224,6 +303,7 @@ export function handleRunEvent(e) {
     return;
   }
   if (t === "agent_end") {
+    this.clearCoalescedActivity?.();
     // PATCH 3 §6.4: cancel the pending rAF and flush the streaming state
     // synchronously (single source -> one final Markdown render). Never wait
     // for the next frame. A full re-render is only needed when there is no

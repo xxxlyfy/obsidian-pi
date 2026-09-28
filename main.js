@@ -3249,7 +3249,13 @@ var PerformanceProfiler = class {
         streamFlushCount: counters.streamFlushCount ?? 0,
         markdownRenderCount: counters.markdownRenderCount ?? 0,
         maxUiCallbackDuration: durations.uiCallback?.max ?? 0,
-        maxStreamFlushDuration: durations.streamFlush?.max ?? 0
+        maxStreamFlushDuration: durations.streamFlush?.max ?? 0,
+        // PATCH 4 activity coalescing + stale callback metrics (spec §7.6).
+        activityFlushCount: counters.activityFlushCount ?? 0,
+        activityCoalescedEvents: counters.activityCoalescedEvents ?? 0,
+        activityCoalescedFlushes: counters.activityCoalescedFlushes ?? 0,
+        maxActivityUpdateDuration: durations.activityUpdate?.max ?? 0,
+        staleCallbackPrevented: counters.staleCallbackPrevented ?? 0
       }
     };
   }
@@ -7690,15 +7696,26 @@ function scheduleStreamingFlush() {
     this.flushStreaming();
     return;
   }
+  this.streamingFlushGuard = this.captureUiCallbackGuard?.();
   this.streamingFlushRaf = requestFrame(() => {
     this.streamingFlushRaf = void 0;
+    const guard = this.streamingFlushGuard;
+    this.streamingFlushGuard = void 0;
+    if (guard && this.isStaleUiCallback?.(guard)) {
+      this.streamingAnswerDirty = false;
+      this.streamingThinkingDirty = false;
+      this.noteStaleUiCallback?.();
+      return;
+    }
     this.flushStreaming();
   });
 }
 function cancelStreamingFlush() {
-  if (this.streamingFlushRaf === void 0) return;
-  globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
-  this.streamingFlushRaf = void 0;
+  if (this.streamingFlushRaf !== void 0) {
+    globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
+    this.streamingFlushRaf = void 0;
+  }
+  this.streamingFlushGuard = void 0;
 }
 function flushStreaming() {
   if (!this.streamingAnswerDirty && !this.streamingThinkingDirty) return;
@@ -7783,13 +7800,16 @@ var run_activity_state_exports = {};
 __export(run_activity_state_exports, {
   applyActivity: () => applyActivity,
   captureContextUsage: () => captureContextUsage,
+  clearCoalescedActivity: () => clearCoalescedActivity,
   clearPendingActivityTimer: () => clearPendingActivityTimer,
+  flushCoalescedActivity: () => flushCoalescedActivity,
   flushPendingActivity: () => flushPendingActivity,
   formatActiveToolStatus: () => formatActiveToolStatus,
   getContextUsageForTokens: () => getContextUsageForTokens,
   handleRunEvent: () => handleRunEvent,
   normalizeRunEventType: () => normalizeRunEventType,
   queuePendingActivity: () => queuePendingActivity,
+  scheduleCoalescedActivity: () => scheduleCoalescedActivity,
   schedulePendingActivity: () => schedulePendingActivity,
   setActivity: () => setActivity,
   trackActiveTool: () => trackActiveTool,
@@ -7958,6 +7978,7 @@ function pickNestedString(value, keys, seen = /* @__PURE__ */ new Set()) {
 
 // src/ui/run-activity-state.mjs
 var ACTIVITY_STICKY_MS = 1200;
+var ACTIVITY_COALESCE_MS = 150;
 function setActivity(e, t, n = "") {
   let s = Date.now(),
     a = isStickyActivityKind(t),
@@ -7978,7 +7999,15 @@ function applyActivity(e, t, n = "", s = 0) {
     this.pendingActivity = void 0;
     this.clearPendingActivityTimer();
   }
-  if (!a && !this.updateActivityDom()) this.renderMessages();
+  if (a) return;
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const startedAt = profiling ? globalThis.performance.now() : 0;
+  if (!this.updateActivityDom()) this.renderMessages();
+  if (profiling) {
+    profiler.incrementCounter("activityFlushCount");
+    profiler.recordDuration("activityUpdate", globalThis.performance.now() - startedAt);
+  }
 }
 function queuePendingActivity(e, t, n = "") {
   this.pendingActivity = { text: e, kind: t, detail: n };
@@ -7986,6 +8015,7 @@ function queuePendingActivity(e, t, n = "") {
 }
 function schedulePendingActivity() {
   if (this.pendingActivityTimer) return;
+  this.pendingActivityGuard = this.captureUiCallbackGuard?.();
   let e = Math.max(0, this.activityStickyUntil - Date.now());
   this.pendingActivityTimer = window.setTimeout(() => {
     this.pendingActivityTimer = void 0;
@@ -7995,19 +8025,62 @@ function schedulePendingActivity() {
 function clearPendingActivityTimer() {
   if (this.pendingActivityTimer) window.clearTimeout(this.pendingActivityTimer);
   this.pendingActivityTimer = void 0;
+  this.pendingActivityGuard = void 0;
 }
 function flushPendingActivity() {
+  if (this.isStaleUiCallback?.(this.pendingActivityGuard)) {
+    this.pendingActivity = void 0;
+    this.pendingActivityGuard = void 0;
+    this.noteStaleUiCallback?.();
+    return;
+  }
   if (!this.pendingActivity || Date.now() < this.activityStickyUntil) {
     this.pendingActivity && this.schedulePendingActivity();
     return;
   }
   if (!this.running || this.streamingAssistantContent || this.activeToolCalls.size > 0) {
     this.pendingActivity = void 0;
+    this.pendingActivityGuard = void 0;
     return;
   }
   let e = this.pendingActivity;
   this.pendingActivity = void 0;
+  this.pendingActivityGuard = void 0;
   this.applyActivity(e.text, e.kind, e.detail);
+}
+function scheduleCoalescedActivity() {
+  performanceProfiler.incrementCounter("activityCoalescedEvents");
+  this.activityCoalescePending = true;
+  if (this.activityCoalesceTimer) return;
+  this.activityCoalesceGuard = this.captureUiCallbackGuard?.();
+  this.activityCoalesceTimer = window.setTimeout(() => {
+    this.activityCoalesceTimer = void 0;
+    this.flushCoalescedActivity();
+  }, ACTIVITY_COALESCE_MS);
+}
+function clearCoalescedActivity() {
+  if (this.activityCoalesceTimer) window.clearTimeout(this.activityCoalesceTimer);
+  this.activityCoalesceTimer = void 0;
+  this.activityCoalescePending = false;
+  this.activityCoalesceGuard = void 0;
+}
+function flushCoalescedActivity() {
+  if (this.activityCoalesceTimer) {
+    window.clearTimeout(this.activityCoalesceTimer);
+    this.activityCoalesceTimer = void 0;
+  }
+  const pending = this.activityCoalescePending === true;
+  const guard = this.activityCoalesceGuard;
+  this.activityCoalescePending = false;
+  this.activityCoalesceGuard = void 0;
+  if (!pending) return;
+  if (this.isStaleUiCallback?.(guard)) {
+    this.noteStaleUiCallback?.();
+    return;
+  }
+  performanceProfiler.incrementCounter("activityCoalescedFlushes");
+  const status = this.formatActiveToolStatus();
+  this.setActivity(status.label, status.kind, status.detail);
 }
 function updateActivityDom() {
   if (
@@ -8080,6 +8153,7 @@ function handleRunEvent(e) {
   }
   if (t === "compaction_end") {
     if (e.raw && e.raw.errorMessage) {
+      this.clearCoalescedActivity?.();
       this.setActivity("Compaction failed", "error", String(e.raw.errorMessage));
       return;
     }
@@ -8106,6 +8180,7 @@ function handleRunEvent(e) {
     return;
   }
   if (t === "extension_error" || t === "extension_ui_error") {
+    this.clearCoalescedActivity?.();
     this.setActivity(
       "Extension failed",
       "error",
@@ -8130,13 +8205,20 @@ function handleRunEvent(e) {
     this.setActivity(n.label, n.kind, n.detail);
     return;
   }
-  if (t === "tool_start" || t === "tool_update") {
+  if (t === "tool_start") {
+    this.clearCoalescedActivity?.();
     this.trackActiveTool(e);
     let n = this.formatActiveToolStatus();
     this.setActivity(n.label, n.kind, n.detail);
     return;
   }
+  if (t === "tool_update") {
+    this.trackActiveTool(e);
+    this.scheduleCoalescedActivity();
+    return;
+  }
   if (t === "tool_end") {
+    this.clearCoalescedActivity?.();
     this.untrackActiveTool(e);
     if (this.activeToolCalls.size > 0) {
       let n = this.formatActiveToolStatus();
@@ -8159,6 +8241,7 @@ function handleRunEvent(e) {
     return;
   }
   if (t === "agent_end") {
+    this.clearCoalescedActivity?.();
     const finalizedStreaming = this.finalizeStreamingContent?.() === true;
     this.activityText = "";
     this.activityDetail = "";
@@ -8788,6 +8871,13 @@ var PiAgentView = class extends f4.ItemView {
     this.streamingAnswerDirty = false;
     this.streamingThinkingDirty = false;
     this.streamingFlushRaf = void 0;
+    this.streamingFlushGuard = void 0;
+    this.pendingActivityGuard = void 0;
+    this.activityCoalesceTimer = void 0;
+    this.activityCoalescePending = false;
+    this.activityCoalesceGuard = void 0;
+    this.runGenerationCounter = 0;
+    this.threadGeneration = 0;
     this.promptQueue = this.plugin.getLocalPromptQueue();
     this.composerImages = [];
     this.composerAttachments = [];
@@ -9063,6 +9153,7 @@ var PiAgentView = class extends f4.ItemView {
     this.threadFavoriteEl = void 0;
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
+    this.clearCoalescedActivity();
     this.cancelStreamingFlush();
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
@@ -9292,6 +9383,7 @@ var PiAgentView = class extends f4.ItemView {
     if (e && !e.canceling) {
       e.canceling = true;
       this.canceling = true;
+      this.clearCoalescedActivity();
       this.setActivity("Canceling", "finishing");
       this.plugin.cancelPiRun(e.runner);
       this.setRunningState(true);
@@ -9301,6 +9393,7 @@ var PiAgentView = class extends f4.ItemView {
   finishCanceledRun() {
     this.running = false;
     this.canceling = false;
+    this.clearCoalescedActivity();
     this.cancelStreamingFlush();
     this.streamingAssistantContent = "";
     this.streamingAnswerDirty = false;
@@ -9538,7 +9631,31 @@ var PiAgentView = class extends f4.ItemView {
     this.running = !!e;
     this.canceling = e?.canceling === true;
   }
+  // PATCH 4 §7.3: unified stale-view / stale-run guard for delayed UI
+  // callbacks (activity timers, streaming rAF, pending sticky state).
+  captureUiCallbackGuard() {
+    return {
+      runGeneration: this.getCurrentThreadRun()?.runGeneration,
+      threadGeneration: this.threadGeneration,
+      threadId: this.getCurrentThreadId()
+    };
+  }
+  isStaleUiCallback(guard) {
+    if (!guard) return false;
+    if (guard.threadGeneration !== this.threadGeneration) return true;
+    if (guard.threadId !== this.getCurrentThreadId()) return true;
+    if (guard.runGeneration !== void 0) {
+      const run = this.getCurrentThreadRun();
+      if (!run || run.runGeneration !== guard.runGeneration) return true;
+    }
+    return false;
+  }
+  noteStaleUiCallback() {
+    performanceProfiler.incrementCounter("staleCallbackPrevented");
+  }
   resetTransientRunUiState() {
+    this.threadGeneration += 1;
+    this.clearCoalescedActivity();
     this.activityText = "";
     this.activityKind = "thinking";
     this.activityDetail = "";
@@ -9667,7 +9784,9 @@ var PiAgentView = class extends f4.ItemView {
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
-      toolErrors: []
+      toolErrors: [],
+      // PATCH 4 §7.3: identifies this run for stale-callback checks.
+      runGeneration: ++this.runGenerationCounter
     };
     let skipQueueDrain = false;
     const addUserMessage = () => {
@@ -9734,6 +9853,10 @@ var PiAgentView = class extends f4.ItemView {
                 n.toolErrors.push(toolError);
               this.handleSuccessfulToolMutation(o, t);
               if (!this.isCurrentThread(t)) return;
+              if (this.activeRuns.get(t) !== n) {
+                this.noteStaleUiCallback();
+                return;
+              }
               this.streamingThinkingContent = n.thinking;
               this.thinkingDisclosureExpanded = n.thinkingExpanded;
               this.thinkingDisclosureUserSet = n.thinkingUserSet;
@@ -9757,6 +9880,10 @@ var PiAgentView = class extends f4.ItemView {
               performanceProfiler.incrementCounter("streamDeltaCount");
               if (!n.thinkingUserSet) n.thinkingExpanded = false;
               if (!this.isCurrentThread(t)) return;
+              if (this.activeRuns.get(t) !== n) {
+                this.noteStaleUiCallback();
+                return;
+              }
               this.thinkingDisclosureExpanded = n.thinkingExpanded;
               this.liveThinkingSetExpanded?.(n.thinkingExpanded);
               this.appendStreamingDelta(o);
@@ -9845,6 +9972,7 @@ var PiAgentView = class extends f4.ItemView {
       this.syncCurrentRunFlags();
       this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
       this.canceling = this.getCurrentThreadRun()?.canceling === true;
+      this.clearCoalescedActivity();
       this.cancelStreamingFlush();
       this.streamingAssistantContent = "";
       this.streamingAnswerDirty = false;

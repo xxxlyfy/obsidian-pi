@@ -93,7 +93,13 @@ export class PerformanceProfiler {
         streamFlushCount: counters.streamFlushCount ?? 0,
         markdownRenderCount: counters.markdownRenderCount ?? 0,
         maxUiCallbackDuration: durations.uiCallback?.max ?? 0,
-        maxStreamFlushDuration: durations.streamFlush?.max ?? 0
+        maxStreamFlushDuration: durations.streamFlush?.max ?? 0,
+        // PATCH 4 activity coalescing + stale callback metrics (spec §7.6).
+        activityFlushCount: counters.activityFlushCount ?? 0,
+        activityCoalescedEvents: counters.activityCoalescedEvents ?? 0,
+        activityCoalescedFlushes: counters.activityCoalescedFlushes ?? 0,
+        maxActivityUpdateDuration: durations.activityUpdate?.max ?? 0,
+        staleCallbackPrevented: counters.staleCallbackPrevented ?? 0
       }
     };
   }

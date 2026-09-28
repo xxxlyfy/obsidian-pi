@@ -101,6 +101,23 @@ describe("PerformanceProfiler", () => {
     expect(metrics.maxStreamFlushDuration).toBe(4.5);
   });
 
+  it("reports PATCH 4 activity coalescing and stale-callback metrics", () => {
+    profiler.enabled = true;
+
+    profiler.incrementCounter("activityFlushCount", 9);
+    profiler.incrementCounter("activityCoalescedEvents", 40);
+    profiler.incrementCounter("activityCoalescedFlushes", 7);
+    profiler.incrementCounter("staleCallbackPrevented", 2);
+    profiler.recordDuration("activityUpdate", 3.25);
+
+    const { metrics } = profiler.snapshot();
+    expect(metrics.activityFlushCount).toBe(9);
+    expect(metrics.activityCoalescedEvents).toBe(40);
+    expect(metrics.activityCoalescedFlushes).toBe(7);
+    expect(metrics.maxActivityUpdateDuration).toBe(3.25);
+    expect(metrics.staleCallbackPrevented).toBe(2);
+  });
+
   it("reset clears counters, durations, maxima, and the time window", () => {
     vi.useFakeTimers();
     vi.setSystemTime(5_000);

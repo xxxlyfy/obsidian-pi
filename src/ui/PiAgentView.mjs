@@ -58,6 +58,13 @@ export class PiAgentView extends f.ItemView {
     this.streamingAnswerDirty = false;
     this.streamingThinkingDirty = false;
     this.streamingFlushRaf = undefined;
+    this.streamingFlushGuard = undefined;
+    this.pendingActivityGuard = undefined;
+    this.activityCoalesceTimer = undefined;
+    this.activityCoalescePending = false;
+    this.activityCoalesceGuard = undefined;
+    this.runGenerationCounter = 0;
+    this.threadGeneration = 0;
     this.promptQueue = this.plugin.getLocalPromptQueue();
     this.composerImages = [];
     this.composerAttachments = [];
@@ -333,6 +340,7 @@ export class PiAgentView extends f.ItemView {
     this.threadFavoriteEl = void 0;
     this.cleanupComposerBarObserver();
     this.clearPendingActivityTimer();
+    this.clearCoalescedActivity();
     this.cancelStreamingFlush();
     this.unloadMessageRenderComponents();
     this.messageActions = void 0;
@@ -562,6 +570,7 @@ export class PiAgentView extends f.ItemView {
     if (e && !e.canceling) {
       e.canceling = !0;
       this.canceling = !0;
+      this.clearCoalescedActivity();
       this.setActivity("Canceling", "finishing");
       this.plugin.cancelPiRun(e.runner);
       this.setRunningState(!0);
@@ -571,6 +580,7 @@ export class PiAgentView extends f.ItemView {
   finishCanceledRun() {
     this.running = !1;
     this.canceling = !1;
+    this.clearCoalescedActivity();
     this.cancelStreamingFlush();
     this.streamingAssistantContent = "";
     this.streamingAnswerDirty = false;
@@ -807,7 +817,33 @@ export class PiAgentView extends f.ItemView {
     this.running = !!e;
     this.canceling = e?.canceling === !0;
   }
+  // PATCH 4 §7.3: unified stale-view / stale-run guard for delayed UI
+  // callbacks (activity timers, streaming rAF, pending sticky state).
+  captureUiCallbackGuard() {
+    return {
+      runGeneration: this.getCurrentThreadRun()?.runGeneration,
+      threadGeneration: this.threadGeneration,
+      threadId: this.getCurrentThreadId()
+    };
+  }
+  isStaleUiCallback(guard) {
+    if (!guard) return false;
+    if (guard.threadGeneration !== this.threadGeneration) return true;
+    if (guard.threadId !== this.getCurrentThreadId()) return true;
+    if (guard.runGeneration !== undefined) {
+      const run = this.getCurrentThreadRun();
+      if (!run || run.runGeneration !== guard.runGeneration) return true;
+    }
+    return false;
+  }
+  noteStaleUiCallback() {
+    performanceProfiler.incrementCounter("staleCallbackPrevented");
+  }
   resetTransientRunUiState() {
+    // A rendered-thread reset invalidates every callback bound to the old
+    // thread generation.
+    this.threadGeneration += 1;
+    this.clearCoalescedActivity();
     this.activityText = "";
     this.activityKind = "thinking";
     this.activityDetail = "";
@@ -936,7 +972,9 @@ export class PiAgentView extends f.ItemView {
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
-      toolErrors: []
+      toolErrors: [],
+      // PATCH 4 §7.3: identifies this run for stale-callback checks.
+      runGeneration: ++this.runGenerationCounter
     };
     let skipQueueDrain = false;
     const addUserMessage = () => {
@@ -1003,6 +1041,10 @@ export class PiAgentView extends f.ItemView {
                 n.toolErrors.push(toolError);
               this.handleSuccessfulToolMutation(o, t);
               if (!this.isCurrentThread(t)) return;
+              if (this.activeRuns.get(t) !== n) {
+                this.noteStaleUiCallback();
+                return;
+              }
               this.streamingThinkingContent = n.thinking;
               this.thinkingDisclosureExpanded = n.thinkingExpanded;
               this.thinkingDisclosureUserSet = n.thinkingUserSet;
@@ -1026,6 +1068,10 @@ export class PiAgentView extends f.ItemView {
               performanceProfiler.incrementCounter("streamDeltaCount");
               if (!n.thinkingUserSet) n.thinkingExpanded = false;
               if (!this.isCurrentThread(t)) return;
+              if (this.activeRuns.get(t) !== n) {
+                this.noteStaleUiCallback();
+                return;
+              }
               this.thinkingDisclosureExpanded = n.thinkingExpanded;
               this.liveThinkingSetExpanded?.(n.thinkingExpanded);
               this.appendStreamingDelta(o);
@@ -1114,6 +1160,7 @@ export class PiAgentView extends f.ItemView {
       this.syncCurrentRunFlags();
       this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
       this.canceling = this.getCurrentThreadRun()?.canceling === !0;
+      this.clearCoalescedActivity();
       this.cancelStreamingFlush();
       this.streamingAssistantContent = "";
       this.streamingAnswerDirty = false;

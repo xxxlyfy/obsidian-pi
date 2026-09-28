@@ -272,6 +272,31 @@ describe("PATCH 3 streaming renderer", () => {
     expect(activitySource).toContain("this.finalizeStreamingContent?.() === true");
   });
 
+  it("drops a stale frame via the run/thread generation guard", () => {
+    const { callbacks } = stubAnimationFrame();
+    const noteStaleUiCallback = vi.fn();
+    const view = createView({
+      captureUiCallbackGuard: () => ({
+        threadId: "thread-1",
+        threadGeneration: 1,
+        runGeneration: 5
+      }),
+      isStaleUiCallback: () => true,
+      noteStaleUiCallback
+    });
+
+    view.appendStreamingDelta("stale");
+    expect(callbacks.size).toBe(1);
+
+    callbacks.get(1)();
+
+    expect(noteStaleUiCallback).toHaveBeenCalledOnce();
+    expect(view.streamingTextEl.text).toBe("");
+    expect(view.streamingAnswerDirty).toBe(false);
+    expect(view.streamingFlushRaf).toBeUndefined();
+    expect(view.streamingFlushGuard).toBeUndefined();
+  });
+
   it("records flush and Markdown-render counts in the profiler", async () => {
     const { performanceProfiler } = await import("../src/shared/performance-profiler.mjs");
     const { callbacks } = stubAnimationFrame();
