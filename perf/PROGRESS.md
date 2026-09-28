@@ -66,3 +66,23 @@
   - TESTING.md 引用的 `ObsidianTesting` 路径是上游 macOS 路径，本机不存在；本机测试 Vault 已确定为 `Desktop\3\test-vault`，人工检查清单以 `TESTING.md` + 规格后续步骤为准。
   - `TESTING.md` 记录上一次发布是 0.0.12 / 47 files / 262 tests，当前 0.0.16 基线为 50 files / 282 tests（差异属正常版本演进）。
 - 下一步入口条件：**已满足** → 开始 PATCH 0（Baseline + Runtime Spike + Audit + Minimal Profiler）。
+
+---
+
+### PATCH 0 — Baseline / Runtime / Audit / Minimal Profiler
+
+- 状态：**完成**。
+- 改动文件：
+  - 新增 `src/shared/performance-profiler.mjs`、`tests/performance-profiler.test.mjs`（6 tests）；
+  - 接线：`src/pi/events.mjs`（`rpcEventsProcessed` / `jsonParse` / `jsonLineBytes` / `event`）、`src/pi/rpc-client.mjs`（`drain`）、`src/plugin/PiAgentPlugin.mjs`（`this.profiler = performanceProfiler`，默认关闭、显式启用）；
+  - `main.js` 由 `npm run build` 重新生成（`build:check` 通过）；新增 `perf/patch0-audit.md`、`perf/tools/seed-test-vault.mjs`；更新 `perf/baseline.md`。
+- 关键测量（详见 `perf/baseline.md`）：
+  - 未修改版本全库健康检查（433 笔记 / 0.48 MiB）：total **67.35s**；longest task **11,996ms**；P95 1,367ms；P99 11,996ms；longtask 54 个、合计 31.1s；heap 41.2→79.9MB；无错误。
+  - Yield spike：`scheduler.yield` 可用（p95 0.1ms）、priority continuation 正常 → **情况 A**。
+  - Profiler 验证运行（PATCH 0 代码）：events 12、drain max 6.0ms、event max 5.9ms、jsonParse max 0.3ms、jsonLineBytes max 60,691。
+- 人工验证：`npm run ci` 全绿（**51 files / 288 tests**）；dev:install → `plugin:reload` → profiler 启用/快照/关闭 → `dev:errors` 无错误。审计：`perf/patch0-audit.md`（events[] 迁移表 + tool schema 四问）。
+- 风险与未决：
+  - **发现 #2（既有，Windows）**：`cmd.exe /c` 多行参数截断 → `--tools` / `--skill` / `--no-skills` 丢失、system 指令被截断；工具模式在 Windows 不生效（基线 run 实际为全量工具 + bash）。不影响本 PATCH 验收，PATCH 5 基准与跨平台对比必须记录。
+  - 发现 #1（空 Vault 视图渲染 TypeError）已记录，未修。
+  - 性能对比基线取自未修改版本（合规）；profiler 验证运行不计入对比基线。
+- 下一步入口条件：**已满足** → PATCH 1（RPC Cooperative Drain；`YieldScheduler` 主路径 `scheduler.yield()`）。

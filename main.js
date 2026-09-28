@@ -3171,6 +3171,80 @@ var import_node_child_process2 = require("node:child_process");
 var import_node_string_decoder = require("node:string_decoder");
 var import_node_timers = require("node:timers");
 
+// src/shared/performance-profiler.mjs
+var textEncoder = new globalThis.TextEncoder();
+var PerformanceProfiler = class {
+  constructor() {
+    this.enabled = false;
+    this.reset();
+  }
+  reset() {
+    this.counters = /* @__PURE__ */ new Map();
+    this.durations = /* @__PURE__ */ new Map();
+    this.maxima = /* @__PURE__ */ new Map();
+    this.startedAt = Date.now();
+  }
+  incrementCounter(name, delta = 1) {
+    if (!this.enabled || !Number.isFinite(delta)) return;
+    const key = String(name);
+    this.counters.set(key, (this.counters.get(key) ?? 0) + delta);
+  }
+  recordDuration(name, duration) {
+    if (!this.enabled || !Number.isFinite(duration) || duration < 0) return;
+    const key = String(name);
+    const stats = this.durations.get(key) ?? { count: 0, total: 0, max: 0, last: 0 };
+    stats.count += 1;
+    stats.total += duration;
+    stats.max = Math.max(stats.max, duration);
+    stats.last = duration;
+    this.durations.set(key, stats);
+  }
+  recordMax(name, value) {
+    if (!this.enabled || !Number.isFinite(value)) return;
+    const key = String(name);
+    this.maxima.set(key, Math.max(this.maxima.get(key) ?? 0, value));
+  }
+  recordJsonEvent(line) {
+    if (!this.enabled) return;
+    this.incrementCounter("rpcEventsProcessed");
+    this.recordMax("jsonLineBytes", textEncoder.encode(line).length);
+  }
+  snapshot() {
+    const elapsedMs = Math.max(0, Date.now() - this.startedAt);
+    const counters = Object.fromEntries(this.counters);
+    const durations = {};
+    for (const [name, stats] of this.durations) {
+      durations[name] = {
+        count: stats.count,
+        total: stats.total,
+        max: stats.max,
+        last: stats.last,
+        mean: stats.count > 0 ? stats.total / stats.count : 0
+      };
+    }
+    const maxima = Object.fromEntries(this.maxima);
+    const rpcEventsProcessed = counters.rpcEventsProcessed ?? 0;
+    return {
+      enabled: this.enabled,
+      elapsedMs,
+      counters,
+      durations,
+      maxima,
+      metrics: {
+        rpcEventsProcessed,
+        rpcEventsPerSecond: elapsedMs > 0 ? (rpcEventsProcessed * 1e3) / elapsedMs : 0,
+        maxDrainDuration: durations.drain?.max ?? 0,
+        maxEventDuration: durations.event?.max ?? 0,
+        maxJsonParseDuration: durations.jsonParse?.max ?? 0,
+        maxJsonLineBytes: maxima.jsonLineBytes ?? 0,
+        yieldCount: counters.yieldCount ?? 0,
+        yieldLatency: durations.yield?.max ?? 0
+      }
+    };
+  }
+};
+var performanceProfiler = new PerformanceProfiler();
+
 // src/pi/extension-ui.mjs
 var import_node_util = require("node:util");
 var DIALOG_METHODS = /* @__PURE__ */ new Set(["select", "confirm", "input", "editor"]);
@@ -3423,6 +3497,8 @@ var PiRpcClient = class {
   }
   handleStdoutChunk(chunk) {
     this.stdoutBuffer += this.decoder.write(chunk);
+    const profiler = performanceProfiler;
+    const startedAt = profiler.enabled ? globalThis.performance.now() : 0;
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf("\n");
       if (newlineIndex < 0) break;
@@ -3431,6 +3507,8 @@ var PiRpcClient = class {
       if (line.endsWith("\r")) line = line.slice(0, -1);
       this.handleLine(line);
     }
+    if (profiler.enabled)
+      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
   }
   flushDecoder() {
     this.stdoutBuffer += this.decoder.end();
@@ -3750,12 +3828,32 @@ function formatCompactNumber(value) {
 
 // src/pi/events.mjs
 function handlePiJsonEventLine(line, callbacks, events, appendText, updateRunState) {
+  const profiler = performanceProfiler;
+  if (!profiler.enabled) {
+    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
+    return;
+  }
+  const startedAt = globalThis.performance.now();
+  try {
+    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
+  } finally {
+    profiler.recordDuration("event", globalThis.performance.now() - startedAt);
+  }
+}
+function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState) {
   if (!line.trim()) return;
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const parseStartedAt = profiling ? globalThis.performance.now() : 0;
   let event;
   try {
     event = JSON.parse(line);
   } catch {
     return;
+  }
+  if (profiling) {
+    profiler.recordJsonEvent(line);
+    profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
   }
   const type = String(event.type ?? "event");
   const emit = (normalizedEvent) => {
@@ -3912,7 +4010,7 @@ function findLatestAssistantMessage(messages) {
 
 // src/ui/prompt-payload.mjs
 var import_node_util2 = require("node:util");
-var textEncoder = new import_node_util2.TextEncoder();
+var textEncoder2 = new import_node_util2.TextEncoder();
 var textDecoder = new import_node_util2.TextDecoder("utf-8");
 var SUPPORTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 var MAX_PROMPT_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -4075,10 +4173,10 @@ function normalizeTextAttachments(attachments, maxTotalBytes = MAX_TOTAL_TEXT_AT
       .toLowerCase()
       .split(";")[0];
     if (!isSupportedTextFile(fileName, mimeType) || attachment.content.includes("\0")) continue;
-    const bytes = textEncoder.encode(attachment.content);
+    const bytes = textEncoder2.encode(attachment.content);
     const limit = Math.min(MAX_TEXT_ATTACHMENT_BYTES, remaining);
     const content = decodeUtf8Prefix(bytes, limit);
-    const includedBytes = textEncoder.encode(content).length;
+    const includedBytes = textEncoder2.encode(content).length;
     if (includedBytes === 0 && bytes.length > 0) continue;
     const originalSize = Number.isFinite(attachment.originalSize)
       ? Math.max(attachment.originalSize, bytes.length)
@@ -4164,7 +4262,7 @@ function createPromptTextAttachment(
     } catch {}
   }
   if (decoded === void 0) throw new Error(`${fileName || "This file"} is not valid UTF-8 text.`);
-  const content = decodeUtf8Prefix(textEncoder.encode(decoded), allowed);
+  const content = decodeUtf8Prefix(textEncoder2.encode(decoded), allowed);
   return normalizeTextAttachments(
     [
       {
@@ -10262,6 +10360,7 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    this.profiler = performanceProfiler;
     if (!P.Platform.isDesktopApp) {
       new P.Notice("Pi Agent is desktop-only.");
       return;

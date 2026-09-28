@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { clearTimeout as clearNodeTimeout, setTimeout as setNodeTimeout } from "node:timers";
+import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
 import { createPiCliError, formatPiCliFailure } from "./diagnostics.mjs";
 import { isExtensionUiDialog, isExtensionUiMethod } from "./extension-ui.mjs";
@@ -177,6 +178,8 @@ export class PiRpcClient {
 
   handleStdoutChunk(chunk) {
     this.stdoutBuffer += this.decoder.write(chunk);
+    const profiler = performanceProfiler;
+    const startedAt = profiler.enabled ? globalThis.performance.now() : 0;
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf("\n");
       if (newlineIndex < 0) break;
@@ -185,6 +188,8 @@ export class PiRpcClient {
       if (line.endsWith("\r")) line = line.slice(0, -1);
       this.handleLine(line);
     }
+    if (profiler.enabled)
+      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
   }
 
   flushDecoder() {

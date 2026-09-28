@@ -1,13 +1,36 @@
+import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import { normalizeTokenUsage } from "./token-usage.mjs";
 
 export function handlePiJsonEventLine(line, callbacks, events, appendText, updateRunState) {
+  const profiler = performanceProfiler;
+  if (!profiler.enabled) {
+    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
+    return;
+  }
+
+  const startedAt = globalThis.performance.now();
+  try {
+    handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState);
+  } finally {
+    profiler.recordDuration("event", globalThis.performance.now() - startedAt);
+  }
+}
+
+function handlePiJsonEventLineInner(line, callbacks, events, appendText, updateRunState) {
   if (!line.trim()) return;
 
+  const profiler = performanceProfiler;
+  const profiling = profiler.enabled;
+  const parseStartedAt = profiling ? globalThis.performance.now() : 0;
   let event;
   try {
     event = JSON.parse(line);
   } catch {
     return;
+  }
+  if (profiling) {
+    profiler.recordJsonEvent(line);
+    profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
   }
 
   const type = String(event.type ?? "event");

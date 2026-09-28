@@ -56,6 +56,18 @@
 - **规避**：在测试 Vault 配置任意模型（已设 `deepseek/deepseek-flash`）后不再触发。
 - **处置**：Step 1 约定 `src/` 零改动，本次不修；建议后续单独开 issue（不在性能 PATCH 范围，除非规格另有要求）。
 
+### 发现 #2（Windows 参数截断，既有 bug，未修）
+
+- **现象**：Windows 下插件经 `cmd.exe /d /s /c` 启动 `pi.cmd`（`src/pi/environment.mjs:76-120`）。`--append-system-prompt` 的插件指令是多行文本，cmd 按换行把 `/c` 字符串拆成多条命令，**只有第一个换行前的内容**到达子进程（实测 node 侧命令行止于 `--append-system-prompt "# Pi Agent`）；位于指令之后的参数全部丢失：`--no-skills`、`--skill`、**`--tools`**。
+- **后果**：
+  1. 插件注入的 system 指令被截断（session `addendum` 段实测只剩 `<addendum>\n# Pi Agent\n</addendum>`）。
+  2. **工具模式在 Windows 失效**：read-only 会话实测仍暴露并执行 `bash`（PATCH 0 基线 run 12/12 次工具调用均为 bash）；chat/edit 模式同样不会生效。
+  3. `includeDefaultSkills` 与附加 skill 路径设置同样失效。
+- **验证**：绕过 cmd（用插件同款 RPC 客户端直连、不带多行参数）传同一 `--tools read,grep,find,ls`，Pi 正确只暴露 read/grep/find/ls；`--tools read` 亦正常 → 问题在参数传递链，不在 Pi。
+- **性质**：0.0.16 release 同样存在（`main.js` 与 release 字节一致）；影响 Windows 的正确性/安全语义（“read-only 不执行 shell”承诺不成立），与本次性能改动无关。
+- **处置**：本次不改（性能 PATCH 范围外）；建议单独开 issue。修法方向：避免用 cmd 传多行参数（用 `pi.exe`/`node bundle/cli.js` 直连），或利用 Pi 的 `--append-system-prompt <file>` 支持把指令写入临时文件。
+- **对性能工作的影响**：PATCH 0 基线 run 实际以全量工具执行（agent 用 bash 扫描全库），工作负载仍有效，但 PATCH 5 基准与跨平台对比必须记录该差异。
+
 ## CI 基线（修改前，2026-09-28）
 
 命令：`npm ci` → `npm run ci`
@@ -72,6 +84,67 @@
   - sha256 `7820055959950c1354d84560149a421f9e26a274826a0087a4d0ea67edd122f2`
   - 未手改；由 `npm run build` 生成，`build:check` 确认与 `src/` 一致。
 - 上游 CI 配置（`.github/workflows/ci.yml`）：ubuntu-latest + Node 24 + `npm ci` + `npm run ci`，与本地门禁一致。
+
+## 性能基线（PATCH 0，未修改 0.0.16）
+
+> 测量时间 2026-09-28；被测版本 = release 0.0.16（`main.js` 与 release 字节一致，未含 profiler）。
+> 测量方式：官方 Obsidian CLI + `obsidian eval`（PerformanceObserver `longtask`），窗口前台可见（CDP 焦点模拟防后台节流）。
+
+### 工作负载（全库健康检查）
+
+- 测试语料：`perf/tools/seed-test-vault.mjs`（固定种子 20260928）生成 433 篇 Markdown、505,331 字节（0.48 MiB）：Notes/Area-0..7 ×350、Hubs ×15、Longform ×8、Daily ×60。生成后需 `obsidian reload` 使索引完整（实测 watcher 曾滞后于批量写入）。
+- Prompt（原文固定，后续 patch 复用）：
+  > 请对当前 vault 执行一次完整的全库健康检查：扫描所有 Markdown 笔记，统计笔记数量、目录结构、标签分布、链接与孤立笔记情况，找出断链、无标签笔记、重复标题等问题，最后输出一份简明的健康检查报告。请覆盖整个 vault，不要抽样。
+- 工具模式：read-only（但 Windows 参数截断 bug 导致实际为全量工具，见「发现 #2」；agent 实际用 bash 扫描全库）。
+
+### 测量结果（1 次运行）
+
+| 指标 | 值 |
+| --- | --- |
+| health-check total duration | **67,352 ms**（`runPrompt` 全程；session 时间戳跨度 63,169 ms） |
+| longest main-thread task | **11,996 ms** |
+| P95 task duration | 1,367 ms |
+| P99 task duration | 11,996 ms（= max） |
+| 最长连续同步执行时间 | 11,996 ms（定义：longtask 最大时长 = 主线程连续不可响应上限） |
+| longtask 数量（≥50ms） | 54 |
+| longtask 总时长 | 31,105 ms（占全程约 46%） |
+| 平均 longtask | 576 ms |
+| JS heap（`performance.memory.usedJSHeapSize`） | 41.2 MB → 79.9 MB（+38.7 MB） |
+| CDP `Runtime.getHeapUsage` | 运行前 used 28.3 MB → 运行后 used 23.5 MB（空闲 GC 后） |
+
+### 同轮事件统计（session JSONL）
+
+| 指标 | 值 |
+| --- | --- |
+| tool 调用 / toolResult | 12 / 12（全部 `bash`） |
+| assistant 消息 / thinking / toolCall / text | 13 / 13 / 12 / 17 |
+| RPC events/sec | unavailable（未修改版本无计数器） |
+| maximum event burst | unavailable |
+| streaming delta count | unavailable |
+| Markdown render count | unavailable |
+
+> `unavailable` 项自 PATCH 0 profiler 落地起可测（已埋点），后续 patch 用同一 workload 对比。
+
+### Profiler 验证运行（PATCH 0 代码，短 prompt）
+
+- 启用方式：`app.plugins.plugins["pi-agent"].profiler.enabled = true`；结束已置回 `false`；`dev:errors` 无错误。
+- `snapshot().metrics`：`rpcEventsProcessed: 12`、`rpcEventsPerSecond: 5.5`、`maxDrainDuration: 6.0 ms`、`maxEventDuration: 5.9 ms`、`maxJsonParseDuration: 0.3 ms`、`maxJsonLineBytes: 60,691`、`yieldCount: 0`、`yieldLatency: 0`（PATCH 1 填充）。
+
+## Yield Runtime Spike（PATCH 0 §3.3）
+
+> 环境：Obsidian 1.13.7 / Electron 43.3.0 / Chromium 150.0.7871.212；窗口前台（CDP `Emulation.setFocusEmulationEnabled`），N=50。
+
+| 机制 | availability | min / median / p95 / max (ms) | 结论 |
+| --- | --- | --- | --- |
+| `scheduler.yield()` | ✅ `typeof globalThis.scheduler?.yield === "function"` | 0 / 0 / 0.1 / 0.1 | **首选** |
+| `MessageChannel` | ✅ | 0 / 0 / 0.1 / 1.8 | fallback |
+| `setTimeout(0)` | ✅ | 0 / 15.4 / 16.7 / 17.1 | 最终 fallback（明显更差） |
+
+优先级验证：`scheduler.yield()` 的续体先于此前入队的 MessageChannel 任务执行（实测顺序 `yield>message`），priority continuation 可用。
+
+**结论（规格 §3.3 情况 A）**：`scheduler.yield()` 可用且实测行为可靠 → PATCH 1 的 `YieldScheduler` 主路径使用 `scheduler.yield()`，`MessageChannel` 为 fallback，`setTimeout(0)` 为最终 fallback；batch interval 验收标准按 scheduler.yield 实测延迟制定。
+
+> 操作注意：Obsidian 窗口被遮挡/最小化时 Chromium 会节流定时器（实测链式 `setTimeout` 几乎停滞；`scheduler.yield` 与 `MessageChannel` 不受影响）。后续所有浏览器内测量必须保持窗口前台或开启焦点模拟。
 
 ## 环境问题与处置记录
 

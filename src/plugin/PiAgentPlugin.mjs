@@ -29,6 +29,7 @@ import { showExtensionUiDialog } from "../ui/modals/extension-ui-modal.mjs";
 import { PiAgentView } from "../ui/PiAgentView.mjs";
 import { requestDesktopNotificationPermission } from "../ui/desktop-notifications.mjs";
 import { previewFrontmatterPatch } from "../shared/frontmatter.mjs";
+import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import { sanitizeThreadHistory } from "../shared/thread-history.mjs";
 import { readChatHistoryBackup, writeChatHistoryBackup } from "../threads/chat-history-backup.mjs";
 import {
@@ -151,6 +152,7 @@ export class PiAgentPlugin extends P.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    this.profiler = performanceProfiler;
 
     if (!P.Platform.isDesktopApp) {
       new P.Notice("Pi Agent is desktop-only.");
