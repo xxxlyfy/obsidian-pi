@@ -236,3 +236,14 @@
   - #1 真实运行：清空 model/effectiveModel/availableModels 后刷新控件 → 3 控件正常、Model 显示 `AI` monogram、`dev:errors` 空；随后恢复 `deepseek/deepseek-flash`。
   - #2 真实运行：read-only 模式执行「列出 vault 根目录结构」，session `1790600219097-b985irhbtw9.jsonl`：33 次工具调用全部为 `ls` / `find`（**0 bash、0 写入**；修复前 12/12 为 bash）；session 内含完整系统指令（`## Vault behavior`、`user-owned knowledge`），不再截断；结束答案 986 字符、0 错误。
 - 备注：临时文件位于 `%TEMP%\pi-agent-system-prompt-<hash>.md`，按内容去重、随系统临时目录清理；内容为插件 system 指令 + 用户「自定义指令」设置，不含 vault 笔记内容。
+
+---
+
+### Release — 0.0.17
+
+- 状态：**已发布**（2026-09-28）。
+- 动作：`perf/ui-responsiveness`（10 commits + 发布准备 `774fcdc`）→ fast-forward 合并 `main` → annotated tag `0.0.17` → 推送 fork（`origin`）；tag 触发 `Release Obsidian plugin` workflow 自动发布。
+- 版本文件：`manifest.json` / `package.json` = **0.0.17**；`versions.json` 增加 `"0.0.17": "1.12.3"`；`CHANGELOG.md` 写入 0.0.17 发布条目。
+- 结果：CI（main push）success；Release workflow success；Release 资产 `main.js`（445,301 B）/ `manifest.json` / `styles.css`。
+- 链接：https://github.com/xxxlyfy/obsidian-pi/releases/tag/0.0.17
+- 备注：主 Vault（OneDrive\Obsidian）未改动，由用户自行安装；测试 Vault 已 `dev:install` 到 0.0.17。
