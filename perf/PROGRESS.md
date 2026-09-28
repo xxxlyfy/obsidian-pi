@@ -195,3 +195,16 @@
   - `yieldCount 0` 属负载特性（队列峰值 44 < 批预算 64）；burst 场景由 CI 注入测试证明调度器可用。
   - 发现 #1/#2 仍未处理（范围外）。
 - 下一步入口条件：**已满足** → 最终报告（规格 ch.14）+ PATCH 6/7 条件评估（届时读 1.md 第 10/11 章）。
+
+---
+
+### Final — 条件补丁决策 + 最终报告
+
+- 状态：**完成（无生产代码变更）**。
+- 交付：`perf/FINAL-REPORT.md`（规格 ch.14 全部章节：Environment / Baseline / 每个 Patch / Before-After / Conditional Patch / 成功标准对照 / 遗留事项）。
+- 条件决策：
+  - **PATCH 6（Application/Pipe Backpressure）：Not Implemented**。依据：max queue depth **44 行** / max queue bytes **98,052 B** 未增长（低于 64-event 批预算，drain 实时消费）；longtask **3 / 175ms** 全在运行首尾、流式期 0；heap 峰值 +36.6MB 后回落至低于起点；Pi ~162 events/s 远低于 renderer 消费能力（单批 mean 0.064ms）→ §10.3 三项达标，不实施。
+  - **PATCH 7（Worker）：Evaluated: Yes / Implemented: No**。依据：max JSON.parse **0.4ms**（mean 0.006ms / 9,374 次）远低于 >16ms 进入门槛；唯一 >50ms 的 normalization 样本是 DOM 绑定的 `agent_end` finalize（61.4ms，§11.1 Worker 禁止且无法下放）→ 进入条件不满足，未做 Worker 全成本对比即不实施。
+- 验证：`npm run ci` 全绿（57 files / 337 tests，PATCH 5 最终状态）；报告全部数据来自 PATCH 0-5 受控真实运行（见 `perf/baseline.md`）。
+- 未决：见报告「遗留事项」——发现 #1/#2（范围外）、legacy compaction 断言门禁 3/3 可清理、`finishCanceledRun()` 死代码、63ms 边界渲染可选优化。
+- 下一步：项目规格内步骤全部完成；如需继续可跟进遗留事项或按要求发布到 fork。
