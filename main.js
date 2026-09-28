@@ -3245,6 +3245,88 @@ var PerformanceProfiler = class {
 };
 var performanceProfiler = new PerformanceProfiler();
 
+// src/pi/yield-scheduler.mjs
+function defaultChannelFactory() {
+  return typeof globalThis.MessageChannel === "function"
+    ? () => new globalThis.MessageChannel()
+    : void 0;
+}
+var YieldScheduler = class {
+  constructor(options = {}) {
+    this.scheduler = "scheduler" in options ? options.scheduler : globalThis.scheduler;
+    this.channelFactory =
+      "channelFactory" in options ? options.channelFactory : defaultChannelFactory();
+    this.timeoutHost = options.timeoutHost ?? globalThis;
+    this.forceStrategy = options.strategy;
+    this.disposed = false;
+    this.channel = void 0;
+    this.pendingYields = [];
+    this.strategy = this.resolveStrategy();
+  }
+  resolveStrategy() {
+    if (this.forceStrategy) return this.forceStrategy;
+    if (typeof this.scheduler?.yield === "function") return "scheduler";
+    if (typeof this.channelFactory === "function") return "message-channel";
+    return "timeout";
+  }
+  async yield() {
+    if (this.disposed) return;
+    const profiler = performanceProfiler;
+    const startedAt = globalThis.performance.now();
+    try {
+      if (this.strategy === "scheduler") {
+        await this.scheduler.yield();
+      } else if (this.strategy === "message-channel") {
+        await this.channelYield();
+      } else {
+        await this.timeoutYield();
+      }
+    } catch {
+      await this.timeoutYield();
+    }
+    if (profiler.enabled) {
+      profiler.incrementCounter("yieldCount");
+      profiler.recordDuration("yield", globalThis.performance.now() - startedAt);
+    }
+  }
+  channelYield() {
+    if (this.disposed) return Promise.resolve();
+    const channel = this.getChannel();
+    if (!channel) return this.timeoutYield();
+    return new Promise((resolve) => {
+      this.pendingYields.push(resolve);
+      channel.port2.postMessage(0);
+    });
+  }
+  getChannel() {
+    if (this.channel || typeof this.channelFactory !== "function") return this.channel;
+    const channel = this.channelFactory();
+    channel.port1.onmessage = () => {
+      const resolve = this.pendingYields.shift();
+      resolve?.();
+    };
+    this.channel = channel;
+    return channel;
+  }
+  timeoutYield() {
+    return new Promise((resolve) => {
+      this.timeoutHost.setTimeout(resolve, 0);
+    });
+  }
+  dispose() {
+    this.disposed = true;
+    if (this.channel) {
+      try {
+        this.channel.port1.onmessage = null;
+        this.channel.port1.close?.();
+        this.channel.port2.close?.();
+      } catch {}
+      this.channel = void 0;
+    }
+    for (const resolve of this.pendingYields.splice(0)) resolve();
+  }
+};
+
 // src/pi/extension-ui.mjs
 var import_node_util = require("node:util");
 var DIALOG_METHODS = /* @__PURE__ */ new Set(["select", "confirm", "input", "editor"]);
@@ -3338,6 +3420,8 @@ function renderExtensionStatuses(container, elements, statuses, visible) {
 
 // src/pi/rpc-client.mjs
 var DEFAULT_REQUEST_TIMEOUT_MS = 3e4;
+var DRAIN_BATCH_MAX_EVENTS = 64;
+var DRAIN_BATCH_MAX_MS = 6;
 var nodeTimerHost = {
   setTimeout: import_node_timers.setTimeout,
   clearTimeout: import_node_timers.clearTimeout
@@ -3370,6 +3454,15 @@ var PiRpcClient = class {
     this.decoder = new import_node_string_decoder.StringDecoder("utf8");
     this.timerHost = options.hostWindow;
     this.disposed = false;
+    this.yieldScheduler = options.yieldScheduler ?? new YieldScheduler();
+    this.drainBudget = {
+      maxEvents: options.drainBudget?.maxEvents ?? DRAIN_BATCH_MAX_EVENTS,
+      maxMs: options.drainBudget?.maxMs ?? DRAIN_BATCH_MAX_MS
+    };
+    this.generation = 0;
+    this.drainPending = false;
+    this.drainPromise = void 0;
+    this.stdoutEnded = false;
   }
   get running() {
     return !!this.child && this.child.exitCode === null && !this.child.killed;
@@ -3401,6 +3494,10 @@ var PiRpcClient = class {
       this.stderr = "";
       this.stdoutBuffer = "";
       this.decoder = new import_node_string_decoder.StringDecoder("utf8");
+      this.generation += 1;
+      this.stdoutEnded = false;
+      this.drainPending = false;
+      this.drainPromise = void 0;
       let started = false;
       const failStart = (error) => {
         if (started) return;
@@ -3424,8 +3521,10 @@ var PiRpcClient = class {
         failStart(normalized);
         this.handleExit(normalized);
       });
-      child.once("close", (exitCode) => {
+      child.once("close", async (exitCode) => {
         if (this.child === child) this.child = void 0;
+        await this.whenDrainIdle();
+        if (this.disposed) return;
         const error = new Error(
           formatPiCliFailure({ context: "Pi RPC process stopped", stderr: this.stderr, exitCode })
         );
@@ -3496,28 +3595,79 @@ var PiRpcClient = class {
     return true;
   }
   handleStdoutChunk(chunk) {
+    if (this.disposed) return;
     this.stdoutBuffer += this.decoder.write(chunk);
-    const profiler = performanceProfiler;
-    const startedAt = profiler.enabled ? globalThis.performance.now() : 0;
-    while (true) {
-      const newlineIndex = this.stdoutBuffer.indexOf("\n");
-      if (newlineIndex < 0) break;
-      let line = this.stdoutBuffer.slice(0, newlineIndex);
-      this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      this.handleLine(line);
-    }
-    if (profiler.enabled)
-      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
+    this.scheduleDrain();
   }
   flushDecoder() {
     this.stdoutBuffer += this.decoder.end();
-    if (!this.stdoutBuffer) return;
-    const line = this.stdoutBuffer.endsWith("\r")
-      ? this.stdoutBuffer.slice(0, -1)
-      : this.stdoutBuffer;
-    this.stdoutBuffer = "";
-    this.handleLine(line);
+    this.stdoutEnded = true;
+    this.scheduleDrain();
+  }
+  // PATCH 1: at most one pending drain; new chunks only append to the parser
+  // buffer. Batches are bounded by event count and time, and yields happen only
+  // between complete JSONL lines (partial lines stay in the buffer).
+  scheduleDrain() {
+    if (this.disposed || this.drainPending) return;
+    this.drainPending = true;
+    const generation = this.generation;
+    const drain = (async () => {
+      while (!this.disposed && generation === this.generation) {
+        this.drainBatch();
+        if (!this.hasDrainWork()) break;
+        await this.yieldScheduler.yield();
+      }
+    })();
+    this.drainPromise = drain;
+    const settle = (error) => {
+      if (error) console.error("Pi Agent: RPC drain failed", error);
+      if (this.drainPromise !== drain) return;
+      this.drainPromise = void 0;
+      this.drainPending = false;
+      if (!this.disposed && generation === this.generation && this.hasDrainWork())
+        this.scheduleDrain();
+    };
+    drain.then(
+      () => settle(void 0),
+      (error) => settle(error)
+    );
+  }
+  drainBatch() {
+    const profiler = performanceProfiler;
+    const startedAt = globalThis.performance.now();
+    let processed = 0;
+    while (processed < this.drainBudget.maxEvents) {
+      let line;
+      const newlineIndex = this.stdoutBuffer.indexOf("\n");
+      if (newlineIndex >= 0) {
+        line = this.stdoutBuffer.slice(0, newlineIndex);
+        this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
+      } else if (this.stdoutEnded && this.stdoutBuffer.length > 0) {
+        line = this.stdoutBuffer;
+        this.stdoutBuffer = "";
+      } else {
+        break;
+      }
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      this.handleLine(line);
+      processed += 1;
+      if (globalThis.performance.now() - startedAt >= this.drainBudget.maxMs) break;
+    }
+    if (profiler.enabled && processed > 0)
+      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
+  }
+  hasDrainWork() {
+    if (this.stdoutBuffer.includes("\n")) return true;
+    return this.stdoutEnded && this.stdoutBuffer.length > 0;
+  }
+  async whenDrainIdle() {
+    while (this.drainPromise) {
+      const current = this.drainPromise;
+      try {
+        await current;
+      } catch {}
+      if (this.drainPromise === current) return;
+    }
   }
   handleLine(line) {
     if (!line.trim()) return;
@@ -3609,8 +3759,10 @@ var PiRpcClient = class {
   }
   dispose() {
     this.disposed = true;
+    this.generation += 1;
     this.terminate();
     this.listeners.clear();
+    this.yieldScheduler.dispose();
     const error = new Error("Pi RPC client disposed.");
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();

@@ -2,12 +2,16 @@ import { execFileSync, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { clearTimeout as clearNodeTimeout, setTimeout as setNodeTimeout } from "node:timers";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+import { YieldScheduler } from "./yield-scheduler.mjs";
 import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
 import { createPiCliError, formatPiCliFailure } from "./diagnostics.mjs";
 import { isExtensionUiDialog, isExtensionUiMethod } from "./extension-ui.mjs";
 import { MINIMUM_PI_VERSION } from "./health.mjs";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+// PATCH 1 bounded drain budgets (spec initial values: 32-64 events / 4-8ms).
+const DRAIN_BATCH_MAX_EVENTS = 64;
+const DRAIN_BATCH_MAX_MS = 6;
 const nodeTimerHost = { setTimeout: setNodeTimeout, clearTimeout: clearNodeTimeout };
 
 function resolveActiveWindow() {
@@ -45,6 +49,15 @@ export class PiRpcClient {
     this.decoder = new StringDecoder("utf8");
     this.timerHost = options.hostWindow;
     this.disposed = false;
+    this.yieldScheduler = options.yieldScheduler ?? new YieldScheduler();
+    this.drainBudget = {
+      maxEvents: options.drainBudget?.maxEvents ?? DRAIN_BATCH_MAX_EVENTS,
+      maxMs: options.drainBudget?.maxMs ?? DRAIN_BATCH_MAX_MS
+    };
+    this.generation = 0;
+    this.drainPending = false;
+    this.drainPromise = undefined;
+    this.stdoutEnded = false;
   }
 
   get running() {
@@ -76,6 +89,10 @@ export class PiRpcClient {
       this.stderr = "";
       this.stdoutBuffer = "";
       this.decoder = new StringDecoder("utf8");
+      this.generation += 1;
+      this.stdoutEnded = false;
+      this.drainPending = false;
+      this.drainPromise = undefined;
 
       let started = false;
       const failStart = (error) => {
@@ -101,8 +118,12 @@ export class PiRpcClient {
         failStart(normalized);
         this.handleExit(normalized);
       });
-      child.once("close", (exitCode) => {
+      child.once("close", async (exitCode) => {
         if (this.child === child) this.child = undefined;
+        // Deliver buffered lines from this process before reporting exit, so
+        // trailing agent events are not lost behind rpc_exit.
+        await this.whenDrainIdle();
+        if (this.disposed) return;
         const error = new Error(
           formatPiCliFailure({ context: "Pi RPC process stopped", stderr: this.stderr, exitCode })
         );
@@ -177,29 +198,87 @@ export class PiRpcClient {
   }
 
   handleStdoutChunk(chunk) {
+    if (this.disposed) return;
     this.stdoutBuffer += this.decoder.write(chunk);
-    const profiler = performanceProfiler;
-    const startedAt = profiler.enabled ? globalThis.performance.now() : 0;
-    while (true) {
-      const newlineIndex = this.stdoutBuffer.indexOf("\n");
-      if (newlineIndex < 0) break;
-      let line = this.stdoutBuffer.slice(0, newlineIndex);
-      this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      this.handleLine(line);
-    }
-    if (profiler.enabled)
-      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
+    this.scheduleDrain();
   }
 
   flushDecoder() {
     this.stdoutBuffer += this.decoder.end();
-    if (!this.stdoutBuffer) return;
-    const line = this.stdoutBuffer.endsWith("\r")
-      ? this.stdoutBuffer.slice(0, -1)
-      : this.stdoutBuffer;
-    this.stdoutBuffer = "";
-    this.handleLine(line);
+    this.stdoutEnded = true;
+    this.scheduleDrain();
+  }
+
+  // PATCH 1: at most one pending drain; new chunks only append to the parser
+  // buffer. Batches are bounded by event count and time, and yields happen only
+  // between complete JSONL lines (partial lines stay in the buffer).
+  scheduleDrain() {
+    if (this.disposed || this.drainPending) return;
+    this.drainPending = true;
+    const generation = this.generation;
+    const drain = (async () => {
+      while (!this.disposed && generation === this.generation) {
+        this.drainBatch();
+        if (!this.hasDrainWork()) break;
+        await this.yieldScheduler.yield();
+      }
+    })();
+    this.drainPromise = drain;
+    const settle = (error) => {
+      if (error) console.error("Pi Agent: RPC drain failed", error);
+      if (this.drainPromise !== drain) return;
+      this.drainPromise = undefined;
+      this.drainPending = false;
+      // Work can arrive between the loop exit and this microtask; reschedule.
+      if (!this.disposed && generation === this.generation && this.hasDrainWork())
+        this.scheduleDrain();
+    };
+    drain.then(
+      () => settle(undefined),
+      (error) => settle(error)
+    );
+  }
+
+  drainBatch() {
+    const profiler = performanceProfiler;
+    const startedAt = globalThis.performance.now();
+    let processed = 0;
+    while (processed < this.drainBudget.maxEvents) {
+      let line;
+      const newlineIndex = this.stdoutBuffer.indexOf("\n");
+      if (newlineIndex >= 0) {
+        line = this.stdoutBuffer.slice(0, newlineIndex);
+        this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
+      } else if (this.stdoutEnded && this.stdoutBuffer.length > 0) {
+        line = this.stdoutBuffer;
+        this.stdoutBuffer = "";
+      } else {
+        break;
+      }
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      this.handleLine(line);
+      processed += 1;
+      if (globalThis.performance.now() - startedAt >= this.drainBudget.maxMs) break;
+    }
+    if (profiler.enabled && processed > 0)
+      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
+  }
+
+  hasDrainWork() {
+    if (this.stdoutBuffer.includes("\n")) return true;
+    return this.stdoutEnded && this.stdoutBuffer.length > 0;
+  }
+
+  async whenDrainIdle() {
+    while (this.drainPromise) {
+      const current = this.drainPromise;
+      try {
+        await current;
+      } catch {
+        // Drain failures are reported by scheduleDrain().
+      }
+      if (this.drainPromise === current) return;
+    }
   }
 
   handleLine(line) {
@@ -299,8 +378,10 @@ export class PiRpcClient {
 
   dispose() {
     this.disposed = true;
+    this.generation += 1;
     this.terminate();
     this.listeners.clear();
+    this.yieldScheduler.dispose();
     const error = new Error("Pi RPC client disposed.");
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();

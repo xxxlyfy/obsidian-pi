@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PiRpcClient } from "../src/pi/rpc-client.mjs";
 
 describe("PiRpcClient protocol framing", () => {
-  it("splits records only on LF and preserves Unicode line separators in JSON strings", () => {
+  it("splits records only on LF and preserves Unicode line separators in JSON strings", async () => {
     const client = new PiRpcClient();
     const events = [];
     client.subscribe((event) => events.push(event));
@@ -12,6 +12,7 @@ describe("PiRpcClient protocol framing", () => {
     client.handleStdoutChunk(bytes.subarray(0, 17));
     client.handleStdoutChunk(bytes.subarray(17, 31));
     client.handleStdoutChunk(bytes.subarray(31));
+    await client.whenDrainIdle();
 
     expect(events).toEqual([{ type: "notice", text: "a b c" }, { type: "agent_settled" }]);
   });

@@ -86,3 +86,20 @@
   - 发现 #1（空 Vault 视图渲染 TypeError）已记录，未修。
   - 性能对比基线取自未修改版本（合规）；profiler 验证运行不计入对比基线。
 - 下一步入口条件：**已满足** → PATCH 1（RPC Cooperative Drain；`YieldScheduler` 主路径 `scheduler.yield()`）。
+
+---
+
+### PATCH 1 — RPC Cooperative Drain
+
+- 状态：**完成**。
+- 改动文件：
+  - 新增 `src/pi/yield-scheduler.mjs`：主路径 `scheduler.yield()`（依据 PATCH 0 spike 情况 A）→ 复用单例 MessageChannel → `setTimeout(0)`；`dispose()` 关闭 channel 并结算 pending yield；profiler 记录 `yieldCount` / `yield` 耗时。
+  - `src/pi/rpc-client.mjs`：有界 drain（初值 64 events / 6ms，可注入 `drainBudget`）、`stdout` 只追加不重复调度（单 pending drain + 退出重查防 tick 竞态）、UTF-8 半字符与半行 JSONL 语义保持、`generation` 防陈旧回调、`close` 前先排空缓冲区、`dispose` 清理调度器。
+  - 测试：新增 `tests/yield-scheduler.test.mjs`（7）、`tests/rpc-cooperative-drain.test.mjs`（规格 Test A–E：1k/10k burst、UTF-8 跨 chunk、半行跨 chunk、dispose during backlog，共 6）；更新 `tests/rpc-client.test.mjs`（等待排空）。
+- 关键测量（同 prompt 真实运行，详见 `perf/baseline.md`）：longest main-thread task **11,996ms → 63ms**；longtask **54 → 3**；总阻塞 **31.1s → 0.18s**；本轮 19,497 events、93.2 events/sec、8,846 yields（max 16.2ms / mean 0.43ms）；`maxEventDuration` 63.1ms（221,914B 的 `agent_end` 单事件，PATCH 2/3 继续优化）；0 错误。
+- 验证：`npm run ci` 全绿（**53 files / 301 tests**）；dev:install → `plugin:reload` → profiler 快照 → `dev:errors` 空。CI 合成测试用注入 spy 验证 yield 次数下限（不依赖 wall-clock）。
+- 风险与未决：
+  - `maxDrainDuration`（63ms）暂高于 6ms 预算：预算只能在事件之间暂停，单事件成本高；记录在案，PATCH 2/3 处理。
+  - 真实运行受模型随机性影响（tool calls 23 vs 12），跨 patch 对比以“主线程阻塞/事件级指标”为准。
+  - 发现 #1/#2 仍未处理（范围外）。
+- 下一步入口条件：**已满足** → PATCH 2（Event Algorithm + RunState + Retention）。

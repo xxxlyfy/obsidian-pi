@@ -146,6 +146,29 @@
 
 > 操作注意：Obsidian 窗口被遮挡/最小化时 Chromium 会节流定时器（实测链式 `setTimeout` 几乎停滞；`scheduler.yield` 与 `MessageChannel` 不受影响）。后续所有浏览器内测量必须保持窗口前台或开启焦点模拟。
 
+## PATCH 1 验证运行（Cooperative Drain）
+
+> 同一测试 Vault、同一 prompt（全库健康检查）。agent 行为存在模型随机性：本轮 tool 调用 23 次（基线 12 次）、RPC 事件 **19,497** 个，实际负载明显更高。
+
+| 指标 | PATCH 0 基线（未修改） | PATCH 1 | 说明 |
+| --- | --- | --- | --- |
+| health-check total duration | 67,352 ms（12 tool calls） | 209,142 ms（23 tool calls） | 负载不同，墙钟不可直接比较 |
+| longest main-thread task | **11,996 ms** | **63 ms** | 关键指标 |
+| longtask 数量（≥50ms） | 54 | **3** | |
+| longtask 总时长 | 31,105 ms | **176 ms** | |
+| P95 / P99 task duration | 1,367 / 11,996 ms | 63 / 63 ms | |
+| RPC events processed | unavailable（未埋点） | 19,497 | |
+| RPC events/sec | — | 93.2 | |
+| yieldCount | — | 8,846 | 每 ~2.2 事件一次（单事件均 7.1ms，批次常为 1–2 事件） |
+| yieldLatency（max / mean） | — | 16.2 / 0.43 ms | |
+| maxDrainDuration | — | 63.2 ms（预算 6ms） | 超预算原因：预算只能在**事件之间**暂停；单条 `agent_end`（221,914B）处理占 63ms |
+| maxEventDuration | — | 63.1 ms | 同上；单事件成本是 PATCH 2/3 的目标 |
+| maxJsonParseDuration | — | 1.9 ms | |
+| maxJsonLineBytes | — | 221,914 | |
+| 错误 | 0 | 0（`dev:errors` / `dev:console` 均空） | |
+
+结论：主线程最长阻塞从 11.9s 级降到 **63ms 级**，且是在更高事件负载下取得；预算因单事件成本高而常退化为 1–2 事件/批，配合 `scheduler.yield`（Chromium 150）仍保持可响应。单事件处理成本留给 PATCH 2（RunState/coalescing）与 PATCH 3（streaming rendering）。
+
 ## 环境问题与处置记录
 
 | 问题 | 现象 | 根因 | 处置 |
