@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.0.17
+
+- Kept Obsidian responsive during long agent runs: RPC output now drains cooperatively in bounded batches instead of blocking the main thread for seconds during full-vault scans.
+- Reworked streaming rendering to plain text with per-frame coalescing, so live answers no longer re-render Markdown for every delta; the final answer is rendered once in Markdown when the run ends.
+- Coalesced tool activity updates and added run/thread generation guards so fast tool progress cannot update a stale chat or run.
+- Fixed opening the Pi view in a vault without a configured model, which failed with `e.startsWith is not a function`; the model control now shows a neutral AI mark.
+- Fixed Windows tool modes and custom instructions: multi-line system prompts are passed to Pi through a file, so `cmd.exe` no longer truncates them and drops `--tools`, `--skills`, and related arguments. Review mode is now truly read-only.
+- Added performance instrumentation (queue depth/bytes, streaming/activity/Markdown counters, heap samples), synthetic regression tests for the drain and streaming pipelines, and a 10,000-note benchmark.
+
 ## 0.0.16
 
 - Doubled the composer input height and made the current-note context chip removable; the note is re-attached after opening another note or switching chats.
