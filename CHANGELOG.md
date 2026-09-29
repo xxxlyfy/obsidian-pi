@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Removed repository documentation files (README, PRIVACY, TESTING, RELEASE, AGENTS).
+
 ## 0.0.18
 
 - Localized the settings tab and the dialogs it opens (model picker, thinking picker, write-tool confirmation, and Pi setup) so they follow Obsidian's app language, including Simplified Chinese.
