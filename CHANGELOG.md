@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.18
+
 - Localized the settings tab and the dialogs it opens (model picker, thinking picker, write-tool confirmation, and Pi setup) so they follow Obsidian's app language, including Simplified Chinese.
 - Localized the chat header and composer controls, the tool mode picker, the thread list, and the single and bulk chat deletion dialogs; new chats now take their default title from the active language.
 
