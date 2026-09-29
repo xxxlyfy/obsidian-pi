@@ -13,7 +13,7 @@
     "lint:obsidian:errors": "npm run lint:obsidian -- --quiet",
     "test": "vitest run",
     "test:pi": "node scripts/pi-smoke.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.src.json",
     "ci": "npm run build && npm run build:check && npm run format:check && npm run lint && npm run lint:obsidian:errors && npm run typecheck && npm test && npm run version:check",
     "dev:install": "node scripts/install-dev.mjs",
     "version:check": "node scripts/check-version.mjs",

@@ -12,6 +12,7 @@ import {
   modelSupportsImages
 } from "./prompt-payload.mjs";
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function enqueuePrompt(
   prompt,
   threadId = this.plugin.getCurrentThread().id,
@@ -40,6 +41,7 @@ export function enqueuePrompt(
   );
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function runNextQueuedPrompt() {
   if (this.canceling || this.plugin.isLocalPromptQueuePaused() || this.steeringPromptIds.size > 0)
     return;
@@ -62,6 +64,7 @@ export function runNextQueuedPrompt() {
   );
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function removeQueuedPrompt(id) {
   const item = this.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending") return;
@@ -72,6 +75,7 @@ export function removeQueuedPrompt(id) {
   this.setRunningState(this.running);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function retrieveQueuedPrompt(id) {
   const item = this.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending" || !this.isCurrentThread(item.threadId)) return;
@@ -84,6 +88,10 @@ export function retrieveQueuedPrompt(id) {
   this.inputEl?.focus();
 }
 
+/**
+ * @this {import("./view/view-surface.mjs").PiAgentViewSurface}
+ * @param {string} id
+ */
 export async function steerQueuedPrompt(id) {
   const taken = takeLocalPrompt(this.promptQueue, id);
   if (!taken.item) return;
@@ -122,6 +130,7 @@ export async function steerQueuedPrompt(id) {
   this.runNextQueuedPrompt();
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderPromptQueue() {
   if (!this.promptQueueEl) return;
   const root = this.promptQueueEl;
@@ -203,6 +212,8 @@ export function renderPromptQueue() {
   }
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
+/** @param {any} parent @param {any} label @param {any} text @param {() => void} callback */
 function addTextAction(parent, label, text, callback) {
   const button = parent.createEl("button", {
     cls: "pi-agent-prompt-queue-action is-text",
@@ -212,6 +223,8 @@ function addTextAction(parent, label, text, callback) {
   button.addEventListener("click", callback);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
+/** @param {any} parent @param {any} icon @param {any} label @param {() => void} callback @param {any} disabled */
 function addAction(parent, icon, label, callback, disabled) {
   const button = parent.createEl("button", {
     cls: "clickable-icon pi-agent-prompt-queue-action",
@@ -222,6 +235,8 @@ function addAction(parent, icon, label, callback, disabled) {
   button.addEventListener("click", callback);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
+/** @param {any} parent @param {any[]} images @param {any[]} attachments */
 function renderQueueAttachments(parent, images = [], attachments = []) {
   if (!images.length && !attachments.length) return;
   const previews = parent.createDiv({ cls: "pi-agent-queue-image-previews" });
@@ -243,10 +258,14 @@ function renderQueueAttachments(parent, images = [], attachments = []) {
   }
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
+/** @param {any} item */
 function attachmentSummary(item) {
   const count = (item.images?.length || 0) + (item.attachments?.length || 0);
   return `${count} attached file${count === 1 ? "" : "s"}`;
 }
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
+/** @param {number} bytes */
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "unknown size";
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`;

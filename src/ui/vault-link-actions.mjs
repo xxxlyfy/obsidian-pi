@@ -97,6 +97,11 @@ export function revealLine(leaf, line) {
   }, 50);
 }
 
+/**
+ * @this {any} Bound to a view with an `openVaultLink` method.
+ * @param {string} value
+ * @param {boolean | "tab"} [newLeaf]
+ */
 export async function openVaultPath(value, newLeaf = "tab") {
   return this.openVaultLink(value, newLeaf === true || newLeaf === "tab");
 }

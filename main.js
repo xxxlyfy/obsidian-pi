@@ -92,7 +92,9 @@ function cancelFrame(handle) {
   else hostGlobals().clearTimeout(handle);
 }
 function heapUsedBytes() {
-  const performanceApi = resolveActiveWindow()?.performance ?? hostGlobals().performance;
+  const performanceApi =
+    /** @type {Record<string, any> | undefined} */
+    resolveActiveWindow()?.performance ?? hostGlobals().performance;
   const used = performanceApi?.memory?.usedJSHeapSize;
   return Number.isFinite(used) ? used : void 0;
 }
@@ -331,6 +333,10 @@ function contextSupportsMatch(source, from, to, prefix, suffix) {
 
 // src/annotations/annotation-store.mjs
 var AnnotationStore = class {
+  /**
+   * @param {unknown} rawData Persisted annotation data, normalized on load.
+   * @param {(data: object) => void} [onChange] Called after every mutation with the new data.
+   */
   constructor(rawData, onChange = () => {}) {
     this.data = normalizeAnnotationData(rawData);
     this.onChange = onChange;
@@ -754,7 +760,7 @@ function createMarkdownAnnotationExtension(controller) {
       eventHandlers: {
         mousemove(event, view) {
           if (!controller.isPicking(view)) return false;
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const line = closestLineElement(event.target);
           if (line) controller.hoverPickTarget(view, view.posAtDOM(line));
           return false;
         },
@@ -776,7 +782,7 @@ function createMarkdownAnnotationExtension(controller) {
             event.preventDefault();
             return true;
           }
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const line = closestLineElement(event.target);
           if (!line) return false;
           event.preventDefault();
           controller.choosePickTarget(view, view.posAtDOM(line));
@@ -801,6 +807,9 @@ function createMarkdownAnnotationExtension(controller) {
 }
 function requestAnnotationRefresh(view) {
   view?.dispatch?.({ effects: refreshAnnotations.of(null) });
+}
+function closestLineElement(target) {
+  return target instanceof Element ? target.closest(".cm-line") : null;
 }
 function buildDecorations(view, controller) {
   const ranges = [];
@@ -2592,6 +2601,14 @@ function getSlashCommands(piCommands = []) {
 
 // src/context/context-builder.mjs
 var ContextBuilder = class {
+  /**
+   * @param {object} graph Vault graph used for links, backlinks, and search.
+   * @param {object} settings Plugin settings.
+   * @param {string} bundledInstructions System instructions shipped with the plugin.
+   * @param {string} vaultBasePath Absolute vault path used to resolve references.
+   * @param {() => any[]} [getPiCommands] Slash commands reported by Pi.
+   * @param {(path: string) => any[] | Promise<any[]>} [annotationProvider] Annotations attached to a note path.
+   */
   constructor(
     graph,
     settings,
@@ -3634,7 +3651,7 @@ function checkPiInstallation(piExecutablePath = "") {
       message: diagnostic.message
     };
   }
-  const versionText = (result.stdout || result.stderr || "Pi CLI found.").trim();
+  const versionText = String(result.stdout || result.stderr || "Pi CLI found.").trim();
   const version = extractVersion(versionText);
   if (version && compareVersions(version, MINIMUM_PI_VERSION) < 0) {
     return {
@@ -3698,7 +3715,10 @@ var import_node_timers = require("node:timers");
 
 // src/shared/performance-profiler.mjs
 function createTextEncoder() {
-  const Encoder = resolveActiveWindow()?.TextEncoder ?? hostGlobals().TextEncoder;
+  const activeWindow =
+    /** @type {Record<string, any> | undefined} */
+    resolveActiveWindow();
+  const Encoder = activeWindow?.TextEncoder ?? hostGlobals().TextEncoder;
   return new Encoder();
 }
 var textEncoder;
@@ -3839,7 +3859,10 @@ function terminateProcessTree(child, { signal = "SIGTERM", timeoutMs = 2e3 } = {
 
 // src/pi/yield-scheduler.mjs
 function defaultChannelFactory() {
-  const MessageChannelApi = resolveActiveWindow()?.MessageChannel ?? hostGlobals().MessageChannel;
+  const activeWindow =
+    /** @type {Record<string, any> | undefined} */
+    resolveActiveWindow();
+  const MessageChannelApi = activeWindow?.MessageChannel ?? hostGlobals().MessageChannel;
   return typeof MessageChannelApi === "function" ? () => new MessageChannelApi() : void 0;
 }
 function defaultTimerHost() {
@@ -3848,9 +3871,14 @@ function defaultTimerHost() {
 function defaultScheduler() {
   return resolveActiveWindow()?.scheduler;
 }
+function hasYield(scheduler) {
+  return typeof scheduler?.yield === "function";
+}
 var YieldScheduler = class {
+  /** @param {YieldSchedulerOptions} [options] */
   constructor(options = {}) {
-    this.scheduler = "scheduler" in options ? options.scheduler : defaultScheduler();
+    this.scheduler =
+      "scheduler" in options ? /** @type {any} */ options.scheduler : defaultScheduler();
     this.channelFactory =
       "channelFactory" in options ? options.channelFactory : defaultChannelFactory();
     this.timeoutHost = options.timeoutHost ?? defaultTimerHost();
@@ -3862,7 +3890,7 @@ var YieldScheduler = class {
   }
   resolveStrategy() {
     if (this.forceStrategy) return this.forceStrategy;
-    if (typeof this.scheduler?.yield === "function") return "scheduler";
+    if (hasYield(this.scheduler)) return "scheduler";
     if (typeof this.channelFactory === "function") return "message-channel";
     return "timeout";
   }
@@ -4747,9 +4775,9 @@ function handlePiEvent(event, state, callbacks) {
     normalizePiEvent(event, state, callbacks);
   } finally {
     if (profiling) {
-      const now2 = now2();
-      profiler.recordDuration("normalize", now2 - normalizeStartedAt);
-      profiler.recordDuration("event", now2 - startedAt);
+      const finishedAt = now();
+      profiler.recordDuration("normalize", finishedAt - normalizeStartedAt);
+      profiler.recordDuration("event", finishedAt - startedAt);
     }
   }
 }
@@ -5339,7 +5367,10 @@ function encodeBase64(binary) {
 }
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const FileReader = resolveActiveWindow()?.FileReader;
+    const activeWindow =
+      /** @type {Record<string, any> | undefined} */
+      resolveActiveWindow();
+    const FileReader = activeWindow?.FileReader;
     if (!FileReader) {
       reject(new Error("Could not read image."));
       return;
@@ -5999,9 +6030,15 @@ function formatReasoningLabel(value) {
 }
 
 // src/ui/desktop-notifications.mjs
+function windowGlobals() {
+  return (
+    /** @type {Record<string, any> | undefined} */
+    resolveActiveWindow()
+  );
+}
 async function requestDesktopNotificationPermission(NotificationApi) {
   const activeNotificationApi =
-    NotificationApi === void 0 ? resolveActiveWindow()?.Notification : NotificationApi;
+    NotificationApi === void 0 ? windowGlobals()?.Notification : NotificationApi;
   if (typeof activeNotificationApi !== "function") return false;
   if (activeNotificationApi.permission === "granted") return true;
   if (
@@ -6032,7 +6069,7 @@ function showDesktopRunNotification({
   documentRef,
   windowRef
 }) {
-  const activeWindow = resolveActiveWindow();
+  const activeWindow = windowGlobals();
   const activeNotificationApi =
     NotificationApi === void 0 ? activeWindow?.Notification : NotificationApi;
   const activeDocument = documentRef === void 0 ? activeWindow?.document : documentRef;
@@ -6084,6 +6121,10 @@ function refreshUiLanguage() {
 
 // src/plugin/settings-tab.mjs
 var PiAgentSettingTab = class extends import_obsidian7.PluginSettingTab {
+  /**
+   * @param {import("obsidian").App} app
+   * @param {import("./PiAgentPlugin.mjs").PiAgentPlugin} plugin
+   */
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -6129,8 +6170,11 @@ var PiAgentSettingTab = class extends import_obsidian7.PluginSettingTab {
   // callers in the plugin may still request a refresh through display(), so route
   // those calls to the declarative update API instead of replacing its DOM.
   display() {
-    if (typeof this.update === "function") {
-      this.update();
+    const declarativeUpdate =
+      /** @type {any} */
+      this.update;
+    if (typeof declarativeUpdate === "function") {
+      declarativeUpdate.call(this);
       return;
     }
     const { containerEl } = this;
@@ -6733,9 +6777,12 @@ var ExtensionUiModal = class extends import_obsidian10.Modal {
     if (this.request.method === "editor") field.value = String(this.request.prefill ?? "");
     else field.setAttr("placeholder", String(this.request.placeholder ?? ""));
     field.addEventListener("keydown", (event) => {
+      const keyEvent =
+        /** @type {KeyboardEvent} */
+        event;
       if (
-        event.key === "Enter" &&
-        (this.request.method !== "editor" || event.metaKey || event.ctrlKey)
+        keyEvent.key === "Enter" &&
+        (this.request.method !== "editor" || keyEvent.metaKey || keyEvent.ctrlKey)
       ) {
         event.preventDefault();
         this.finish(field.value);
@@ -7594,7 +7641,10 @@ function showThreadRowMenu(e, t2, n, s) {
               this.plugin.getThreadSessionStats(t2.id),
               this.plugin.getThreadSessionTree(t2.id)
             ]);
-            const entryCount = countSessionEntries(tree?.tree ?? []);
+            const entryCount = countSessionEntries(
+              /** @type {any} */
+              tree?.tree ?? []
+            );
             new f2.Notice(
               stats
                 ? `${stats.sessionFile}
@@ -7684,7 +7734,12 @@ function formatThreadMeta(e, t2) {
 function countSessionEntries(nodes) {
   return nodes.reduce(
     (count, node) =>
-      count + 1 + countSessionEntries(Array.isArray(node.children) ? node.children : []),
+      count +
+      1 +
+      countSessionEntries(
+        /** @type {any} */
+        Array.isArray(node.children) ? node.children : []
+      ),
     0
   );
 }
@@ -9258,6 +9313,58 @@ var PiAgentView = class extends f4.ItemView {
     this.nextDesktopNotificationRunId = 1;
     this.stickToBottom = true;
   }
+  // --- Members provided by the mixin modules above -------------------------
+  // Declared here so `this.xxx` resolves during type checking; assigning them in
+  // the constructor would create a second source of truth for values the mixins
+  // own. `any` is temporary until the view state moves into its own object.
+  /** @type {any} */
+  pendingActivity;
+  /** @type {any} */
+  pendingActivityTimer;
+  /** @type {any} */
+  currentRunContextUsage;
+  /** @type {any} */
+  streamingItemEl;
+  /** @type {any} */
+  streamingTextEl;
+  /** @type {any} */
+  liveThinkingSetExpanded;
+  /** @type {any} */
+  unloadMessageRenderComponents;
+  /** @type {any} */
+  clearPendingActivityTimer;
+  /** @type {any} */
+  clearCoalescedActivity;
+  /** @type {any} */
+  cancelStreamingFlush;
+  /** @type {any} */
+  appendStreamingDelta;
+  /** @type {any} */
+  appendStreamingThinkingDelta;
+  /** @type {any} */
+  handleRunEvent;
+  /** @type {any} */
+  setActivity;
+  /** @type {any} */
+  renderMessages;
+  /** @type {any} */
+  renderThreadList;
+  /** @type {any} */
+  showThreadList;
+  /** @type {any} */
+  renderPromptQueue;
+  /** @type {any} */
+  enqueuePrompt;
+  /** @type {any} */
+  runNextQueuedPrompt;
+  /** @type {any} */
+  handleMessageLinkClick;
+  /** @type {any} */
+  parseVaultLinkTarget;
+  /** @type {any} */
+  formatVaultLinkTarget;
+  /** @type {any} */
+  openVaultLink;
   getViewType() {
     return PI_AGENT_VIEW_TYPE;
   }
@@ -9868,6 +9975,7 @@ var PiAgentView = class extends f4.ItemView {
             await file.slice(0, Math.min(file.size, remaining + 4)).arrayBuffer()
           );
           const attachment = createPromptTextAttachment(
+            /** @type {any} */
             {
               bytes,
               fileName: file.name,
@@ -9906,7 +10014,14 @@ var PiAgentView = class extends f4.ItemView {
       } else {
         this.composerAttachments.push(
           createPromptTextAttachment(
-            { bytes, fileName: file.name, mimeType, source: "vault", path: file.path },
+            /** @type {any} */
+            {
+              bytes,
+              fileName: file.name,
+              mimeType,
+              source: "vault",
+              path: file.path
+            },
             MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.composerAttachments)
           )
         );
@@ -11252,8 +11367,15 @@ Pi CLI tools are controlled by the selected tool mode. They are not an OS-level 
 - Suggested fields: type, status, tags, project, area, created, updated.
 - Propose a Base config before creating it unless the user explicitly asks you to create it immediately.`;
 var PiAgentPlugin = class extends P.Plugin {
-  constructor() {
-    super(...arguments);
+  /**
+   * Obsidian may pass constructor arguments through to Plugin; forward the first
+   * two explicitly, which is the documented shape, and ignore the rest.
+   *
+   * @param {any} app
+   * @param {any} [manifest]
+   */
+  constructor(app, manifest) {
+    super(app, manifest);
     this.settings = DEFAULT_SETTINGS;
     this.messages = [];
     this.threadHistory = new ThreadStore();
@@ -11271,6 +11393,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.localPromptSteering = [];
     this.localPromptQueuePaused = false;
     this.promptEnricher = void 0;
+    this.extensionUiHandler = void 0;
     this.modelCatalogRefreshGate = new RuntimeCatalogRefreshGate();
     this.modelCatalogRefreshedAt = 0;
     this.modelCatalogGeneration = 0;
@@ -11309,6 +11432,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
         if (
+          /** @type {any} */
           file.extension === "md" &&
           this.annotationStore.list(oldPath).length > 0 &&
           !this.annotationStore.renamePath(oldPath, file.path)
@@ -11320,7 +11444,11 @@ var PiAgentPlugin = class extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file.extension === "md") this.annotationStore.deletePath(file.path);
+        if (
+          /** @type {any} */
+          file.extension === "md"
+        )
+          this.annotationStore.deletePath(file.path);
       })
     );
     this.registerView(PI_AGENT_VIEW_TYPE, (e) => new PiAgentView(e, this));
@@ -12150,13 +12278,18 @@ var PiAgentPlugin = class extends P.Plugin {
     if (annotations.length === 0) return annotations;
     const file = this.app.vault.getAbstractFileByPath(path6);
     if (!(file instanceof P.TFile) || file.extension !== "md") return annotations;
-    const activeEditor = this.app.workspace.activeEditor;
+    const activeEditor =
+      /** @type {any} */
+      this.app.workspace.activeEditor;
     let content = activeEditor?.file?.path === path6 ? activeEditor.editor?.getValue?.() : void 0;
     if (typeof content !== "string") {
-      const openLeaf = this.app.workspace
-        .getLeavesOfType("markdown")
-        .find((leaf) => leaf.view?.file?.path === path6 && leaf.view?.editor?.getValue);
-      content = openLeaf?.view?.editor?.getValue?.();
+      const openLeaf = this.app.workspace.getLeavesOfType("markdown").find((leaf) => {
+        const view =
+          /** @type {any} */
+          leaf.view;
+        return view?.file?.path === path6 && view?.editor?.getValue;
+      });
+      content = /** @type {any} */ openLeaf?.view?.editor?.getValue?.();
     }
     if (typeof content !== "string") content = await this.app.vault.read(file);
     return this.annotationStore.reanchorPath(path6, content);
@@ -12303,7 +12436,9 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   getVaultBasePath() {
     var t2;
-    let e = this.app.vault.adapter;
+    let e =
+      /** @type {any} */
+      this.app.vault.adapter;
     return (t2 = e.getBasePath) == null ? void 0 : t2.call(e);
   }
   getPluginDirectory() {

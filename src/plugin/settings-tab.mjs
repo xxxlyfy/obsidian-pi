@@ -15,6 +15,10 @@ import { requestDesktopNotificationPermission } from "../ui/desktop-notification
 import { refreshUiLanguage } from "./ui-language.mjs";
 
 export class PiAgentSettingTab extends PluginSettingTab {
+  /**
+   * @param {import("obsidian").App} app
+   * @param {import("./PiAgentPlugin.mjs").PiAgentPlugin} plugin
+   */
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -63,8 +67,10 @@ export class PiAgentSettingTab extends PluginSettingTab {
   // callers in the plugin may still request a refresh through display(), so route
   // those calls to the declarative update API instead of replacing its DOM.
   display() {
-    if (typeof this.update === "function") {
-      this.update();
+    // Present only on Obsidian builds that render settings declaratively.
+    const declarativeUpdate = /** @type {any} */ (this).update;
+    if (typeof declarativeUpdate === "function") {
+      declarativeUpdate.call(this);
       return;
     }
 

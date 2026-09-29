@@ -125,8 +125,15 @@ Pi CLI tools are controlled by the selected tool mode. They are not an OS-level 
 - Suggested fields: type, status, tags, project, area, created, updated.
 - Propose a Base config before creating it unless the user explicitly asks you to create it immediately.`;
 export class PiAgentPlugin extends P.Plugin {
-  constructor() {
-    super(...arguments);
+  /**
+   * Obsidian may pass constructor arguments through to Plugin; forward the first
+   * two explicitly, which is the documented shape, and ignore the rest.
+   *
+   * @param {any} app
+   * @param {any} [manifest]
+   */
+  constructor(app, manifest) {
+    super(app, manifest);
     this.settings = H;
     this.messages = [];
     this.threadHistory = new ThreadStore();
@@ -144,6 +151,8 @@ export class PiAgentPlugin extends P.Plugin {
     this.localPromptSteering = [];
     this.localPromptQueuePaused = false;
     this.promptEnricher = undefined;
+    /** @type {any} Extension UI handler, built on first use by getExtensionUiHandler(). */
+    this.extensionUiHandler = undefined;
     this.modelCatalogRefreshGate = new RuntimeCatalogRefreshGate();
     this.modelCatalogRefreshedAt = 0;
     this.modelCatalogGeneration = 0;
@@ -190,7 +199,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
         if (
-          file.extension === "md" &&
+          /** @type {any} */ (file).extension === "md" &&
           this.annotationStore.list(oldPath).length > 0 &&
           !this.annotationStore.renamePath(oldPath, file.path)
         )
@@ -201,7 +210,8 @@ export class PiAgentPlugin extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file.extension === "md") this.annotationStore.deletePath(file.path);
+        if (/** @type {any} */ (file).extension === "md")
+          this.annotationStore.deletePath(file.path);
       })
     );
     this.registerView(T, (e) => new PiAgentView(e, this));
@@ -475,7 +485,7 @@ export class PiAgentPlugin extends P.Plugin {
   }
   refreshOpenModelControls() {
     for (const leaf of this.app.workspace.getLeavesOfType(T)) {
-      leaf.view?.runSettings?.refresh?.();
+      /** @type {any} */ (leaf.view)?.runSettings?.refresh?.();
     }
     this.settingsTab?.display?.();
   }
@@ -726,6 +736,7 @@ export class PiAgentPlugin extends P.Plugin {
       : !1;
   }
   getExtensionUiHandler() {
+    // Built lazily and cached, because the handler closes over this plugin.
     this.extensionUiHandler ??= createExtensionUiHandler({
       select: (request) => showExtensionUiDialog(this.app, request),
       confirm: (request) => showExtensionUiDialog(this.app, request),
@@ -784,16 +795,17 @@ export class PiAgentPlugin extends P.Plugin {
   }
   setExtensionEditorText(text) {
     const leaf = this.app.workspace.getLeavesOfType(T)[0];
-    leaf?.view?.setExtensionEditorText?.(String(text ?? ""));
+    /** @type {any} */ (leaf?.view)?.setExtensionEditorText?.(String(text ?? ""));
   }
   refreshExtensionUiViews() {
     for (const leaf of this.app.workspace.getLeavesOfType(T)) {
-      leaf.view?.renderExtensionWidgets?.();
-      leaf.updateHeader?.();
+      /** @type {any} */ (leaf.view)?.renderExtensionWidgets?.();
+      /** @type {any} */ (leaf).updateHeader?.();
     }
   }
   refreshAnnotationBadges() {
-    for (const leaf of this.app.workspace.getLeavesOfType(T)) leaf.view?.renderToolBadges?.();
+    for (const leaf of this.app.workspace.getLeavesOfType(T))
+      /** @type {any} */ (leaf.view)?.renderToolBadges?.();
   }
   async activateView() {
     var n;
@@ -1052,13 +1064,14 @@ export class PiAgentPlugin extends P.Plugin {
     if (!(file instanceof P.TFile) || file.extension !== "md") return annotations;
     // Resolve against the exact current file at prompt time. Prefer an open
     // editor because vault reads can lag behind an unsaved CodeMirror change.
-    const activeEditor = this.app.workspace.activeEditor;
+    const activeEditor = /** @type {any} */ (this.app.workspace.activeEditor);
     let content = activeEditor?.file?.path === path ? activeEditor.editor?.getValue?.() : undefined;
     if (typeof content !== "string") {
-      const openLeaf = this.app.workspace
-        .getLeavesOfType("markdown")
-        .find((leaf) => leaf.view?.file?.path === path && leaf.view?.editor?.getValue);
-      content = openLeaf?.view?.editor?.getValue?.();
+      const openLeaf = this.app.workspace.getLeavesOfType("markdown").find((leaf) => {
+        const view = /** @type {any} */ (leaf.view);
+        return view?.file?.path === path && view?.editor?.getValue;
+      });
+      content = /** @type {any} */ (openLeaf?.view)?.editor?.getValue?.();
     }
     if (typeof content !== "string") content = await this.app.vault.read(file);
     return this.annotationStore.reanchorPath(path, content);
@@ -1205,7 +1218,7 @@ export class PiAgentPlugin extends P.Plugin {
   }
   getVaultBasePath() {
     var t;
-    let e = this.app.vault.adapter;
+    let e = /** @type {any} */ (this.app.vault.adapter);
     return (t = e.getBasePath) == null ? void 0 : t.call(e);
   }
   getPluginDirectory() {

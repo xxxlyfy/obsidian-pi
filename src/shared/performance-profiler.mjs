@@ -8,7 +8,8 @@
 import { heapUsedBytes, hostGlobals, resolveActiveWindow } from "./runtime.mjs";
 
 function createTextEncoder() {
-  const Encoder = resolveActiveWindow()?.TextEncoder ?? hostGlobals().TextEncoder;
+  const activeWindow = /** @type {Record<string, any> | undefined} */ (resolveActiveWindow());
+  const Encoder = activeWindow?.TextEncoder ?? hostGlobals().TextEncoder;
   return new Encoder();
 }
 

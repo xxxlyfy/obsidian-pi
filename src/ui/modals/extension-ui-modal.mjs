@@ -41,9 +41,10 @@ class ExtensionUiModal extends Modal {
     if (this.request.method === "editor") field.value = String(this.request.prefill ?? "");
     else field.setAttr("placeholder", String(this.request.placeholder ?? ""));
     field.addEventListener("keydown", (event) => {
+      const keyEvent = /** @type {KeyboardEvent} */ (event);
       if (
-        event.key === "Enter" &&
-        (this.request.method !== "editor" || event.metaKey || event.ctrlKey)
+        keyEvent.key === "Enter" &&
+        (this.request.method !== "editor" || keyEvent.metaKey || keyEvent.ctrlKey)
       ) {
         event.preventDefault();
         this.finish(field.value);

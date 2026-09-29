@@ -21,6 +21,7 @@ const ACTIVITY_STICKY_MS = 1200;
 // short enough to feel instant and long enough to absorb update bursts.
 const ACTIVITY_COALESCE_MS = 150;
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function setActivity(e, t, n = "") {
   let s = Date.now(),
     a = isStickyActivityKind(t),
@@ -32,6 +33,7 @@ export function setActivity(e, t, n = "") {
   this.applyActivity(e, t, n, a ? s + ACTIVITY_STICKY_MS : 0);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function applyActivity(e, t, n = "", s = 0) {
   let a = this.activityText === e && this.activityKind === t && this.activityDetail === n;
   this.activityText = e;
@@ -54,11 +56,13 @@ export function applyActivity(e, t, n = "", s = 0) {
   }
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function queuePendingActivity(e, t, n = "") {
   this.pendingActivity = { text: e, kind: t, detail: n };
   this.schedulePendingActivity();
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function schedulePendingActivity() {
   if (this.pendingActivityTimer) return;
   // The sticky-window flush is a delayed callback; capture the
@@ -71,12 +75,14 @@ export function schedulePendingActivity() {
   }, e);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function clearPendingActivityTimer() {
   if (this.pendingActivityTimer) window.clearTimeout(this.pendingActivityTimer);
   this.pendingActivityTimer = void 0;
   this.pendingActivityGuard = void 0;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function flushPendingActivity() {
   if (this.isStaleUiCallback?.(this.pendingActivityGuard)) {
     this.pendingActivity = void 0;
@@ -102,6 +108,7 @@ export function flushPendingActivity() {
 // Coalesce tool_update activity status into one update per
 // ACTIVITY_COALESCE_MS window. Immediate events call clearCoalescedActivity()
 // because they already reflect the latest state.
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function scheduleCoalescedActivity() {
   performanceProfiler.incrementCounter("activityCoalescedEvents");
   this.activityCoalescePending = true;
@@ -113,6 +120,7 @@ export function scheduleCoalescedActivity() {
   }, ACTIVITY_COALESCE_MS);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function clearCoalescedActivity() {
   if (this.activityCoalesceTimer) window.clearTimeout(this.activityCoalesceTimer);
   this.activityCoalesceTimer = void 0;
@@ -120,6 +128,7 @@ export function clearCoalescedActivity() {
   this.activityCoalesceGuard = void 0;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function flushCoalescedActivity() {
   if (this.activityCoalesceTimer) {
     window.clearTimeout(this.activityCoalesceTimer);
@@ -139,6 +148,7 @@ export function flushCoalescedActivity() {
   this.setActivity(status.label, status.kind, status.detail);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function updateActivityDom() {
   if (
     !this.running ||
@@ -160,6 +170,7 @@ export function updateActivityDom() {
   return !0;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function captureContextUsage(e) {
   let t = extractEventTokenUsage(e == null ? void 0 : e.raw),
     n = this.getContextUsageForTokens(t);
@@ -171,6 +182,7 @@ export function captureContextUsage(e) {
   }
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function getContextUsageForTokens(e) {
   var a;
   if (!e) return;
@@ -179,6 +191,7 @@ export function getContextUsageForTokens(e) {
   return createContextUsage(e, n);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function handleRunEvent(e) {
   let t = this.normalizeRunEventType(e.type);
   this.captureContextUsage(e);
@@ -321,6 +334,7 @@ export function handleRunEvent(e) {
   }
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function normalizeRunEventType(e) {
   return e === "auto_compaction_start" || e === "session_before_compact"
     ? "compaction_start"
@@ -329,6 +343,7 @@ export function normalizeRunEventType(e) {
       : e;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function trackActiveTool(e) {
   let t = getToolEventKey(e),
     n = String(e.toolName || e.message || "tool"),
@@ -336,10 +351,12 @@ export function trackActiveTool(e) {
   this.activeToolCalls.set(t, { name: n, args: s });
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function untrackActiveTool(e) {
   this.activeToolCalls.delete(getToolEventKey(e));
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function formatActiveToolStatus() {
   let e = [...this.activeToolCalls.values()];
   if (e.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };

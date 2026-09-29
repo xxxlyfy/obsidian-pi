@@ -4,6 +4,14 @@ import { parsePromptReferences } from "./prompt-references.mjs";
 import { getSlashCommands } from "./slash-commands.mjs";
 
 export class ContextBuilder {
+  /**
+   * @param {object} graph Vault graph used for links, backlinks, and search.
+   * @param {object} settings Plugin settings.
+   * @param {string} bundledInstructions System instructions shipped with the plugin.
+   * @param {string} vaultBasePath Absolute vault path used to resolve references.
+   * @param {() => any[]} [getPiCommands] Slash commands reported by Pi.
+   * @param {(path: string) => any[] | Promise<any[]>} [annotationProvider] Annotations attached to a note path.
+   */
   constructor(
     graph,
     settings,

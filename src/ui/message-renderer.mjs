@@ -2,6 +2,7 @@ import * as f from "obsidian";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import { cancelFrame, now, requestFrame } from "../shared/runtime.mjs";
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderMessages() {
   this.syncCurrentRunFlags();
   if (!this.messagesEl) return;
@@ -31,10 +32,12 @@ export function renderMessages() {
   this.isRenderingMessages = !1;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function restoreMessagesScroll(e, t, n) {
   t ? (e.scrollTop = e.scrollHeight) : (e.scrollTop = Math.min(n, e.scrollHeight));
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderEmptyState() {
   if (!this.messagesEl) return;
   let t = this.messagesEl
@@ -43,6 +46,7 @@ export function renderEmptyState() {
   (0, f.setIcon)(t, "messages-square");
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderMessage(e, t) {
   if (!this.messagesEl) return;
   let n = this.messagesEl.createDiv({
@@ -68,11 +72,13 @@ export function renderMessage(e, t) {
   this.renderPlainMessageContent(answer, e.content);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderToolErrors(container, errors) {
   for (const error of Array.isArray(errors) ? errors : [])
     container.createDiv({ cls: "pi-agent-tool-error", text: error });
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderThinkingDisclosure(
   container,
   thinking,
@@ -121,6 +127,7 @@ export function renderThinkingDisclosure(
   };
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function handleMessageLinkClick(event) {
   const link = event?.target?.closest?.("a.internal-link");
   if (!link) return false;
@@ -132,6 +139,7 @@ export function handleMessageLinkClick(event) {
   return true;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderPlainMessageContent(container, content) {
   performanceProfiler.incrementCounter("markdownRenderCount");
   container.empty();
@@ -162,11 +170,13 @@ export function renderPlainMessageContent(container, content) {
   });
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function unloadMessageRenderComponents() {
   for (const component of this.messageRenderComponents.splice(0)) component.unload();
   this.messageRenderComponentByElement = new WeakMap();
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderStreamingAssistantMessage() {
   if (!this.messagesEl) return;
   const item = this.messagesEl.createDiv({
@@ -202,6 +212,7 @@ export function renderStreamingAssistantMessage() {
   this.streamingThinkingDirty = false;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderStreamingAnswer() {
   const container = this.streamingTextEl;
   if (!container || container.isConnected === false) return false;
@@ -211,6 +222,7 @@ export function renderStreamingAnswer() {
   return true;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderStreamingThinking() {
   const container = this.liveThinkingTextEl;
   if (!container || container.isConnected === false) return false;
@@ -218,6 +230,7 @@ export function renderStreamingThinking() {
   return true;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderActivityMessage() {
   if (!this.messagesEl) return;
   const item = this.messagesEl.createDiv({
@@ -244,6 +257,7 @@ export function renderActivityMessage() {
   this.streamingThinkingDirty = false;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function appendStreamingDelta(delta) {
   if (!delta) return;
   this.activityText = "Responding";
@@ -260,6 +274,7 @@ export function appendStreamingDelta(delta) {
   this.scheduleStreamingFlush();
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function appendStreamingThinkingDelta(delta) {
   if (!delta) return;
   // Thinking uses the same single source -> frame
@@ -271,6 +286,8 @@ export function appendStreamingThinkingDelta(delta) {
 /**
  * At most one streaming flush per animation frame. Multiple
  * deltas collapse into a single rAF, then a single low-cost text DOM update.
+ *
+ * @this {import("./view/view-surface.mjs").PiAgentViewSurface}
  */
 export function scheduleStreamingFlush() {
   if (this.streamingFlushRaf !== undefined) return;
@@ -292,6 +309,7 @@ export function scheduleStreamingFlush() {
   });
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function cancelStreamingFlush() {
   if (this.streamingFlushRaf !== undefined) {
     cancelFrame(this.streamingFlushRaf);
@@ -300,6 +318,7 @@ export function cancelStreamingFlush() {
   this.streamingFlushGuard = undefined;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function flushStreaming() {
   if (!this.streamingAnswerDirty && !this.streamingThinkingDirty) return;
 
@@ -327,6 +346,7 @@ export function flushStreaming() {
   }
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 /**
  * Cancel the pending frame, flush synchronously and replace
  * the plain-text streaming container with one final Markdown render based on
@@ -334,6 +354,8 @@ export function flushStreaming() {
  *
  * Returns false when there is no connected streaming DOM to finalize (the
  * caller falls back to a full message re-render).
+ *
+ * @this {import("./view/view-surface.mjs").PiAgentViewSurface}
  */
 export function finalizeStreamingContent() {
   const answer = this.streamingAssistantContent || "";
@@ -363,6 +385,7 @@ export function finalizeStreamingContent() {
   return true;
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderRoleLabel(e, t, n, s) {
   let a = e.createDiv({ cls: "pi-agent-message-role" }),
     o = a.createSpan({ cls: "pi-agent-message-role-title" }),

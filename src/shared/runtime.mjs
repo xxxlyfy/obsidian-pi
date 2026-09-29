@@ -49,6 +49,9 @@ export function structuredCloneSafe(value) {
  * Host globals, used only as a fallback for environments without a DOM window
  * (unit tests under Node). Every UI path must go through resolveActiveWindow()
  * instead, so a view in a popout window keeps working.
+ *
+ * @returns {Record<string, any>} The host global, typed loosely because the
+ * fallback reaches for platform APIs that the DOM lib does not declare.
  */
 export function hostGlobals() {
   return globalThis;
@@ -96,10 +99,13 @@ export function cancelFrame(handle) {
 
 /**
  * Current JavaScript heap usage in bytes, when the host exposes it. Chromium
- * reports it through `performance.memory`; other hosts return undefined.
+ * reports it through the non-standard `performance.memory`; other hosts return
+ * undefined.
  */
 export function heapUsedBytes() {
-  const performanceApi = resolveActiveWindow()?.performance ?? hostGlobals().performance;
+  const performanceApi = /** @type {Record<string, any> | undefined} */ (
+    resolveActiveWindow()?.performance ?? hostGlobals().performance
+  );
   const used = performanceApi?.memory?.usedJSHeapSize;
   return Number.isFinite(used) ? used : undefined;
 }

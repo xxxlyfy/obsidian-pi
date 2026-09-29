@@ -4,6 +4,23 @@ export function calculateContextTokens(usage) {
     : 0;
 }
 
+/**
+ * @typedef {object} TokenUsage
+ * @property {number} input
+ * @property {number} output
+ * @property {number} cacheRead
+ * @property {number} cacheWrite
+ * @property {number} totalTokens
+ * @property {number} [contextWindow]
+ * @property {string} [provider] Set by the event layer from the assistant message.
+ * @property {string} [model] Set by the event layer from the assistant message.
+ * @property {string} [modelId] Set by the event layer as `provider/model`.
+ */
+
+/**
+ * @param {any} usage
+ * @returns {TokenUsage | undefined}
+ */
 export function normalizeTokenUsage(usage) {
   if (!usage) return undefined;
 

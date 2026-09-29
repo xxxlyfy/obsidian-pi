@@ -20,6 +20,21 @@ export function formatPiCliFailure(options = {}) {
   return diagnosePiCliFailure(options).message;
 }
 
+/**
+ * @typedef {object} PiCliFailureInput
+ * @property {string} [context] What was being attempted, used as the message prefix.
+ * @property {unknown} [error] Thrown error, inspected for ENOENT.
+ * @property {string | Buffer} [stderr] Captured stderr.
+ * @property {string | Buffer} [stdout] Captured stdout.
+ * @property {number | null} [exitCode] Process exit code.
+ */
+
+/**
+ * Classify a failed Pi CLI invocation into an actionable message.
+ *
+ * @param {PiCliFailureInput} [options]
+ * @returns {{ kind: "pi-missing" | "node-missing" | "generic", message: string }}
+ */
 export function diagnosePiCliFailure({
   context = "Could not run Pi CLI",
   error,

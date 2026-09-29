@@ -1,8 +1,13 @@
 import { resolveActiveWindow } from "../shared/runtime.mjs";
 
+/** @returns {Record<string, any> | undefined} */
+function windowGlobals() {
+  return /** @type {Record<string, any> | undefined} */ (resolveActiveWindow());
+}
+
 export async function requestDesktopNotificationPermission(NotificationApi) {
   const activeNotificationApi =
-    NotificationApi === undefined ? resolveActiveWindow()?.Notification : NotificationApi;
+    NotificationApi === undefined ? windowGlobals()?.Notification : NotificationApi;
   if (typeof activeNotificationApi !== "function") return false;
   if (activeNotificationApi.permission === "granted") return true;
   if (
@@ -27,6 +32,20 @@ export async function openNotificationThread(plugin, threadId, viewType) {
   return true;
 }
 
+/**
+ * @typedef {object} DesktopNotificationInput
+ * @property {any} runId
+ * @property {Set<any>} sentRunIds
+ * @property {string} [body]
+ * @property {() => any} [onClick]
+ * @property {any} [NotificationApi]
+ * @property {any} [documentRef]
+ * @property {any} [windowRef]
+ */
+
+/**
+ * @param {DesktopNotificationInput} input
+ */
 export function showDesktopRunNotification({
   runId,
   sentRunIds,
@@ -36,7 +55,7 @@ export function showDesktopRunNotification({
   documentRef,
   windowRef
 }) {
-  const activeWindow = resolveActiveWindow();
+  const activeWindow = windowGlobals();
   const activeNotificationApi =
     NotificationApi === undefined ? activeWindow?.Notification : NotificationApi;
   const activeDocument = documentRef === undefined ? activeWindow?.document : documentRef;

@@ -29,16 +29,23 @@ npm run ci           # the full quality gate, see below
 `npm run ci` is the single gate used by CI and should pass before every commit.
 It runs, in order:
 
-| Step          | Command                        | What it protects                                         |
-| ------------- | ------------------------------ | -------------------------------------------------------- |
-| Build         | `npm run build`                | `main.js` is generated from `src/`, never edited by hand |
-| Freshness     | `npm run build:check`          | A stale committed bundle fails the build                 |
-| Format        | `npm run format:check`         | Prettier, including the generated bundle                 |
-| Lint          | `npm run lint`                 | ESLint over `src`, `scripts`, `tests`                    |
-| Obsidian lint | `npm run lint:obsidian:errors` | Platform rules (timers, popout windows, UI text)         |
-| Types         | `npm run typecheck`            | `tsc --noEmit`                                           |
-| Tests         | `npm test`                     | Vitest unit and synthetic performance tests              |
-| Version       | `npm run version:check`        | `package.json`, `manifest.json`, `versions.json` agree   |
+| Step          | Command                        | What it protects                                                      |
+| ------------- | ------------------------------ | --------------------------------------------------------------------- |
+| Build         | `npm run build`                | `main.js` is generated from `src/`, never edited by hand              |
+| Freshness     | `npm run build:check`          | A stale committed bundle fails the build                              |
+| Format        | `npm run format:check`         | Prettier, including the generated bundle                              |
+| Lint          | `npm run lint`                 | ESLint over `src`, `scripts`, `tests`                                 |
+| Obsidian lint | `npm run lint:obsidian:errors` | Platform rules (timers, popout windows, UI text)                      |
+| Types         | `npm run typecheck`            | `tsc --noEmit` for tests/scripts, plus `tsconfig.src.json` for `src/` |
+| Tests         | `npm test`                     | Vitest unit and synthetic performance tests                           |
+| Version       | `npm run version:check`        | `package.json`, `manifest.json`, `versions.json` agree                |
+
+`tsconfig.src.json` turns on `checkJs` for `src/`, which is plain JavaScript. It
+keeps `strict` off on purpose: the source is untyped, so `noImplicitAny` and
+`strictNullChecks` would report thousands of annotation-only findings and hide
+the real ones. What stays enabled still catches unknown properties, misspelled
+methods, and wrong argument shapes. When the source gains types, flip those
+strict flags on in that file.
 
 ### Architecture
 

@@ -55,7 +55,7 @@ export function checkPiInstallation(piExecutablePath = "") {
     };
   }
 
-  const versionText = (result.stdout || result.stderr || "Pi CLI found.").trim();
+  const versionText = String(result.stdout || result.stderr || "Pi CLI found.").trim();
   const version = extractVersion(versionText);
   if (version && compareVersions(version, MINIMUM_PI_VERSION) < 0) {
     return {

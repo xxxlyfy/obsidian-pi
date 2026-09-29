@@ -49,6 +49,19 @@ export function normalizeProviderId(providerOrModel) {
     .replace(/[._\s]+/g, "-");
 }
 
+/**
+ * @typedef {object} ProviderBrand
+ * @property {string} provider Normalized provider id.
+ * @property {RegExp} [match] Matcher that selected this brand.
+ * @property {string} name Human-readable provider name.
+ * @property {{ path: string }} [icon] Inline SVG path, when the brand has a mark.
+ * @property {string} [mark] Short monogram, when the brand has no SVG path.
+ */
+
+/**
+ * @param {string | object} providerOrModel
+ * @returns {ProviderBrand}
+ */
 export function resolveProviderBrand(providerOrModel) {
   const provider = normalizeProviderId(providerOrModel);
   const brand = PROVIDER_BRANDS.find((candidate) => candidate.match.test(provider));

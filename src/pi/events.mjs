@@ -25,9 +25,9 @@ export function handlePiEvent(event, state, callbacks) {
     normalizePiEvent(event, state, callbacks);
   } finally {
     if (profiling) {
-      const now = now();
-      profiler.recordDuration("normalize", now - normalizeStartedAt);
-      profiler.recordDuration("event", now - startedAt);
+      const finishedAt = now();
+      profiler.recordDuration("normalize", finishedAt - normalizeStartedAt);
+      profiler.recordDuration("event", finishedAt - startedAt);
     }
   }
 }

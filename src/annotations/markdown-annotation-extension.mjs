@@ -34,7 +34,7 @@ export function createMarkdownAnnotationExtension(controller) {
       eventHandlers: {
         mousemove(event, view) {
           if (!controller.isPicking(view)) return false;
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const line = closestLineElement(event.target);
           if (line) controller.hoverPickTarget(view, view.posAtDOM(line));
           return false;
         },
@@ -56,7 +56,7 @@ export function createMarkdownAnnotationExtension(controller) {
             event.preventDefault();
             return true;
           }
-          const line = event.target?.closest?.(".cm-line") ?? null;
+          const line = closestLineElement(event.target);
           if (!line) return false;
           event.preventDefault();
           controller.choosePickTarget(view, view.posAtDOM(line));
@@ -82,6 +82,17 @@ export function createMarkdownAnnotationExtension(controller) {
 
 export function requestAnnotationRefresh(view) {
   view?.dispatch?.({ effects: refreshAnnotations.of(null) });
+}
+
+/**
+ * CodeMirror reports pointer targets as EventTarget, but a mouse event target is
+ * an element. Narrow it here so the call site can use closest() safely.
+ *
+ * @param {EventTarget | null} target
+ * @returns {Element | null}
+ */
+function closestLineElement(target) {
+  return target instanceof Element ? target.closest(".cm-line") : null;
 }
 
 function buildDecorations(view, controller) {

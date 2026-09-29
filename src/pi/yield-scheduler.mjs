@@ -13,7 +13,8 @@ import { hostGlobals, now, resolveActiveWindow } from "../shared/runtime.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
 
 function defaultChannelFactory() {
-  const MessageChannelApi = resolveActiveWindow()?.MessageChannel ?? hostGlobals().MessageChannel;
+  const activeWindow = /** @type {Record<string, any> | undefined} */ (resolveActiveWindow());
+  const MessageChannelApi = activeWindow?.MessageChannel ?? hostGlobals().MessageChannel;
   return typeof MessageChannelApi === "function" ? () => new MessageChannelApi() : undefined;
 }
 
@@ -25,9 +26,24 @@ function defaultScheduler() {
   return resolveActiveWindow()?.scheduler;
 }
 
+/** @param {any} scheduler */
+function hasYield(scheduler) {
+  return typeof scheduler?.yield === "function";
+}
+
+/**
+ * @typedef {object} YieldSchedulerOptions
+ * @property {{ yield: () => Promise<void> }} [scheduler] Injected priority scheduler.
+ * @property {any} [channelFactory] Creates a MessageChannel-like pair.
+ * @property {{ setTimeout: (fn: () => void, ms: number) => any }} [timeoutHost] Timer host.
+ * @property {"scheduler" | "message-channel" | "timeout"} [strategy] Force one strategy.
+ */
+
 export class YieldScheduler {
+  /** @param {YieldSchedulerOptions} [options] */
   constructor(options = {}) {
-    this.scheduler = "scheduler" in options ? options.scheduler : defaultScheduler();
+    this.scheduler =
+      "scheduler" in options ? /** @type {any} */ (options.scheduler) : defaultScheduler();
     this.channelFactory =
       "channelFactory" in options ? options.channelFactory : defaultChannelFactory();
     this.timeoutHost = options.timeoutHost ?? defaultTimerHost();
@@ -40,7 +56,7 @@ export class YieldScheduler {
 
   resolveStrategy() {
     if (this.forceStrategy) return this.forceStrategy;
-    if (typeof this.scheduler?.yield === "function") return "scheduler";
+    if (hasYield(this.scheduler)) return "scheduler";
     if (typeof this.channelFactory === "function") return "message-channel";
     return "timeout";
   }

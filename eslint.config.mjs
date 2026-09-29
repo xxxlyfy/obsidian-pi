@@ -5,6 +5,7 @@ const globals = {
   clearTimeout: "readonly",
   console: "readonly",
   document: "readonly",
+  Element: "readonly",
   globalThis: "readonly",
   navigator: "readonly",
   process: "readonly",

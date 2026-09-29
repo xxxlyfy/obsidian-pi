@@ -99,6 +99,21 @@ const SUPPORTED_TEXT_MIME_TYPES = new Set([
   "application/x-shellscript"
 ]);
 
+/**
+ * @typedef {object} QueuedPromptInput
+ * @property {string} [prompt]
+ * @property {any[]} [images]
+ * @property {any[]} [attachments]
+ * @property {any[]} [annotations]
+ * @property {string} [contextFilePath]
+ * @property {string} [threadId]
+ * @property {string} [id]
+ * @property {number} [createdAt]
+ */
+
+/**
+ * @param {QueuedPromptInput} [input]
+ */
 export function createQueuedPrompt({
   prompt = "",
   images = [],
@@ -413,7 +428,8 @@ function encodeBase64(binary) {
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const FileReader = resolveActiveWindow()?.FileReader;
+    const activeWindow = /** @type {Record<string, any> | undefined} */ (resolveActiveWindow());
+    const FileReader = activeWindow?.FileReader;
     if (!FileReader) {
       reject(new Error("Could not read image."));
       return;

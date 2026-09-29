@@ -9,6 +9,10 @@ import {
 } from "./annotation-model.mjs";
 
 export class AnnotationStore {
+  /**
+   * @param {unknown} rawData Persisted annotation data, normalized on load.
+   * @param {(data: object) => void} [onChange] Called after every mutation with the new data.
+   */
   constructor(rawData, onChange = () => {}) {
     this.data = normalizeAnnotationData(rawData);
     this.onChange = onChange;

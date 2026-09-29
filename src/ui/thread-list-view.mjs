@@ -7,11 +7,13 @@ import { t as tr, tCount as trCount } from "../shared/i18n/index.mjs";
 
 const PI_BRAND_NAME = "Pi";
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function showThreadList() {
   this.showingThreadList = !0;
   this.renderThreadList();
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderThreadList() {
   var a;
   let e = this.containerEl.children[1],
@@ -63,6 +65,7 @@ export function renderThreadList() {
     : t.forEach((m) => this.renderThreadListRow(h, m, m.id === n.id));
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function renderThreadListRow(e, t, n) {
   let s = e.createDiv({
       cls: `pi-agent-thread-list-row${n ? " is-current" : ""}`
@@ -150,6 +153,7 @@ export async function deleteChats() {
   this.renderThreadList();
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function showThreadRowMenu(e, t, n, s) {
   let a = new f.Menu();
   a.addItem((o) =>
@@ -185,7 +189,7 @@ export function showThreadRowMenu(e, t, n, s) {
               this.plugin.getThreadSessionStats(t.id),
               this.plugin.getThreadSessionTree(t.id)
             ]);
-            const entryCount = countSessionEntries(tree?.tree ?? []);
+            const entryCount = countSessionEntries(/** @type {any} */ (tree?.tree ?? []));
             new f.Notice(
               stats
                 ? `${stats.sessionFile}\n${stats.totalMessages} messages · ${entryCount} tree entries · ${stats.tokens?.total ?? 0} tokens · $${Number(stats.cost ?? 0).toFixed(4)}`
@@ -220,6 +224,7 @@ export function showThreadRowMenu(e, t, n, s) {
   a.showAtMouseEvent(e);
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function startThreadListRename(e, t) {
   let n = document.createElement("input");
   n.addClass("pi-agent-thread-list-title-input");
@@ -247,6 +252,7 @@ export function startThreadListRename(e, t) {
   n.select();
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function toggleThreadFavorite(e) {
   this.plugin.toggleThreadFavorite(e.id)
     ? this.renderThreadList()
@@ -268,6 +274,7 @@ export async function deleteThreadFromList(e) {
   }
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function formatThreadMeta(e, t) {
   let n = this.plugin.getThreadDisplayMessageCount
       ? this.plugin.getThreadDisplayMessageCount(e)
@@ -279,11 +286,14 @@ export function formatThreadMeta(e, t) {
 export function countSessionEntries(nodes) {
   return nodes.reduce(
     (count, node) =>
-      count + 1 + countSessionEntries(Array.isArray(node.children) ? node.children : []),
+      count +
+      1 +
+      countSessionEntries(/** @type {any} */ (Array.isArray(node.children) ? node.children : [])),
     0
   );
 }
 
+/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function formatThreadDate(e) {
   try {
     return new Date(e).toLocaleString();

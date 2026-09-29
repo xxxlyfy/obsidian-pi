@@ -41,6 +41,15 @@ import { now } from "../shared/runtime.mjs";
 // Aliased: `t` is already a local identifier throughout this view.
 import { t as tr } from "../shared/i18n/index.mjs";
 
+/**
+ * Chat view. Its methods are assembled here plus the mixin modules imported
+ * below (message-renderer, run-activity-state, prompt-queue, thread-list-view,
+ * vault-link-actions), which all operate on this same instance.
+ *
+ * The members declared after the constructor with `@type` tags are provided by
+ * those mixins at runtime. Declaring them makes the composition visible and,
+ * with `checkJs` enabled for `src/`, type-checked.
+ */
 export class PiAgentView extends f.ItemView {
   constructor(e, t) {
     super(e);
@@ -84,6 +93,36 @@ export class PiAgentView extends f.ItemView {
     this.nextDesktopNotificationRunId = 1;
     this.stickToBottom = !0;
   }
+
+  // --- Members provided by the mixin modules above -------------------------
+  // Declared here so `this.xxx` resolves during type checking; assigning them in
+  // the constructor would create a second source of truth for values the mixins
+  // own. `any` is temporary until the view state moves into its own object.
+  /** @type {any} */ pendingActivity;
+  /** @type {any} */ pendingActivityTimer;
+  /** @type {any} */ currentRunContextUsage;
+  /** @type {any} */ streamingItemEl;
+  /** @type {any} */ streamingTextEl;
+  /** @type {any} */ liveThinkingSetExpanded;
+  /** @type {any} */ unloadMessageRenderComponents;
+  /** @type {any} */ clearPendingActivityTimer;
+  /** @type {any} */ clearCoalescedActivity;
+  /** @type {any} */ cancelStreamingFlush;
+  /** @type {any} */ appendStreamingDelta;
+  /** @type {any} */ appendStreamingThinkingDelta;
+  /** @type {any} */ handleRunEvent;
+  /** @type {any} */ setActivity;
+  /** @type {any} */ renderMessages;
+  /** @type {any} */ renderThreadList;
+  /** @type {any} */ showThreadList;
+  /** @type {any} */ renderPromptQueue;
+  /** @type {any} */ enqueuePrompt;
+  /** @type {any} */ runNextQueuedPrompt;
+  /** @type {any} */ handleMessageLinkClick;
+  /** @type {any} */ parseVaultLinkTarget;
+  /** @type {any} */ formatVaultLinkTarget;
+  /** @type {any} */ openVaultLink;
+
   getViewType() {
     return T;
   }
@@ -693,13 +732,13 @@ export class PiAgentView extends f.ItemView {
             await file.slice(0, Math.min(file.size, remaining + 4)).arrayBuffer()
           );
           const attachment = createPromptTextAttachment(
-            {
+            /** @type {any} */ ({
               bytes,
               fileName: file.name,
               mimeType: file.type,
               source: "local",
               originalSize: file.size
-            },
+            }),
             remaining
           );
           this.composerAttachments.push(attachment);
@@ -731,7 +770,13 @@ export class PiAgentView extends f.ItemView {
       } else {
         this.composerAttachments.push(
           createPromptTextAttachment(
-            { bytes, fileName: file.name, mimeType, source: "vault", path: file.path },
+            /** @type {any} */ ({
+              bytes,
+              fileName: file.name,
+              mimeType,
+              source: "vault",
+              path: file.path
+            }),
             MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.composerAttachments)
           )
         );
