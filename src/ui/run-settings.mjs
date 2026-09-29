@@ -1,10 +1,11 @@
 import { Notice, setIcon } from "obsidian";
 import {
   CUSTOM_MODEL_VALUE,
+  getLocalizedToolModeShortLabel,
   getResolvedReasoning,
-  getSelectedModelInfo,
-  getToolModeShortLabel
+  getSelectedModelInfo
 } from "../plugin/settings.mjs";
+import { t } from "../shared/i18n/index.mjs";
 import { ModelPickerModal, ThinkingPickerModal } from "./modals/model-picker-modal.mjs";
 import { ToolModePickerModal } from "./modals/tool-mode-picker-modal.mjs";
 import { confirmWithModal } from "./modals/confirm-modal.mjs";
@@ -58,9 +59,9 @@ export class RunSettingsControls {
 
     this.addPickerSetting(
       containerEl,
-      "Tool mode",
+      t("runSettings.toolMode"),
       this.getToolModeIcon(),
-      getToolModeShortLabel(this.plugin.settings.sandboxMode),
+      getLocalizedToolModeShortLabel(this.plugin.settings.sandboxMode),
       async () => {
         new ToolModePickerModal(this.plugin.app, this.plugin.settings, async (value) => {
           await this.applyToolMode(value);
@@ -83,7 +84,7 @@ export class RunSettingsControls {
     buttonEl.addEventListener("click", async (event) => {
       event.preventDefault();
       buttonEl.disabled = true;
-      labelEl.setText("Loading…");
+      labelEl.setText(t("common.loading"));
       try {
         await onClick();
       } catch (error) {
@@ -159,10 +160,10 @@ export class RunSettingsControls {
     const writeModes = ["edit", "full-agent", "workspace-write"];
     if (writeModes.includes(value) && !this.plugin.settings.acknowledgedToolRisk) {
       const confirmed = await confirmWithModal(this.plugin.app, {
-        title: "Enable write tools?",
-        message:
-          "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
-        confirmText: "Enable tools",
+        title: t("confirm.writeTools.title"),
+        message: t("confirm.writeTools.message"),
+        confirmText: t("confirm.writeTools.confirm"),
+        cancelText: t("common.cancel"),
         warning: true
       });
       if (!confirmed) return;

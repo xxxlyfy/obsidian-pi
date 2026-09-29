@@ -1,3 +1,5 @@
+import { t, tCount } from "../shared/i18n/index.mjs";
+
 export function planBulkThreadDeletion(threads, runningThreadIds = []) {
   const running = new Set(runningThreadIds);
   const createScope = (candidates) => {
@@ -24,11 +26,10 @@ export function planBulkThreadDeletion(threads, runningThreadIds = []) {
 }
 
 export function formatBulkDeleteResult({ deletedCount, skippedCount, createdEmptyChat }) {
-  const deleted = `${deletedCount} chat${deletedCount === 1 ? "" : "s"} deleted`;
-  const skipped =
-    skippedCount > 0
-      ? `; ${skippedCount} active chat${skippedCount === 1 ? " was" : "s were"} skipped`
-      : "";
-  const replacement = createdEmptyChat ? "; a new empty chat was created" : "";
-  return `${deleted}${skipped}${replacement}. Local Pi sessions were kept.`;
+  const parts = [tCount("deleteThreads.result.deleted", deletedCount)];
+  if (skippedCount > 0) parts.push(tCount("deleteThreads.result.skipped", skippedCount));
+  if (createdEmptyChat) parts.push(t("deleteThreads.result.created"));
+
+  const body = parts.join(t("deleteThreads.result.sep"));
+  return `${body}${t("deleteThreads.result.tail")}${t("deleteThreads.result.suffix")}`;
 }

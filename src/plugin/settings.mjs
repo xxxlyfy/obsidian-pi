@@ -1,3 +1,5 @@
+import { t } from "../shared/i18n/index.mjs";
+
 export const CUSTOM_MODEL_VALUE = "__custom";
 
 const REASONING_LABELS = {
@@ -96,6 +98,43 @@ export function getReasoningOptions(settings) {
   return options;
 }
 
+const REASONING_KEYS = {
+  off: "reasoning.off",
+  minimal: "reasoning.minimal",
+  low: "reasoning.low",
+  medium: "reasoning.medium",
+  high: "reasoning.high",
+  xhigh: "reasoning.xhigh",
+  max: "reasoning.max"
+};
+
+const REASONING_SHORT_KEYS = {
+  minimal: "reasoning.minimal.short",
+  max: "reasoning.max.short"
+};
+
+export function getLocalizedReasoningLabel(value, options = {}) {
+  const key = REASONING_KEYS[value];
+  if (!key) return value;
+  const shortKey = options.short ? REASONING_SHORT_KEYS[value] : undefined;
+  return t(shortKey ?? key);
+}
+
+export function getLocalizedReasoningOptions(settings) {
+  const options = getReasoningOptions(settings);
+  const resolved = getResolvedReasoning(settings);
+  return Object.fromEntries(
+    Object.entries(options).map(([value]) => [
+      value,
+      value
+        ? getLocalizedReasoningLabel(value)
+        : REASONING_KEYS[resolved]
+          ? t(REASONING_KEYS[resolved])
+          : t("reasoning.automatic")
+    ])
+  );
+}
+
 export function getResolvedReasoning(settings) {
   if (settings.reasoningEffort) return settings.reasoningEffort;
 
@@ -146,6 +185,37 @@ export function getToolModePickerItems() {
 
 export function getToolModeShortLabel(value) {
   return getToolModePickerItems().find((item) => item.value === value)?.primary ?? "";
+}
+
+const TOOL_MODE_KEYS = {
+  chat: "toolMode.chat",
+  "read-only": "toolMode.readOnly",
+  edit: "toolMode.edit",
+  "full-agent": "toolMode.fullAgent"
+};
+
+// Localized variants. The English builders above stay untouched for callers that
+// have not been localized yet.
+export function getLocalizedToolModeOptions() {
+  return Object.fromEntries(
+    Object.entries(TOOL_MODE_KEYS).map(([value, key]) => [
+      value,
+      `${t(`${key}.primary`)} — ${t(`${key}.secondary`)}`
+    ])
+  );
+}
+
+export function getLocalizedToolModePickerItems() {
+  return Object.entries(TOOL_MODE_KEYS).map(([value, key]) => ({
+    value,
+    primary: t(`${key}.primary`),
+    secondary: t(`${key}.secondary`)
+  }));
+}
+
+export function getLocalizedToolModeShortLabel(value) {
+  const key = TOOL_MODE_KEYS[value];
+  return key ? t(`${key}.primary`) : "";
 }
 
 function normalizeString(value) {

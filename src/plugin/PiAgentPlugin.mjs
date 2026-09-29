@@ -15,8 +15,10 @@ import {
 } from "../pi/extension-ui.mjs";
 import { PiModelCatalog } from "../pi/model-catalog.mjs";
 import { getCompactInstructions, PiRunner } from "../pi/runner.mjs";
+import { t } from "../shared/i18n/index.mjs";
 import { CUSTOM_MODEL_VALUE as b, DEFAULT_SETTINGS as H, normalizeSettings } from "./settings.mjs";
 import { PiAgentSettingTab } from "./settings-tab.mjs";
+import { refreshUiLanguage } from "./ui-language.mjs";
 import {
   PI_AGENT_DISPLAY_NAME as Ce,
   PI_AGENT_ICON_ID as I,
@@ -152,6 +154,7 @@ export class PiAgentPlugin extends P.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    refreshUiLanguage();
     this.profiler = performanceProfiler;
 
     if (!P.Platform.isDesktopApp) {
@@ -391,7 +394,7 @@ export class PiAgentPlugin extends P.Plugin {
   checkPiInstallation(showSuccess) {
     let e = checkPiInstallation(this.settings.piExecutablePath);
     if (e.ok) {
-      showSuccess && new P.Notice(`Pi CLI is available: ${e.version || e.message}`);
+      showSuccess && new P.Notice(t("notice.cliAvailable", { version: e.version || e.message }));
       return e;
     }
 
@@ -406,7 +409,10 @@ export class PiAgentPlugin extends P.Plugin {
     if (showNotice) {
       new P.Notice(
         result.ok
-          ? `Loaded ${this.settings.availableModels.length} Pi models; default ${this.settings.effectiveModel}.`
+          ? t("notice.modelsLoaded", {
+              count: this.settings.availableModels.length,
+              model: this.settings.effectiveModel
+            })
           : this.modelCatalogError
       );
     }

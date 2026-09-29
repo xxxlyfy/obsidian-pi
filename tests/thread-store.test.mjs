@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ThreadStore } from "../src/threads/thread-store.mjs";
+import { setLocale } from "../src/shared/i18n/index.mjs";
+
+afterEach(() => setLocale("en"));
 
 describe("ThreadStore", () => {
   it("creates a current thread from legacy messages", () => {
@@ -128,6 +131,34 @@ describe("ThreadStore", () => {
     expect(store.listThreads({ includeArchived: true })).toEqual([
       expect.objectContaining({ id: result.createdThreadId, title: "New chat", messages: [] })
     ]);
+  });
+
+  it("creates default titles in the active language and keeps auto-titling across languages", () => {
+    setLocale("zh-cn");
+
+    const chineseStore = new ThreadStore();
+    expect(chineseStore.getCurrentThread().title).toBe("新对话");
+    expect(chineseStore.forkCurrentThread(undefined)).toBeUndefined();
+
+    chineseStore.addMessage({ role: "user", content: "分析这份笔记", createdAt: 1 });
+    expect(chineseStore.getCurrentThread().title).toBe("分析这份笔记");
+
+    // A thread created while English was active still auto-titles after switching.
+    setLocale("en");
+    const englishStore = new ThreadStore();
+    const englishThread = englishStore.startNewThread();
+    expect(englishThread.title).toBe("New chat");
+
+    setLocale("zh-cn");
+    englishStore.addMessageToThread(englishThread.id, {
+      role: "user",
+      content: "Summarize this note",
+      createdAt: 2
+    });
+    expect(englishStore.getThread(englishThread.id).title).toBe("Summarize this note");
+
+    const fork = englishStore.forkCurrentThread("forked.jsonl");
+    expect(fork.title).toBe("Summarize this note（分叉）");
   });
 
   it("preserves completed thinking and visible tool errors", () => {

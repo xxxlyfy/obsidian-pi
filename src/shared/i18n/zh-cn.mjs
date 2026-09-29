@@ -1,0 +1,205 @@
+// Simplified Chinese strings for the Pi Agent settings surfaces.
+// Keys must match src/shared/i18n/en.mjs exactly.
+export default {
+  "common.loading": "加载中…",
+  "common.loadingThinking": "正在加载思考等级…",
+  "common.cancel": "取消",
+
+  "settings.group.advanced": "高级",
+  "settings.group.piCli": "Pi CLI",
+  "settings.group.skills": "技能",
+  "settings.group.context": "上下文与文件访问",
+
+  "settings.model.name": "模型",
+  "settings.model.desc":
+    "来自 Pi 内置与自定义模型注册表的 provider/model 标识。选择默认项将跟随 ~/.pi/agent/settings.json 或 .pi/settings.json。",
+  "settings.model.chooseTooltip": "选择模型",
+  "settings.model.refresh": "刷新",
+  "settings.model.refreshTooltip": "从 Pi 刷新模型列表",
+  "settings.model.refreshing": "正在刷新…",
+  "settings.model.customFallback": "自定义模型",
+  "settings.model.piDefault": "Pi 默认",
+
+  "settings.thinking.name": "思考等级",
+  "settings.thinking.desc": "仅控制推理强度。可选值来自 Pi 返回的当前模型。",
+  "settings.thinking.chooseTooltip": "选择思考等级",
+
+  "settings.toolMode.name": "工具模式",
+  "settings.toolMode.desc": "控制启用哪些 Pi CLI 工具。工具模式不是操作系统级沙箱。",
+
+  "settings.desktopNotifications.name": "桌面完成通知",
+  "settings.desktopNotifications.desc": "Obsidian 未聚焦时，在代理运行结束后发送通知。",
+  "settings.desktopNotifications.unavailable":
+    "桌面通知不可用或未获授权。你可以在操作系统的通知设置中启用它。",
+
+  "settings.extensionStatus.name": "显示扩展状态",
+  "settings.extensionStatus.desc": "在 Obsidian 状态栏显示 Pi 扩展上报的状态消息。",
+
+  "settings.customInstructions.name": "自定义指令",
+  "settings.customInstructions.desc": "追加到每次 Pi 运行的、针对当前仓库的指令。",
+  "settings.customInstructions.placeholder": "优先使用 PARA 文件夹。项目笔记保持简洁。",
+
+  "settings.customModel.name": "自定义模型标识",
+  "settings.customModel.desc":
+    "当 Pi 目录中没有某个 provider/model 标识时使用的回退项。自定义标识只能在这里选中。",
+  "settings.customModel.placeholder": "Provider/model",
+  "settings.customModel.use": "使用自定义",
+  "settings.customModel.using": "正在使用自定义",
+
+  "settings.piExecutable.name": "Pi 可执行文件路径",
+  "settings.piExecutable.desc":
+    "可选的 Pi CLI 路径。留空则自动检测常见安装位置。支持 ~ 以及 ${USER} 之类的环境变量。",
+
+  "settings.checkInstall.name": "检查 Pi 安装",
+  "settings.checkInstall.desc": "验证 Obsidian 能否在当前环境中运行 Pi CLI。",
+  "settings.checkInstall.button": "检查",
+
+  "settings.defaultSkills.name": "包含默认 Pi 技能",
+  "settings.defaultSkills.desc":
+    "加载 Pi 从全局和仓库/项目技能位置发现的技能。关闭后只使用下面的附加技能文件夹。",
+
+  "settings.skillFolders.name": "附加技能文件夹",
+  "settings.skillFolders.desc": "每行一个受信任的技能文件或文件夹。支持绝对路径和仓库相对路径。",
+
+  "settings.ignoredFolders.name": "忽略的文件夹/目录",
+  "settings.ignoredFolders.desc": "以逗号分隔的文件夹前缀，Pi 预附加的上下文和检索会忽略这些位置。",
+
+  "toolMode.chat.primary": "对话",
+  "toolMode.chat.secondary": "不使用 Pi CLI 工具",
+  "toolMode.readOnly.primary": "审阅",
+  "toolMode.readOnly.secondary": "只读/搜索/列表",
+  "toolMode.edit.primary": "编辑",
+  "toolMode.edit.secondary": "编辑/写入，不使用 shell",
+  "toolMode.fullAgent.primary": "完整代理",
+  "toolMode.fullAgent.secondary": "编辑/写入与 shell",
+
+  "reasoning.automatic": "自动",
+  "reasoning.off": "关闭",
+  "reasoning.minimal": "最低 - 使用工具时可能不可用",
+  "reasoning.minimal.short": "最低",
+  "reasoning.low": "低",
+  "reasoning.medium": "中",
+  "reasoning.high": "高",
+  "reasoning.xhigh": "极高",
+  "reasoning.max": "最高 - 最深",
+  "reasoning.max.short": "最高",
+
+  "modelPicker.empty": "没有匹配该搜索的 Pi 模型。",
+  "modelPicker.placeholder": "按名称、提供商、标识或能力搜索模型…",
+  "thinkingPicker.empty": "Pi 未为该模型解析出思考等级。",
+  "thinkingPicker.placeholder": "选择思考等级…",
+  "picker.navigate": "导航",
+  "picker.select": "选择",
+  "picker.close": "关闭",
+  "picker.selected": "已选中",
+  "picker.effectiveFor": "对 {model} 生效",
+
+  "confirm.writeTools.title": "启用写入工具？",
+  "confirm.writeTools.message":
+    "Pi 工具模式不是操作系统级沙箱。编辑和完整代理可以修改仓库/项目文件，完整代理还可以运行 shell 命令。",
+  "confirm.writeTools.confirm": "启用工具",
+
+  "setup.heading": "设置 Pi CLI",
+  "setup.missing": "Pi Agent 需要先安装 Pi CLI 才能运行提示词。",
+  "setup.needsNode":
+    "请安装 Node.js，或让 Node 版本管理器对 GUI 应用可见，然后完全重启 Obsidian。之后在终端运行 pi --version 确认 Pi 仍可用。",
+  "setup.installSteps":
+    "在终端安装 Pi，必要时完成认证，然后重启 Obsidian 以让它读取更新后的 PATH。",
+  "setup.modeHint": "请先使用对话或审阅模式。只有在你允许 Pi 修改的仓库中才启用编辑或完整代理。",
+  "setup.copyDiagnostic": "复制诊断命令",
+  "setup.copyInstall": "复制安装命令",
+  "setup.copiedDiagnostic": "已复制诊断命令。",
+  "setup.copiedInstall": "已复制 Pi 安装命令。",
+  "setup.dismiss": "不再显示",
+  "setup.close": "关闭",
+
+  "notice.cliAvailable": "Pi CLI 可用：{version}",
+  "notice.modelsLoaded": "已加载 {count} 个 Pi 模型；默认 {model}。",
+
+  "send.send": "发送",
+  "send.sendAria": "发送消息",
+  "send.queue": "排队",
+  "send.queueAria": "消息加入队列",
+  "send.cancel": "取消",
+  "send.cancelAria": "取消代理运行",
+  "send.canceling": "正在取消",
+  "send.cancelingAria": "正在取消代理运行",
+  "send.queued.one": "已排队 {count} 条。",
+  "send.queued.other": "已排队 {count} 条。",
+
+  "view.renameChat": "重命名对话",
+  "view.newChat": "新建对话",
+  "view.forkChat": "分叉对话",
+  "view.manageThreads": "管理对话线程",
+  "view.favoriteAdd": "标为收藏",
+  "view.favoriteRemove": "取消收藏",
+  "view.chatTitle": "对话标题",
+  "view.forkBusy": "请等待当前对话的代理运行结束后再分叉。",
+  "view.threadMissing": "未找到该对话线程。",
+  "view.nothingToFork": "还没有可分叉的内容。",
+
+  "composer.placeholder": "向代理提问你的仓库内容…… Enter 发送，Shift+Enter 换行。",
+  "composer.attach": "附加文件",
+  "composer.vaultFile": "仓库文件",
+  "composer.localFile": "本地文件",
+  "composer.chooseFile": "选择仓库中的图片、文本、代码或配置文件…",
+
+  "runSettings.toolMode": "工具模式",
+  "toolModePicker.empty": "没有可用的工具模式。",
+  "toolModePicker.placeholder": "选择工具模式…",
+
+  "thread.defaultTitle": "新对话",
+  "thread.forkTitle": "{title}（分叉）",
+
+  "threadList.back": "返回对话",
+  "threadList.title": "对话线程",
+  "threadList.count.one": "{count} 个对话",
+  "threadList.count.other": "{count} 个对话",
+  "threadList.newChat": "新建对话",
+  "threadList.deleteChats": "删除对话",
+  "threadList.empty": "暂无对话线程。",
+  "threadList.openChat": "打开对话",
+  "threadList.running": "代理正在此对话中运行",
+  "threadList.deleteChat": "删除对话",
+  "threadList.actions": "对话操作",
+  "threadList.meta.one": "{count} 条消息 • 更新于 {date}",
+  "threadList.meta.other": "{count} 条消息 • 更新于 {date}",
+  "threadList.current": "当前",
+  "threadList.currentMeta": "当前 • {meta}",
+  "threadList.unknownDate": "未知日期",
+  "threadList.currentChat": "当前对话",
+  "threadList.open": "打开",
+  "threadList.rename": "重命名",
+  "threadList.sessionInfo": "{brand} 会话信息",
+  "threadList.exportSession": "导出 {brand} 会话为 HTML",
+  "threadList.delete": "删除",
+  "threadList.deleteBlocked": "请等待进行中的代理运行结束后再删除对话。",
+  "threadList.deleteNothing": "没有可删除的对话。",
+  "threadList.deleteRunning": "请等待代理运行结束后再删除此对话。",
+  "threadList.deletedBoth": "对话与本地 Pi 会话已删除。",
+  "threadList.deletedChat": "对话已删除。",
+  "threadList.deleteFailed": "对话或本地 Pi 会话无法删除。",
+
+  "deleteThreads.title": "删除对话？",
+  "deleteThreads.message": "选择要删除哪些聊天记录。本地 Pi 会话文件会保留。",
+  "deleteThreads.favorite.one": "已保护 {count} 个收藏对话。",
+  "deleteThreads.favorite.other": "已保护 {count} 个收藏对话。",
+  "deleteThreads.skipped.one": "{count} 个进行中的对话需要等代理运行结束后才能删除。",
+  "deleteThreads.skipped.other": "{count} 个进行中的对话需要等代理运行结束后才能删除。",
+  "deleteThreads.exceptFavorites": "删除除收藏外的所有对话（{count}）",
+  "deleteThreads.all": "删除所有对话（{count}）",
+  "deleteThreads.result.deleted.one": "{count} 个对话已删除",
+  "deleteThreads.result.deleted.other": "{count} 个对话已删除",
+  "deleteThreads.result.skipped.one": "{count} 个进行中的对话已跳过",
+  "deleteThreads.result.skipped.other": "{count} 个进行中的对话已跳过",
+  "deleteThreads.result.created": "已新建一个空对话",
+  "deleteThreads.result.sep": "；",
+  "deleteThreads.result.tail": "。",
+  "deleteThreads.result.suffix": "本地 Pi 会话已保留。",
+
+  "deleteThread.title": "删除对话？",
+  "deleteThread.keepSession": "选择保留还是删除“{title}”对应的本地 Pi 会话。",
+  "deleteThread.remove": "确认从插件历史中删除“{title}”？",
+  "deleteThread.chatOnly": "仅删除对话",
+  "deleteThread.both": "删除对话与本地 Pi 会话"
+};

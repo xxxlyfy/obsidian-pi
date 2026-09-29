@@ -1,17 +1,18 @@
 import { Notice, SuggestModal } from "obsidian";
-import { getToolModePickerItems } from "../../plugin/settings.mjs";
+import { getLocalizedToolModePickerItems } from "../../plugin/settings.mjs";
+import { t } from "../../shared/i18n/index.mjs";
 
 export class ToolModePickerModal extends SuggestModal {
   constructor(app, settings, onChoose) {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
-    this.emptyStateText = "No tool modes available.";
-    this.setPlaceholder("Choose tool mode…");
+    this.emptyStateText = t("toolModePicker.empty");
+    this.setPlaceholder(t("toolModePicker.placeholder"));
     this.setInstructions([
-      { command: "↑↓", purpose: "navigate" },
-      { command: "↵", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "↑↓", purpose: t("picker.navigate") },
+      { command: "↵", purpose: t("picker.select") },
+      { command: "esc", purpose: t("picker.close") }
     ]);
   }
 
@@ -23,7 +24,7 @@ export class ToolModePickerModal extends SuggestModal {
   }
 
   getItems() {
-    return getToolModePickerItems();
+    return getLocalizedToolModePickerItems();
   }
 
   renderSuggestion(item, el) {
@@ -34,7 +35,7 @@ export class ToolModePickerModal extends SuggestModal {
     el.setAttribute(
       "aria-label",
       `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${
-        this.settings.sandboxMode === item.value ? ", selected" : ""
+        this.settings.sandboxMode === item.value ? `, ${t("picker.selected")}` : ""
       }`
     );
   }

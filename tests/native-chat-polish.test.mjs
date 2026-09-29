@@ -250,7 +250,7 @@ describe("native chat polish", () => {
 
   it("keeps guarded bulk deletion directly visible and removes archive-all", () => {
     expect(threadListSource).toContain('setIcon)(deleteChatsButton, "trash-2")');
-    expect(threadListSource).toContain('"aria-label": "Delete chats"');
+    expect(threadListSource).toContain('tr("threadList.deleteChats")');
     expect(threadListSource).toContain("chooseBulkThreadDeletion");
     expect(threadListSource).not.toContain("Archive all chats");
     expect(threadListSource).not.toContain("archiveAllChats");

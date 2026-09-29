@@ -1,20 +1,24 @@
 import { Notice, PluginSettingTab, Setting } from "obsidian";
 import {
   CUSTOM_MODEL_VALUE,
-  getReasoningOptions,
+  getLocalizedReasoningLabel,
+  getLocalizedReasoningOptions,
+  getLocalizedToolModeOptions,
   getResolvedReasoning,
-  getSelectedModelInfo,
-  getToolModeOptions
+  getSelectedModelInfo
 } from "./settings.mjs";
 import { normalizeSkillFolderList } from "../context/skills.mjs";
+import { t } from "../shared/i18n/index.mjs";
 import { confirmWithModal } from "../ui/modals/confirm-modal.mjs";
 import { ModelPickerModal, ThinkingPickerModal } from "../ui/modals/model-picker-modal.mjs";
 import { requestDesktopNotificationPermission } from "../ui/desktop-notifications.mjs";
+import { refreshUiLanguage } from "./ui-language.mjs";
 
 export class PiAgentSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    refreshUiLanguage();
 
     const configDir = app.vault.configDir;
     if (configDir && !plugin.settings.ignoredFolders.includes(configDir)) {
@@ -34,22 +38,22 @@ export class PiAgentSettingTab extends PluginSettingTab {
       this.getCustomInstructionsDefinition(),
       {
         type: "group",
-        heading: "Advanced",
+        heading: t("settings.group.advanced"),
         items: [this.getCustomModelDefinition()]
       },
       {
         type: "group",
-        heading: "Pi CLI",
+        heading: t("settings.group.piCli"),
         items: [this.getPiExecutableDefinition(), this.getPiInstallationDefinition()]
       },
       {
         type: "group",
-        heading: "Skills",
+        heading: t("settings.group.skills"),
         items: [this.getDefaultSkillsDefinition(), this.getAdditionalSkillsDefinition()]
       },
       {
         type: "group",
-        heading: "Context and file access",
+        heading: t("settings.group.context"),
         items: [this.getIgnoredFoldersDefinition()]
       }
     ];
@@ -84,26 +88,31 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getModelDefinition() {
     return {
-      name: "Model",
-      desc: "Provider/model from Pi's built-in and custom model registry. Use default to follow ~/.pi/agent/settings.json or .pi/settings.json.",
+      name: t("settings.model.name"),
+      desc: t("settings.model.desc"),
       render: (setting) =>
         setting
           .addButton((button) =>
             button
               .setButtonText(this.getModelButtonLabel())
-              .setTooltip("Choose model")
+              .setTooltip(t("settings.model.chooseTooltip"))
               .onClick(async () => {
                 const label = this.getModelButtonLabel();
-                button.setButtonText("Loading…");
+                button.setButtonText(t("common.loading"));
                 button.setDisabled(true);
                 try {
                   await this.plugin.ensureRuntimeModelState();
-                  new ModelPickerModal(this.app, this.plugin.settings, async (value) => {
-                    this.plugin.settings.model = value;
-                    this.plugin.settings.reasoningEffort = "";
-                    await this.plugin.saveSettings();
-                    this.plugin.refreshOpenModelControls();
-                  }).open();
+                  new ModelPickerModal(
+                    this.app,
+                    this.plugin.settings,
+                    async (value) => {
+                      this.plugin.settings.model = value;
+                      this.plugin.settings.reasoningEffort = "";
+                      await this.plugin.saveSettings();
+                      this.plugin.refreshOpenModelControls();
+                    },
+                    { localize: true }
+                  ).open();
                 } catch (error) {
                   new Notice(error instanceof Error ? error.message : String(error));
                 } finally {
@@ -114,10 +123,10 @@ export class PiAgentSettingTab extends PluginSettingTab {
           )
           .addButton((button) =>
             button
-              .setButtonText("Refresh")
-              .setTooltip("Refresh models from Pi")
+              .setButtonText(t("settings.model.refresh"))
+              .setTooltip(t("settings.model.refreshTooltip"))
               .onClick(async () => {
-                button.setButtonText("Refreshing...");
+                button.setButtonText(t("settings.model.refreshing"));
                 button.setDisabled(true);
                 try {
                   await this.plugin.refreshModelCatalog(true);
@@ -132,24 +141,29 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getThinkingDefinition() {
     return {
-      name: "Thinking level",
-      desc: "Controls reasoning effort only. Values come from the selected model returned by Pi.",
+      name: t("settings.thinking.name"),
+      desc: t("settings.thinking.desc"),
       render: (setting) =>
         setting.addButton((button) =>
           button
             .setButtonText(this.getReasoningButtonLabel())
-            .setTooltip("Choose thinking level")
+            .setTooltip(t("settings.thinking.chooseTooltip"))
             .onClick(async () => {
               const label = this.getReasoningButtonLabel();
-              button.setButtonText("Loading…");
+              button.setButtonText(t("common.loading"));
               button.setDisabled(true);
               try {
                 await this.plugin.ensureRuntimeModelState();
-                new ThinkingPickerModal(this.app, this.plugin.settings, async (value) => {
-                  this.plugin.settings.reasoningEffort = value;
-                  await this.plugin.saveSettings();
-                  this.plugin.refreshOpenModelControls();
-                }).open();
+                new ThinkingPickerModal(
+                  this.app,
+                  this.plugin.settings,
+                  async (value) => {
+                    this.plugin.settings.reasoningEffort = value;
+                    await this.plugin.saveSettings();
+                    this.plugin.refreshOpenModelControls();
+                  },
+                  { localize: true }
+                ).open();
               } catch (error) {
                 new Notice(error instanceof Error ? error.message : String(error));
               } finally {
@@ -163,22 +177,22 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getToolModeDefinition() {
     return {
-      name: "Tool mode",
-      desc: "Controls which Pi CLI tools are enabled. Tool modes are not an operating-system sandbox.",
+      name: t("settings.toolMode.name"),
+      desc: t("settings.toolMode.desc"),
       render: (setting) =>
         setting.addDropdown((dropdown) =>
           dropdown
-            .addOptions(getToolModeOptions())
+            .addOptions(getLocalizedToolModeOptions())
             .setValue(this.plugin.settings.sandboxMode)
             .onChange(async (value) => {
               if (
                 (value === "edit" || value === "full-agent" || value === "workspace-write") &&
                 !this.plugin.settings.acknowledgedToolRisk &&
                 !(await confirmWithModal(this.app, {
-                  title: "Enable write tools?",
-                  message:
-                    "Pi tool modes are not an operating-system sandbox. Edit and full agent can modify vault/project files, and full agent can run shell commands.",
-                  confirmText: "Enable tools",
+                  title: t("confirm.writeTools.title"),
+                  message: t("confirm.writeTools.message"),
+                  confirmText: t("confirm.writeTools.confirm"),
+                  cancelText: t("common.cancel"),
                   warning: true
                 }))
               ) {
@@ -198,15 +212,13 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getDesktopNotificationsDefinition() {
     return {
-      name: "Desktop completion notifications",
-      desc: "Notify when an agent run finishes while Obsidian is unfocused.",
+      name: t("settings.desktopNotifications.name"),
+      desc: t("settings.desktopNotifications.desc"),
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.desktopNotifications).onChange(async (value) => {
             if (value && !(await requestDesktopNotificationPermission())) {
-              new Notice(
-                "Desktop notifications are unavailable or not permitted. You can enable them in your operating-system notification settings."
-              );
+              new Notice(t("settings.desktopNotifications.unavailable"));
             }
             this.plugin.settings.desktopNotifications = value;
             await this.plugin.saveSettings();
@@ -217,8 +229,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getExtensionStatusDefinition() {
     return {
-      name: "Show extension status",
-      desc: "Show status messages reported by Pi extensions in Obsidian's status bar.",
+      name: t("settings.extensionStatus.name"),
+      desc: t("settings.extensionStatus.desc"),
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle
@@ -230,12 +242,12 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getCustomInstructionsDefinition() {
     return {
-      name: "Custom instructions",
-      desc: "Vault-specific instructions added to every Pi run.",
+      name: t("settings.customInstructions.name"),
+      desc: t("settings.customInstructions.desc"),
       render: (setting) =>
         setting.addTextArea((text) =>
           text
-            .setPlaceholder("Prefer PARA folders. Keep project notes concise.")
+            .setPlaceholder(t("settings.customInstructions.placeholder"))
             .setValue(this.plugin.settings.customInstructions)
             .onChange(async (value) => {
               this.plugin.settings.customInstructions = value;
@@ -247,14 +259,14 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getCustomModelDefinition() {
     return {
-      name: "Custom model slug",
-      desc: "Fallback for a provider/model slug that Pi does not expose in its catalog. Custom slugs are only selectable here.",
+      name: t("settings.customModel.name"),
+      desc: t("settings.customModel.desc"),
       render: (setting) => {
         let useCustomButton;
         setting
           .addText((text) =>
             text
-              .setPlaceholder("Provider/model")
+              .setPlaceholder(t("settings.customModel.placeholder"))
               .setValue(this.plugin.settings.customModel)
               .onChange(async (value) => {
                 this.plugin.settings.customModel = value.trim();
@@ -266,7 +278,9 @@ export class PiAgentSettingTab extends PluginSettingTab {
             useCustomButton = button;
             button
               .setButtonText(
-                this.plugin.settings.model === CUSTOM_MODEL_VALUE ? "Using custom" : "Use custom"
+                this.plugin.settings.model === CUSTOM_MODEL_VALUE
+                  ? t("settings.customModel.using")
+                  : t("settings.customModel.use")
               )
               .setDisabled(!this.plugin.settings.customModel)
               .onClick(async () => {
@@ -282,8 +296,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getPiExecutableDefinition() {
     return {
-      name: "Pi executable path",
-      desc: "Optional path to the Pi CLI. Leave empty to auto-detect common install locations. Supports ~ and environment variables like ${USER}.",
+      name: t("settings.piExecutable.name"),
+      desc: t("settings.piExecutable.desc"),
       render: (setting) =>
         setting.addText((text) =>
           text
@@ -299,11 +313,11 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getPiInstallationDefinition() {
     return {
-      name: "Check Pi installation",
-      desc: "Verify that Obsidian can run the Pi CLI from its current environment.",
+      name: t("settings.checkInstall.name"),
+      desc: t("settings.checkInstall.desc"),
       render: (setting) =>
         setting.addButton((button) =>
-          button.setButtonText("Check").onClick(() => {
+          button.setButtonText(t("settings.checkInstall.button")).onClick(() => {
             this.plugin.checkPiInstallation(true);
           })
         )
@@ -312,8 +326,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getDefaultSkillsDefinition() {
     return {
-      name: "Include default Pi skills",
-      desc: "Load skills discovered by Pi from global and vault/project skill locations. Turn this off to use only the additional skill folders below.",
+      name: t("settings.defaultSkills.name"),
+      desc: t("settings.defaultSkills.desc"),
       render: (setting) =>
         setting.addToggle((toggle) =>
           toggle
@@ -328,8 +342,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getAdditionalSkillsDefinition() {
     return {
-      name: "Additional skill folders",
-      desc: "One trusted skill file or folder per line. Supports absolute and vault-relative paths.",
+      name: t("settings.skillFolders.name"),
+      desc: t("settings.skillFolders.desc"),
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -350,8 +364,8 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getIgnoredFoldersDefinition() {
     return {
-      name: "Ignored folders/directories",
-      desc: "Comma-separated folder prefixes that Pi pre-attached context and retrieval should ignore.",
+      name: t("settings.ignoredFolders.name"),
+      desc: t("settings.ignoredFolders.desc"),
       render: (setting) =>
         setting.addTextArea((text) =>
           text
@@ -370,14 +384,16 @@ export class PiAgentSettingTab extends PluginSettingTab {
 
   getModelButtonLabel() {
     if (this.plugin.settings.model === CUSTOM_MODEL_VALUE) {
-      return this.plugin.settings.customModel || "Custom model";
+      return this.plugin.settings.customModel || t("settings.model.customFallback");
     }
     const selected = getSelectedModelInfo(this.plugin.settings);
     if (selected) return selected.displayName;
     const effective = this.plugin.settings.availableModels.find(
       (model) => model.slug === this.plugin.settings.effectiveModel
     );
-    return effective?.displayName || this.plugin.settings.effectiveModel || "Pi default";
+    return (
+      effective?.displayName || this.plugin.settings.effectiveModel || t("settings.model.piDefault")
+    );
   }
 
   getReasoningButtonLabel() {
@@ -385,14 +401,12 @@ export class PiAgentSettingTab extends PluginSettingTab {
     if (value) return this.getReasoningOptions()[value] || value;
     const resolved = getResolvedReasoning(this.plugin.settings);
     return resolved === "pi-default"
-      ? "Loading thinking…"
-      : resolved === "xhigh"
-        ? "XHigh"
-        : resolved.charAt(0).toUpperCase() + resolved.slice(1);
+      ? t("common.loadingThinking")
+      : getLocalizedReasoningLabel(resolved, { short: true });
   }
 
   getReasoningOptions() {
-    return getReasoningOptions(this.plugin.settings);
+    return getLocalizedReasoningOptions(this.plugin.settings);
   }
 
   getReasoningDropdownValue() {

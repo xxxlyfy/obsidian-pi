@@ -37,6 +37,8 @@ import {
 } from "./editor-file-refresh.mjs";
 import { openNotificationThread, showDesktopRunNotification } from "./desktop-notifications.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+// Aliased: `t` is already a local identifier throughout this view.
+import { t as tr } from "../shared/i18n/index.mjs";
 
 export class PiAgentView extends f.ItemView {
   constructor(e, t) {
@@ -178,7 +180,7 @@ export class PiAgentView extends f.ItemView {
     this.renderPiIcon(s);
     this.threadTitleEl = n.createSpan({
       cls: "pi-agent-thread-title",
-      attr: { role: "button", tabindex: "0", title: "Rename chat" }
+      attr: { role: "button", tabindex: "0", title: tr("view.renameChat") }
     });
     this.threadTitleEl.addEventListener("click", () => this.startThreadTitleRename());
     this.threadTitleEl.addEventListener("keydown", (c) => {
@@ -194,7 +196,7 @@ export class PiAgentView extends f.ItemView {
       }),
       o = a.createEl("button", {
         cls: "clickable-icon pi-agent-header-action",
-        attr: { "aria-label": "New chat", title: "New chat" }
+        attr: { "aria-label": tr("view.newChat"), title: tr("view.newChat") }
       });
     this.threadFavoriteEl = favoriteButton;
     (0, f.setIcon)(favoriteButton, "star");
@@ -208,14 +210,14 @@ export class PiAgentView extends f.ItemView {
     });
     let l = a.createEl("button", {
       cls: "clickable-icon pi-agent-header-action",
-      attr: { "aria-label": "Fork chat", title: "Fork chat" }
+      attr: { "aria-label": tr("view.forkChat"), title: tr("view.forkChat") }
     });
     (0, f.setIcon)(l, "split");
     l.addEventListener("click", (c) => {
       var p;
       c.preventDefault();
       if (this.isThreadRunning(this.plugin.getCurrentThread().id)) {
-        new f.Notice("Wait for this chat's agent run to finish before forking it.");
+        new f.Notice(tr("view.forkBusy"));
         return;
       }
       if ((p = this.threadMenu) != null) p.forkChat();
@@ -224,8 +226,8 @@ export class PiAgentView extends f.ItemView {
     let u = a.createEl("button", {
       cls: "clickable-icon pi-agent-thread-menu",
       attr: {
-        "aria-label": "Manage chat threads",
-        title: "Manage chat threads"
+        "aria-label": tr("view.manageThreads"),
+        title: tr("view.manageThreads")
       }
     });
     (0, f.setIcon)(u, "list");
@@ -250,7 +252,7 @@ export class PiAgentView extends f.ItemView {
     this.extensionWidgetsAboveEl = d.createDiv({ cls: "pi-agent-extension-widgets" });
     this.renderComposerImages();
     this.inputEl = d.createEl("textarea", {
-      placeholder: "Ask the agent about your vault... Enter sends, Shift+Enter adds a line."
+      placeholder: tr("composer.placeholder")
     });
     this.inputEl.addEventListener("keydown", (c) => {
       var p;
@@ -313,10 +315,10 @@ export class PiAgentView extends f.ItemView {
     this.runSettings.render(h);
     let m = h.createEl("button", {
       cls: "clickable-icon pi-agent-send-button",
-      attr: { "aria-label": "Send message", title: "Send message" }
+      attr: { "aria-label": tr("send.sendAria"), title: tr("send.sendAria") }
     });
     (0, f.setIcon)(m, "send");
-    m.createSpan({ cls: "pi-agent-control-label", text: "Send" });
+    m.createSpan({ cls: "pi-agent-control-label", text: tr("send.send") });
     this.sendButtonEl = m;
     m.addEventListener("click", () => this.handleSendButtonClick());
     this.observeComposerBar(h);
@@ -480,13 +482,19 @@ export class PiAgentView extends f.ItemView {
     const favorite = this.plugin.getCurrentThread().favorite === true;
     this.threadFavoriteEl.toggleClass("is-favorite", favorite);
     this.threadFavoriteEl.setAttr("aria-pressed", String(favorite));
-    this.threadFavoriteEl.setAttr("aria-label", favorite ? "Remove favorite" : "Mark as favorite");
-    this.threadFavoriteEl.setAttr("title", favorite ? "Remove favorite" : "Mark as favorite");
+    this.threadFavoriteEl.setAttr(
+      "aria-label",
+      tr(favorite ? "view.favoriteRemove" : "view.favoriteAdd")
+    );
+    this.threadFavoriteEl.setAttr(
+      "title",
+      tr(favorite ? "view.favoriteRemove" : "view.favoriteAdd")
+    );
   }
   toggleCurrentThreadFavorite() {
     const thread = this.plugin.getCurrentThread();
     if (!this.plugin.toggleThreadFavorite(thread.id)) {
-      new f.Notice("Chat thread was not found.");
+      new f.Notice(tr("view.threadMissing"));
       return;
     }
     this.renderThreadFavorite();
@@ -500,7 +508,7 @@ export class PiAgentView extends f.ItemView {
     this.threadTitleEl.addClass("is-editing");
     let t = this.threadTitleEl.createEl("input", {
         cls: "pi-agent-thread-title-input",
-        attr: { type: "text", value: e.title, "aria-label": "Chat title" }
+        attr: { type: "text", value: e.title, "aria-label": tr("view.chatTitle") }
       }),
       n = (o) => {
         var d;
@@ -625,7 +633,7 @@ export class PiAgentView extends f.ItemView {
   renderImagePicker(parent) {
     const button = parent.createEl("button", {
       cls: "clickable-icon pi-agent-image-button",
-      attr: { "aria-label": "Attach files", title: "Attach files" }
+      attr: { "aria-label": tr("composer.attach"), title: tr("composer.attach") }
     });
     f.setIcon(button, "paperclip");
     button.addEventListener("click", (event) => this.showAttachmentMenu(event));
@@ -634,13 +642,13 @@ export class PiAgentView extends f.ItemView {
     const menu = new f.Menu();
     menu.addItem((item) =>
       item
-        .setTitle("Vault file")
+        .setTitle(tr("composer.vaultFile"))
         .setIcon("vault")
         .onClick(() => this.showVaultFilePicker())
     );
     menu.addItem((item) =>
       item
-        .setTitle("Local file")
+        .setTitle(tr("composer.localFile"))
         .setIcon("hard-drive")
         .onClick(() => this.imageInputEl?.click())
     );
@@ -664,7 +672,7 @@ export class PiAgentView extends f.ItemView {
       }
     }
     const modal = new VaultFileModal(this.plugin.app);
-    modal.setPlaceholder("Choose a vault image, text, code, or config file…");
+    modal.setPlaceholder(tr("composer.chooseFile"));
     modal.open();
   }
   isAttachableFile(name, mimeType) {

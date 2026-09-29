@@ -1,5 +1,11 @@
 import { FuzzySuggestModal, Notice, SuggestModal } from "obsidian";
-import { getReasoningOptions, getResolvedReasoning } from "../../plugin/settings.mjs";
+import {
+  getLocalizedReasoningLabel,
+  getLocalizedReasoningOptions,
+  getReasoningOptions,
+  getResolvedReasoning
+} from "../../plugin/settings.mjs";
+import { t } from "../../shared/i18n/index.mjs";
 import {
   buildModelPickerItems,
   getModelPickerPrimary,
@@ -7,18 +13,26 @@ import {
 } from "../model-picker.mjs";
 import { renderProviderIcon } from "../provider-icons.mjs";
 
+// Modals opened from the Pi Agent settings tab follow the app language. Instances
+// opened from the chat composer keep English until that surface is localized too.
+function createText(localize) {
+  return (key, params) => t(key, params, localize ? undefined : "en");
+}
+
 export class ModelPickerModal extends FuzzySuggestModal {
-  constructor(app, settings, onChoose) {
+  constructor(app, settings, onChoose, options = {}) {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
+    this.localize = options.localize === true;
+    this.text = createText(this.localize);
     this.limit = 1000;
-    this.emptyStateText = "No Pi models match this search.";
-    this.setPlaceholder("Search models by name, provider, slug, or capability…");
+    this.emptyStateText = this.text("modelPicker.empty");
+    this.setPlaceholder(this.text("modelPicker.placeholder"));
     this.setInstructions([
-      { command: "↑↓", purpose: "navigate" },
-      { command: "↵", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "↑↓", purpose: this.text("picker.navigate") },
+      { command: "↵", purpose: this.text("picker.select") },
+      { command: "esc", purpose: this.text("picker.close") }
     ]);
   }
 
@@ -32,15 +46,17 @@ export class ModelPickerModal extends FuzzySuggestModal {
 
   renderSuggestion(match, el) {
     const item = match.item;
+    const primary = getModelPickerPrimary(item);
+    const secondary = getModelPickerSecondary(item);
     const row = el.createDiv({ cls: "pi-agent-model-suggestion" });
     renderProviderIcon(row, item.model);
     const copy = row.createDiv({ cls: "pi-agent-model-suggestion-copy" });
-    copy.createDiv({ cls: "pi-agent-suggestion-title", text: getModelPickerPrimary(item) });
-    copy.createDiv({ cls: "pi-agent-suggestion-detail", text: getModelPickerSecondary(item) });
+    copy.createDiv({ cls: "pi-agent-suggestion-title", text: primary });
+    copy.createDiv({ cls: "pi-agent-suggestion-detail", text: secondary });
     el.setAttribute(
       "aria-label",
-      `${getModelPickerPrimary(item)}, ${getModelPickerSecondary(item)}${
-        this.settings.model === item.value ? ", selected" : ""
+      `${primary}, ${secondary}${
+        this.settings.model === item.value ? `, ${this.text("picker.selected")}` : ""
       }`
     );
   }
@@ -53,16 +69,18 @@ export class ModelPickerModal extends FuzzySuggestModal {
 }
 
 export class ThinkingPickerModal extends SuggestModal {
-  constructor(app, settings, onChoose) {
+  constructor(app, settings, onChoose, options = {}) {
     super(app);
     this.settings = settings;
     this.onChoose = onChoose;
-    this.emptyStateText = "Pi did not resolve thinking levels for this model.";
-    this.setPlaceholder("Choose thinking level…");
+    this.localize = options.localize === true;
+    this.text = createText(this.localize);
+    this.emptyStateText = this.text("thinkingPicker.empty");
+    this.setPlaceholder(this.text("thinkingPicker.placeholder"));
     this.setInstructions([
-      { command: "↑↓", purpose: "navigate" },
-      { command: "↵", purpose: "select" },
-      { command: "esc", purpose: "close" }
+      { command: "↑↓", purpose: this.text("picker.navigate") },
+      { command: "↵", purpose: this.text("picker.select") },
+      { command: "esc", purpose: this.text("picker.close") }
     ]);
   }
 
@@ -74,15 +92,20 @@ export class ThinkingPickerModal extends SuggestModal {
   }
 
   getItems() {
-    const options = getReasoningOptions(this.settings);
+    const options = this.localize
+      ? getLocalizedReasoningOptions(this.settings)
+      : getReasoningOptions(this.settings);
     return Object.entries(options).flatMap(([value, label]) => {
       const resolved = value === "" ? getResolvedReasoning(this.settings) : "";
       if (value === "" && (resolved === "pi-default" || resolved === "cli-default")) return [];
       return [
         {
           value,
-          primary: value === "" ? formatReasoningLabel(resolved) : label,
-          secondary: value === "" ? `Effective for ${formatEffectiveModel(this.settings)}` : ""
+          primary: value === "" ? this.formatReasoningPrimary(resolved) : label,
+          secondary:
+            value === ""
+              ? this.text("picker.effectiveFor", { model: formatEffectiveModel(this.settings) })
+              : ""
         }
       ];
     });
@@ -96,7 +119,7 @@ export class ThinkingPickerModal extends SuggestModal {
     el.setAttribute(
       "aria-label",
       `${item.primary}${item.secondary ? `, ${item.secondary}` : ""}${
-        this.settings.reasoningEffort === item.value ? ", selected" : ""
+        this.settings.reasoningEffort === item.value ? `, ${this.text("picker.selected")}` : ""
       }`
     );
   }
@@ -105,6 +128,12 @@ export class ThinkingPickerModal extends SuggestModal {
     Promise.resolve(this.onChoose(item.value)).catch((error) => {
       new Notice(error instanceof Error ? error.message : String(error));
     });
+  }
+
+  formatReasoningPrimary(value) {
+    return this.localize
+      ? getLocalizedReasoningLabel(value, { short: true })
+      : formatReasoningLabel(value);
   }
 }
 

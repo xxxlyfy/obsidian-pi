@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({
   Modal: class {}
@@ -6,6 +6,9 @@ vi.mock("obsidian", () => ({
 
 const { getThreadDeletionChoices } = await import("../src/ui/modals/delete-thread-modal.mjs");
 const { getBulkThreadDeletionChoices } = await import("../src/ui/modals/delete-threads-modal.mjs");
+const { setLocale } = await import("../src/shared/i18n/index.mjs");
+
+afterEach(() => setLocale("en"));
 
 describe("DeleteThreadModal choices", () => {
   it("keeps Pi session deletion separate and opt-in", () => {
@@ -39,5 +42,19 @@ describe("DeleteThreadModal choices", () => {
         exceptFavorites: { deleteCount: 0 }
       })[0]
     ).toMatchObject({ id: "except-favorites", disabled: true });
+  });
+
+  it("localizes the bulk deletion choices", () => {
+    setLocale("zh-cn");
+
+    expect(
+      getBulkThreadDeletionChoices({
+        all: { deleteCount: 5 },
+        exceptFavorites: { deleteCount: 3 }
+      })
+    ).toEqual([
+      { id: "except-favorites", label: "删除除收藏外的所有对话（3）", disabled: false },
+      { id: "all", label: "删除所有对话（5）", disabled: false }
+    ]);
   });
 });

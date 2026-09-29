@@ -1,10 +1,12 @@
+import { t, tCount } from "../shared/i18n/index.mjs";
+
 export function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
   if (canceling) {
     return {
       state: "canceling",
       icon: "loader",
-      label: "Canceling",
-      ariaLabel: "Canceling agent run",
+      label: t("send.canceling"),
+      ariaLabel: t("send.cancelingAria"),
       disabled: true
     };
   }
@@ -13,8 +15,8 @@ export function getSendActionState({ running, canceling, hasInput, queuedCount =
     return {
       state: "queue",
       icon: "list-plus",
-      label: "Queue",
-      ariaLabel: "Queue message",
+      label: t("send.queue"),
+      ariaLabel: t("send.queueAria"),
       disabled: false
     };
   }
@@ -23,8 +25,8 @@ export function getSendActionState({ running, canceling, hasInput, queuedCount =
     return {
       state: "cancel",
       icon: "square",
-      label: "Cancel",
-      ariaLabel: "Cancel agent run",
+      label: t("send.cancel"),
+      ariaLabel: t("send.cancelAria"),
       disabled: false
     };
   }
@@ -32,9 +34,9 @@ export function getSendActionState({ running, canceling, hasInput, queuedCount =
   return {
     state: "send",
     icon: "send",
-    label: "Send",
-    ariaLabel: "Send message",
+    label: t("send.send"),
+    ariaLabel: t("send.sendAria"),
     disabled: false,
-    titleSuffix: queuedCount > 0 ? `${queuedCount} queued.` : ""
+    titleSuffix: queuedCount > 0 ? tCount("send.queued", queuedCount) : ""
   };
 }

@@ -2,13 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   CUSTOM_MODEL_VALUE,
   DEFAULT_SETTINGS,
+  getLocalizedReasoningLabel,
+  getLocalizedReasoningOptions,
+  getLocalizedToolModeOptions,
+  getLocalizedToolModePickerItems,
+  getLocalizedToolModeShortLabel,
   getModelOptions,
   getReasoningOptions,
   getResolvedReasoning,
   getSelectedModelInfo,
   getToolModeOptions,
+  getToolModePickerItems,
   normalizeSettings
 } from "../src/plugin/settings.mjs";
+import { setLocale } from "../src/shared/i18n/index.mjs";
 
 describe("plugin settings helpers", () => {
   const model = {
@@ -130,5 +137,59 @@ describe("plugin settings helpers", () => {
       })
     ).toBe(model);
     expect(getToolModeOptions()).toHaveProperty("full-agent", "Full agent — edit/write and shell");
+  });
+
+  it("localizes settings-only tool mode and reasoning labels", () => {
+    setLocale("en");
+    expect(getLocalizedToolModeOptions()).toEqual(getToolModeOptions());
+    expect(getLocalizedToolModePickerItems()).toEqual(getToolModePickerItems());
+    expect(getLocalizedToolModeShortLabel("read-only")).toBe("Review");
+    expect(getLocalizedToolModeShortLabel("unknown")).toBe("");
+    expect(
+      getLocalizedReasoningOptions({
+        ...DEFAULT_SETTINGS,
+        model: "provider/model",
+        availableModels: [model]
+      })
+    ).toEqual(
+      getReasoningOptions({
+        ...DEFAULT_SETTINGS,
+        model: "provider/model",
+        availableModels: [model]
+      })
+    );
+    expect(getLocalizedReasoningOptions({ ...DEFAULT_SETTINGS })).toEqual({ "": "Automatic" });
+    expect(getLocalizedReasoningLabel("max")).toBe("Max - deepest");
+    expect(getLocalizedReasoningLabel("max", { short: true })).toBe("Max");
+    expect(getLocalizedReasoningLabel("minimal", { short: true })).toBe("Minimal");
+    expect(getLocalizedReasoningLabel("mystery")).toBe("mystery");
+
+    setLocale("zh-cn");
+    expect(getLocalizedToolModeOptions()).toEqual({
+      chat: "对话 — 不使用 Pi CLI 工具",
+      "read-only": "审阅 — 只读/搜索/列表",
+      edit: "编辑 — 编辑/写入，不使用 shell",
+      "full-agent": "完整代理 — 编辑/写入与 shell"
+    });
+    expect(
+      getLocalizedReasoningOptions({
+        ...DEFAULT_SETTINGS,
+        model: "provider/model",
+        availableModels: [model]
+      })
+    ).toEqual({ "": "中", low: "低", medium: "中", high: "高", max: "最高 - 最深" });
+    expect(getLocalizedReasoningOptions({ ...DEFAULT_SETTINGS })).toEqual({ "": "自动" });
+    expect(getLocalizedReasoningLabel("xhigh")).toBe("极高");
+    expect(getLocalizedReasoningLabel("max", { short: true })).toBe("最高");
+    expect(getLocalizedToolModePickerItems()).toEqual([
+      { value: "chat", primary: "对话", secondary: "不使用 Pi CLI 工具" },
+      { value: "read-only", primary: "审阅", secondary: "只读/搜索/列表" },
+      { value: "edit", primary: "编辑", secondary: "编辑/写入，不使用 shell" },
+      { value: "full-agent", primary: "完整代理", secondary: "编辑/写入与 shell" }
+    ]);
+    expect(getLocalizedToolModeShortLabel("read-only")).toBe("审阅");
+    expect(getLocalizedToolModeShortLabel("full-agent")).toBe("完整代理");
+
+    setLocale("en");
   });
 });

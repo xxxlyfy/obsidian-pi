@@ -140,10 +140,12 @@ describe("compact composer run settings", () => {
   });
 
   it("adds a tool mode picker with the write-risk confirmation and mode colors", () => {
-    expect(runSettingsSource).toContain('"Tool mode"');
+    expect(runSettingsSource).toContain('t("runSettings.toolMode")');
     expect(runSettingsSource).toContain("ToolModePickerModal");
-    expect(runSettingsSource).toContain("getToolModeShortLabel(this.plugin.settings.sandboxMode)");
-    expect(runSettingsSource).toContain('"Enable write tools?"');
+    expect(runSettingsSource).toContain(
+      "getLocalizedToolModeShortLabel(this.plugin.settings.sandboxMode)"
+    );
+    expect(runSettingsSource).toContain('t("confirm.writeTools.title")');
     expect(runSettingsSource).toContain("confirmWithModal(this.plugin.app");
     expect(runSettingsSource).toContain("pi-agent-run-setting-mode-write");
     expect(runSettingsSource).toContain("pi-agent-run-setting-mode-full");

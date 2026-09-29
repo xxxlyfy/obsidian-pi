@@ -1,4 +1,10 @@
-const DEFAULT_THREAD_TITLE = "New chat";
+import { t, translatedValues } from "../shared/i18n/index.mjs";
+
+const DEFAULT_TITLE_KEY = "thread.defaultTitle";
+// A title is only a placeholder while it still equals the default in any
+// supported language, so threads created in English keep auto-titling after the
+// app switches to Chinese and vice versa.
+const DEFAULT_TITLE_VALUES = new Set(translatedValues(DEFAULT_TITLE_KEY));
 
 export class ThreadStore {
   constructor(history, legacyMessages, legacyPiSessionId) {
@@ -44,7 +50,7 @@ export class ThreadStore {
 
     const now = Date.now();
     const thread = createThread({
-      title: `${current.title} (fork)`,
+      title: t("thread.forkTitle", { title: current.title }),
       now,
       messages: current.messages,
       piSessionId
@@ -171,7 +177,7 @@ export class ThreadStore {
 
     thread.messages = [...thread.messages, normalizedMessage];
     thread.updatedAt = Math.max(thread.updatedAt, normalizedMessage.createdAt, Date.now());
-    if (thread.title === DEFAULT_THREAD_TITLE && normalizedMessage.role === "user") {
+    if (isDefaultThreadTitle(thread.title) && normalizedMessage.role === "user") {
       thread.title = titleFromPrompt(normalizedMessage.content);
     }
 
@@ -353,13 +359,21 @@ function normalizeOptionalString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function defaultThreadTitle() {
+  return t(DEFAULT_TITLE_KEY);
+}
+
+function isDefaultThreadTitle(title) {
+  return DEFAULT_TITLE_VALUES.has(title);
+}
+
 function normalizeTitle(value) {
-  return value.replace(/\s+/g, " ").trim().slice(0, 80) || DEFAULT_THREAD_TITLE;
+  return value.replace(/\s+/g, " ").trim().slice(0, 80) || defaultThreadTitle();
 }
 
 function inferThreadTitle(messages) {
   const firstUserMessage = messages.find((message) => message.role === "user");
-  return firstUserMessage ? titleFromPrompt(firstUserMessage.content) : DEFAULT_THREAD_TITLE;
+  return firstUserMessage ? titleFromPrompt(firstUserMessage.content) : defaultThreadTitle();
 }
 
 function titleFromPrompt(prompt) {

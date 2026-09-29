@@ -1,4 +1,5 @@
 import { Notice } from "obsidian";
+import { t } from "../shared/i18n/index.mjs";
 
 export class ThreadActions {
   constructor(plugin, callbacks) {
@@ -23,7 +24,7 @@ export class ThreadActions {
         this.callbacks.renderMessages();
         this.callbacks.renderToolBadges?.();
       } else {
-        new Notice("Nothing to fork yet.");
+        new Notice(t("view.nothingToFork"));
       }
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));
