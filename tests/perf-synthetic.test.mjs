@@ -3,6 +3,7 @@ import { createRunState, finishToolEvent, trackToolEvent } from "../src/pi/run-s
 import { handlePiEvent } from "../src/pi/events.mjs";
 import { PiRpcClient } from "../src/pi/rpc-client.mjs";
 import { performanceProfiler } from "../src/shared/performance-profiler.mjs";
+import { createViewLifecycle } from "../src/ui/view/lifecycle.mjs";
 
 const markdownRender = vi.fn().mockResolvedValue(undefined);
 
@@ -81,6 +82,7 @@ function stubAnimationFrame() {
 
 function createStreamingView() {
   const view = Object.assign({}, streamingMethods, {
+    lifecycle: createViewLifecycle(),
     messagesEl: new FakeElement("div"),
     stickToBottom: true,
     streamingAssistantContent: "",

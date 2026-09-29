@@ -138,6 +138,34 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
     `${heapGrowthMb.toFixed(1)} MiB over 20 cycles`
   );
 
+  // 4b. A timer registered with the view lifecycle must not survive a teardown,
+  //     which is the guarantee the lifecycle exists to provide. Runs after the
+  //     reopen so the lifecycle under test is a fresh, live one.
+  const lifecycleCheck = await evaluate(`(async () => {
+    const view = window.app.workspace.getLeavesOfType("pi-agent-view")[0]?.view;
+    view.renderChatView();
+    const lifecycle = view.lifecycle;
+    let fired = false;
+    lifecycle.setTimer(() => { fired = true; }, 150);
+    const registeredBefore = lifecycle.pendingTimers;
+    view.renderChatView();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return {
+      registeredBefore,
+      oldTimerFired: fired,
+      oldDisposed: lifecycle.disposed,
+      newLifecycle: view.lifecycle !== lifecycle
+    };
+  })()`);
+  record(
+    "a timer from the replaced lifecycle never fires",
+    lifecycleCheck.registeredBefore === 1 &&
+      lifecycleCheck.oldTimerFired === false &&
+      lifecycleCheck.oldDisposed === true &&
+      lifecycleCheck.newLifecycle === true,
+    JSON.stringify(lifecycleCheck)
+  );
+
   // 5. Reopen and render a full chat view again (proves teardown is recoverable).
   const reopened = await evaluate(`(async () => {
     const view = window.app.workspace.getLeavesOfType("pi-agent-view")[0]?.view;

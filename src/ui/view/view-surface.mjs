@@ -50,7 +50,11 @@
  * @property {any} activityCoalesceGuard Stale-callback guard for coalesced activity.
  * @property {any} streamingFlushRaf Frame handle for the streaming flush.
  * @property {any} streamingFlushGuard Stale-callback guard for the streaming flush.
- * @property {any} composerBarCleanup Disconnect handle for the composer-bar observer.
+ * @property {any} lifecycle View lifecycle owning timers and cleanup handles.
+ * @property {any} composerBarCleanup Release handle for the composer-bar observer.
+ * @property {any} streamingFlushCleanup Release handle for the streaming frame.
+ * @property {(...args: any[]) => any} releaseStreamingFlushCleanup
+ * @property {(...args: any[]) => any} cleanupComposerBarObserver
  * @property {boolean} running Whether any run is active for the rendered thread.
  * @property {boolean} canceling Whether the current run is being cancelled.
  * @property {boolean} stickToBottom Whether the message list follows new content.

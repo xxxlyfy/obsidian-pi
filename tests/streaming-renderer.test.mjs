@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createViewLifecycle } from "../src/ui/view/lifecycle.mjs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const markdownRender = vi.fn().mockResolvedValue(undefined);
@@ -103,6 +104,7 @@ function createView(overrides = {}) {
   return Object.assign(
     view,
     {
+      lifecycle: createViewLifecycle(),
       messagesEl: new FakeElement("div"),
       running: true,
       stickToBottom: true,

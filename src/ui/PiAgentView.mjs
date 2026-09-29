@@ -41,6 +41,7 @@ import {
 import { openNotificationThread, showDesktopRunNotification } from "./desktop-notifications.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import { now } from "../shared/runtime.mjs";
+import { createViewLifecycle } from "./view/lifecycle.mjs";
 // Aliased: `t` is already a local identifier throughout this view.
 import { t as tr } from "../shared/i18n/index.mjs";
 
@@ -57,6 +58,8 @@ export class PiAgentView extends f.ItemView {
   constructor(e, t) {
     super(e);
     this.plugin = t;
+    /** @type {import("./view/lifecycle.mjs").ViewLifecycle} Timers and cleanup handles owned by this view. */
+    this.lifecycle = createViewLifecycle();
     this.running = !1;
     this.canceling = !1;
     this.activityText = "Thinking";
@@ -134,12 +137,17 @@ export class PiAgentView extends f.ItemView {
     this.renderChatView();
   }
   renderChatView() {
+    // The DOM is rebuilt from scratch here, so the previous lifecycle's timers
+    // and cleanups (if any survived onClose) must not outlive this call.
+    if (this.lifecycle) this.lifecycle.dispose();
+    this.lifecycle = createViewLifecycle();
     this.showingThreadList = !1;
     let currentThreadId = this.getCurrentThreadId();
     if (this.renderedThreadId !== currentThreadId) this.resetTransientRunUiState();
     this.renderedThreadId = currentThreadId;
     this.syncCurrentRunFlags();
-    this.cleanupComposerBarObserver();
+    // Fresh lifecycle, so there is nothing left to clean up here; observeComposerBar
+    // registers its replacement below.
     let e = this.containerEl.children[1];
     e.empty();
     e.addClass("pi-agent-view");
@@ -306,7 +314,7 @@ export class PiAgentView extends f.ItemView {
       this.suggestions?.update();
     });
     this.inputEl.addEventListener("blur", () => {
-      window.setTimeout(() => {
+      this.lifecycle.setTimer(() => {
         this.suggestions?.close();
       }, 120);
     });
@@ -366,6 +374,10 @@ export class PiAgentView extends f.ItemView {
     this.clearCoalescedActivity();
     this.cancelStreamingFlush();
     this.unloadMessageRenderComponents();
+    // Release anything the mixins registered. Their own clear* calls above keep
+    // their state consistent; this is the backstop for handles they no longer
+    // track, and it makes a forgotten timer harmless instead of a leak.
+    this.lifecycle?.dispose();
     this.messageActions = void 0;
     this.noteActions = void 0;
     this.threadMenu = void 0;
@@ -613,7 +625,8 @@ export class PiAgentView extends f.ItemView {
     }
   }
   observeComposerBar(e) {
-    this.cleanupComposerBarObserver();
+    // The previous observer, if any, was released by cleanupComposerBarObserver()
+    // or by disposing the lifecycle; registering the new one replaces it.
     let t = () => this.updateComposerBarMode(e.clientWidth);
     t();
     if (typeof ResizeObserver == "undefined") {
@@ -625,8 +638,7 @@ export class PiAgentView extends f.ItemView {
             window.removeEventListener("resize", t);
           }
         };
-      this.composerBarCleanup = s;
-      this.register(s);
+      this.composerBarCleanup = this.lifecycle.addCleanup(s);
       return;
     }
     let n = new ResizeObserver((a) => {
@@ -642,8 +654,7 @@ export class PiAgentView extends f.ItemView {
         }
       };
     n.observe(e);
-    this.composerBarCleanup = a;
-    this.register(a);
+    this.composerBarCleanup = this.lifecycle.addCleanup(a);
   }
   updateComposerBarMode(e) {
     let t = this.composerBarEl;

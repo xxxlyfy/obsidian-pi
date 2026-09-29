@@ -7856,6 +7856,7 @@ __export(message_renderer_exports, {
   finalizeStreamingContent: () => finalizeStreamingContent,
   flushStreaming: () => flushStreaming,
   handleMessageLinkClick: () => handleMessageLinkClick,
+  releaseStreamingFlushCleanup: () => releaseStreamingFlushCleanup,
   renderActivityMessage: () => renderActivityMessage,
   renderEmptyState: () => renderEmptyState,
   renderMessage: () => renderMessage,
@@ -8116,6 +8117,7 @@ function scheduleStreamingFlush() {
   if (this.streamingFlushRaf !== void 0) return;
   this.streamingFlushGuard = this.captureUiCallbackGuard?.();
   this.streamingFlushRaf = requestFrame(() => {
+    this.releaseStreamingFlushCleanup();
     this.streamingFlushRaf = void 0;
     const guard = this.streamingFlushGuard;
     this.streamingFlushGuard = void 0;
@@ -8127,13 +8129,18 @@ function scheduleStreamingFlush() {
     }
     this.flushStreaming();
   });
+  const frameHandle = this.streamingFlushRaf;
+  this.streamingFlushCleanup = this.lifecycle?.addCleanup(() => cancelFrame(frameHandle));
 }
 function cancelStreamingFlush() {
-  if (this.streamingFlushRaf !== void 0) {
-    cancelFrame(this.streamingFlushRaf);
-    this.streamingFlushRaf = void 0;
-  }
+  this.releaseStreamingFlushCleanup();
+  this.streamingFlushRaf = void 0;
   this.streamingFlushGuard = void 0;
+}
+function releaseStreamingFlushCleanup() {
+  const release = this.streamingFlushCleanup;
+  this.streamingFlushCleanup = void 0;
+  if (typeof release === "function") release();
 }
 function flushStreaming() {
   if (!this.streamingAnswerDirty && !this.streamingThinkingDirty) return;
@@ -8435,13 +8442,13 @@ function schedulePendingActivity() {
   if (this.pendingActivityTimer) return;
   this.pendingActivityGuard = this.captureUiCallbackGuard?.();
   let e = Math.max(0, this.activityStickyUntil - Date.now());
-  this.pendingActivityTimer = window.setTimeout(() => {
+  this.pendingActivityTimer = this.lifecycle?.setTimer(() => {
     this.pendingActivityTimer = void 0;
     this.flushPendingActivity();
   }, e);
 }
 function clearPendingActivityTimer() {
-  if (this.pendingActivityTimer) window.clearTimeout(this.pendingActivityTimer);
+  this.lifecycle?.clearTimer(this.pendingActivityTimer);
   this.pendingActivityTimer = void 0;
   this.pendingActivityGuard = void 0;
 }
@@ -8471,20 +8478,20 @@ function scheduleCoalescedActivity() {
   this.activityCoalescePending = true;
   if (this.activityCoalesceTimer) return;
   this.activityCoalesceGuard = this.captureUiCallbackGuard?.();
-  this.activityCoalesceTimer = window.setTimeout(() => {
+  this.activityCoalesceTimer = this.lifecycle?.setTimer(() => {
     this.activityCoalesceTimer = void 0;
     this.flushCoalescedActivity();
   }, ACTIVITY_COALESCE_MS);
 }
 function clearCoalescedActivity() {
-  if (this.activityCoalesceTimer) window.clearTimeout(this.activityCoalesceTimer);
+  this.lifecycle?.clearTimer(this.activityCoalesceTimer);
   this.activityCoalesceTimer = void 0;
   this.activityCoalescePending = false;
   this.activityCoalesceGuard = void 0;
 }
 function flushCoalescedActivity() {
   if (this.activityCoalesceTimer) {
-    window.clearTimeout(this.activityCoalesceTimer);
+    this.lifecycle?.clearTimer(this.activityCoalesceTimer);
     this.activityCoalesceTimer = void 0;
   }
   const pending = this.activityCoalescePending === true;
@@ -9269,11 +9276,102 @@ function restoreEditorScroll(editor, scroll) {
   } catch {}
 }
 
+// src/ui/view/lifecycle.mjs
+function createViewLifecycle() {
+  const timers = /* @__PURE__ */ new Set();
+  const cleanups = /* @__PURE__ */ new Set();
+  let disposed = false;
+  const clearTimeoutSafe = (handle) => {
+    if (typeof window !== "undefined") window.clearTimeout(handle);
+    else clearTimeout(handle);
+  };
+  return {
+    get disposed() {
+      return disposed;
+    },
+    get pendingTimers() {
+      return timers.size;
+    },
+    get pendingCleanups() {
+      return cleanups.size;
+    },
+    /**
+     * Schedule a callback and remember its handle. The callback is skipped if
+     * the view was disposed while the timer was pending, so a late timer can
+     * never touch torn-down DOM.
+     *
+     * @param {() => void} callback
+     * @param {number} delayMs
+     * @returns {any} The timer handle.
+     */
+    setTimer(callback, delayMs) {
+      if (disposed) return void 0;
+      const handle = setTimeout(() => {
+        timers.delete(handle);
+        if (disposed) return;
+        callback();
+      }, delayMs);
+      timers.add(handle);
+      return handle;
+    },
+    /**
+     * @param {any} handle
+     */
+    clearTimer(handle) {
+      if (handle === void 0 || handle === null) return;
+      timers.delete(handle);
+      clearTimeoutSafe(handle);
+    },
+    /**
+     * Register a disconnect/release function to run on dispose.
+     *
+     * @param {() => void} cleanup
+     * @returns {() => void} An idempotent release function for this cleanup.
+     */
+    addCleanup(cleanup) {
+      if (disposed) {
+        cleanup();
+        return () => {};
+      }
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        cleanups.delete(release);
+        cleanup();
+      };
+      cleanups.add(release);
+      return release;
+    },
+    /**
+     * Stop every outstanding timer and run every registered cleanup. Safe to
+     * call more than once; a view is disposed once but teardown paths overlap.
+     */
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const handle of [...timers]) {
+        timers.delete(handle);
+        clearTimeoutSafe(handle);
+      }
+      for (const release of [...cleanups]) {
+        cleanups.delete(release);
+        try {
+          release();
+        } catch (error) {
+          console.error("Pi Agent: view cleanup failed", error);
+        }
+      }
+    }
+  };
+}
+
 // src/ui/PiAgentView.mjs
 var PiAgentView = class extends f4.ItemView {
   constructor(e, t2) {
     super(e);
     this.plugin = t2;
+    this.lifecycle = createViewLifecycle();
     this.running = false;
     this.canceling = false;
     this.activityText = "Thinking";
@@ -9349,12 +9447,13 @@ var PiAgentView = class extends f4.ItemView {
     this.renderChatView();
   }
   renderChatView() {
+    if (this.lifecycle) this.lifecycle.dispose();
+    this.lifecycle = createViewLifecycle();
     this.showingThreadList = false;
     let currentThreadId = this.getCurrentThreadId();
     if (this.renderedThreadId !== currentThreadId) this.resetTransientRunUiState();
     this.renderedThreadId = currentThreadId;
     this.syncCurrentRunFlags();
-    this.cleanupComposerBarObserver();
     let e = this.containerEl.children[1];
     e.empty();
     e.addClass("pi-agent-view");
@@ -9521,7 +9620,7 @@ var PiAgentView = class extends f4.ItemView {
       this.suggestions?.update();
     });
     this.inputEl.addEventListener("blur", () => {
-      window.setTimeout(() => {
+      this.lifecycle.setTimer(() => {
         this.suggestions?.close();
       }, 120);
     });
@@ -9581,6 +9680,7 @@ var PiAgentView = class extends f4.ItemView {
     this.clearCoalescedActivity();
     this.cancelStreamingFlush();
     this.unloadMessageRenderComponents();
+    this.lifecycle?.dispose();
     this.messageActions = void 0;
     this.noteActions = void 0;
     this.threadMenu = void 0;
@@ -9828,7 +9928,6 @@ var PiAgentView = class extends f4.ItemView {
     }
   }
   observeComposerBar(e) {
-    this.cleanupComposerBarObserver();
     let t2 = () => this.updateComposerBarMode(e.clientWidth);
     t2();
     if (typeof ResizeObserver == "undefined") {
@@ -9840,8 +9939,7 @@ var PiAgentView = class extends f4.ItemView {
             window.removeEventListener("resize", t2);
           }
         };
-      this.composerBarCleanup = s2;
-      this.register(s2);
+      this.composerBarCleanup = this.lifecycle.addCleanup(s2);
       return;
     }
     let n = new ResizeObserver((a2) => {
@@ -9858,8 +9956,7 @@ var PiAgentView = class extends f4.ItemView {
         }
       };
     n.observe(e);
-    this.composerBarCleanup = a;
-    this.register(a);
+    this.composerBarCleanup = this.lifecycle.addCleanup(a);
   }
   updateComposerBarMode(e) {
     let t2 = this.composerBarEl;

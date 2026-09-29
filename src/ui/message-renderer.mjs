@@ -295,7 +295,11 @@ export function scheduleStreamingFlush() {
   // The delayed frame callback carries a run/thread generation
   // guard so a settled run or switched thread cannot repaint stale content.
   this.streamingFlushGuard = this.captureUiCallbackGuard?.();
+  // Registered with the view lifecycle so closing the view cancels this frame.
+  // The handle is captured, not read back later: cancelling clears the field,
+  // and a cleanup that read it then would call cancel without an argument.
   this.streamingFlushRaf = requestFrame(() => {
+    this.releaseStreamingFlushCleanup();
     this.streamingFlushRaf = undefined;
     const guard = this.streamingFlushGuard;
     this.streamingFlushGuard = undefined;
@@ -307,15 +311,29 @@ export function scheduleStreamingFlush() {
     }
     this.flushStreaming();
   });
+  const frameHandle = this.streamingFlushRaf;
+  this.streamingFlushCleanup = this.lifecycle?.addCleanup(() => cancelFrame(frameHandle));
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function cancelStreamingFlush() {
-  if (this.streamingFlushRaf !== undefined) {
-    cancelFrame(this.streamingFlushRaf);
-    this.streamingFlushRaf = undefined;
-  }
+  // The lifecycle registration is the single place that cancels the frame, so
+  // this cannot cancel twice; releaseStreamingFlushCleanup() clears the field.
+  this.releaseStreamingFlushCleanup();
+  this.streamingFlushRaf = undefined;
   this.streamingFlushGuard = undefined;
+}
+
+/**
+ * Drop the frame's lifecycle registration, if any. Called when the frame runs
+ * or is cancelled, so dispose() does not touch a frame that is already gone.
+ *
+ * @this {import("./view/view-surface.mjs").PiAgentViewSurface}
+ */
+export function releaseStreamingFlushCleanup() {
+  const release = this.streamingFlushCleanup;
+  this.streamingFlushCleanup = undefined;
+  if (typeof release === "function") release();
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */

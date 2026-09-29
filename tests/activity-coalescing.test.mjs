@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as activityMethods from "../src/ui/run-activity-state.mjs";
+import { createViewLifecycle } from "../src/ui/view/lifecycle.mjs";
 import { performanceProfiler } from "../src/shared/performance-profiler.mjs";
 
 beforeEach(() => {
@@ -15,6 +16,7 @@ afterEach(() => {
 
 function createView(overrides = {}) {
   return Object.assign({}, activityMethods, {
+    lifecycle: createViewLifecycle(),
     running: true,
     activityText: "",
     activityKind: "thinking",

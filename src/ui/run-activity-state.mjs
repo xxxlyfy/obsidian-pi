@@ -69,7 +69,9 @@ export function schedulePendingActivity() {
   // run/thread generation so a settled run or switched thread cannot apply it.
   this.pendingActivityGuard = this.captureUiCallbackGuard?.();
   let e = Math.max(0, this.activityStickyUntil - Date.now());
-  this.pendingActivityTimer = window.setTimeout(() => {
+  // Registered with the view lifecycle: if the view closes before this fires,
+  // the callback is dropped instead of touching torn-down DOM.
+  this.pendingActivityTimer = this.lifecycle?.setTimer(() => {
     this.pendingActivityTimer = void 0;
     this.flushPendingActivity();
   }, e);
@@ -77,7 +79,7 @@ export function schedulePendingActivity() {
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function clearPendingActivityTimer() {
-  if (this.pendingActivityTimer) window.clearTimeout(this.pendingActivityTimer);
+  this.lifecycle?.clearTimer(this.pendingActivityTimer);
   this.pendingActivityTimer = void 0;
   this.pendingActivityGuard = void 0;
 }
@@ -114,7 +116,8 @@ export function scheduleCoalescedActivity() {
   this.activityCoalescePending = true;
   if (this.activityCoalesceTimer) return;
   this.activityCoalesceGuard = this.captureUiCallbackGuard?.();
-  this.activityCoalesceTimer = window.setTimeout(() => {
+  // Registered with the view lifecycle so a teardown drops the callback.
+  this.activityCoalesceTimer = this.lifecycle?.setTimer(() => {
     this.activityCoalesceTimer = void 0;
     this.flushCoalescedActivity();
   }, ACTIVITY_COALESCE_MS);
@@ -122,7 +125,7 @@ export function scheduleCoalescedActivity() {
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function clearCoalescedActivity() {
-  if (this.activityCoalesceTimer) window.clearTimeout(this.activityCoalesceTimer);
+  this.lifecycle?.clearTimer(this.activityCoalesceTimer);
   this.activityCoalesceTimer = void 0;
   this.activityCoalescePending = false;
   this.activityCoalesceGuard = void 0;
@@ -131,7 +134,7 @@ export function clearCoalescedActivity() {
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function flushCoalescedActivity() {
   if (this.activityCoalesceTimer) {
-    window.clearTimeout(this.activityCoalesceTimer);
+    this.lifecycle?.clearTimer(this.activityCoalesceTimer);
     this.activityCoalesceTimer = void 0;
   }
   const pending = this.activityCoalescePending === true;
