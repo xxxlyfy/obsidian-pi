@@ -42,6 +42,7 @@ import { openNotificationThread, showDesktopRunNotification } from "./desktop-no
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import { now } from "../shared/runtime.mjs";
 import { createViewLifecycle } from "./view/lifecycle.mjs";
+import { createViewState } from "./view/view-state.mjs";
 // Aliased: `t` is already a local identifier throughout this view.
 import { t as tr } from "../shared/i18n/index.mjs";
 
@@ -60,44 +61,11 @@ export class PiAgentView extends f.ItemView {
     this.plugin = t;
     /** @type {import("./view/lifecycle.mjs").ViewLifecycle} Timers and cleanup handles owned by this view. */
     this.lifecycle = createViewLifecycle();
-    this.running = !1;
-    this.canceling = !1;
-    this.activityText = "Thinking";
-    this.activityKind = "thinking";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
-    this.pendingActivityTimer = void 0;
-    this.isRenderingMessages = !1;
-    this.activeToolCalls = new Map();
-    this.currentRunContextUsage = void 0;
-    this.invalidatedContextThreadIds = new Set();
-    this.streamingAssistantContent = "";
-    this.streamingAnswerDirty = false;
-    this.streamingThinkingDirty = false;
-    this.streamingFlushRaf = undefined;
-    this.streamingFlushGuard = undefined;
-    this.pendingActivityGuard = undefined;
-    this.activityCoalesceTimer = undefined;
-    this.activityCoalescePending = false;
-    this.activityCoalesceGuard = undefined;
-    this.runGenerationCounter = 0;
-    this.threadGeneration = 0;
-    this.promptQueue = this.plugin.getLocalPromptQueue();
-    this.composerImages = [];
-    this.composerAttachments = [];
-    this.nativePiQueue = undefined;
-    this.steeringPromptIds = new Set();
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.completedThinkingExpansion = new Map();
-    this.messageRenderComponents = [];
-    this.messageRenderComponentByElement = new WeakMap();
-    this.activeRuns = new Map();
-    this.desktopNotificationRunIds = new Set();
-    this.nextDesktopNotificationRunId = 1;
-    this.stickToBottom = !0;
+    // Transient view state lives in one documented place (see view-state.mjs).
+    // Object.assign keeps the fields on this instance, because the mixins read
+    // and write them through `this`; it just stops this constructor from being
+    // the only description of what state a view has.
+    Object.assign(this, createViewState(t));
   }
 
   // The mixin modules above add their methods, and some of their state, to this

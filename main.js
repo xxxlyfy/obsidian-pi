@@ -9366,50 +9366,58 @@ function createViewLifecycle() {
   };
 }
 
+// src/ui/view/view-state.mjs
+function createViewState(plugin) {
+  return {
+    running: false,
+    canceling: false,
+    activityText: "Thinking",
+    activityKind: "thinking",
+    activityDetail: "",
+    activityStickyUntil: 0,
+    pendingActivity: void 0,
+    pendingActivityTimer: void 0,
+    pendingActivityGuard: void 0,
+    isRenderingMessages: false,
+    activeToolCalls: /* @__PURE__ */ new Map(),
+    currentRunContextUsage: void 0,
+    invalidatedContextThreadIds: /* @__PURE__ */ new Set(),
+    streamingAssistantContent: "",
+    streamingThinkingContent: "",
+    streamingAnswerDirty: false,
+    streamingThinkingDirty: false,
+    streamingFlushRaf: void 0,
+    streamingFlushGuard: void 0,
+    streamingFlushCleanup: void 0,
+    activityCoalesceTimer: void 0,
+    activityCoalesceGuard: void 0,
+    activityCoalescePending: false,
+    runGenerationCounter: 0,
+    threadGeneration: 0,
+    promptQueue: plugin.getLocalPromptQueue(),
+    composerImages: [],
+    composerAttachments: [],
+    nativePiQueue: void 0,
+    steeringPromptIds: /* @__PURE__ */ new Set(),
+    thinkingDisclosureExpanded: false,
+    thinkingDisclosureUserSet: false,
+    completedThinkingExpansion: /* @__PURE__ */ new Map(),
+    messageRenderComponents: [],
+    messageRenderComponentByElement: /* @__PURE__ */ new WeakMap(),
+    activeRuns: /* @__PURE__ */ new Map(),
+    desktopNotificationRunIds: /* @__PURE__ */ new Set(),
+    nextDesktopNotificationRunId: 1,
+    stickToBottom: true
+  };
+}
+
 // src/ui/PiAgentView.mjs
 var PiAgentView = class extends f4.ItemView {
   constructor(e, t2) {
     super(e);
     this.plugin = t2;
     this.lifecycle = createViewLifecycle();
-    this.running = false;
-    this.canceling = false;
-    this.activityText = "Thinking";
-    this.activityKind = "thinking";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
-    this.pendingActivityTimer = void 0;
-    this.isRenderingMessages = false;
-    this.activeToolCalls = /* @__PURE__ */ new Map();
-    this.currentRunContextUsage = void 0;
-    this.invalidatedContextThreadIds = /* @__PURE__ */ new Set();
-    this.streamingAssistantContent = "";
-    this.streamingAnswerDirty = false;
-    this.streamingThinkingDirty = false;
-    this.streamingFlushRaf = void 0;
-    this.streamingFlushGuard = void 0;
-    this.pendingActivityGuard = void 0;
-    this.activityCoalesceTimer = void 0;
-    this.activityCoalescePending = false;
-    this.activityCoalesceGuard = void 0;
-    this.runGenerationCounter = 0;
-    this.threadGeneration = 0;
-    this.promptQueue = this.plugin.getLocalPromptQueue();
-    this.composerImages = [];
-    this.composerAttachments = [];
-    this.nativePiQueue = void 0;
-    this.steeringPromptIds = /* @__PURE__ */ new Set();
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.completedThinkingExpansion = /* @__PURE__ */ new Map();
-    this.messageRenderComponents = [];
-    this.messageRenderComponentByElement = /* @__PURE__ */ new WeakMap();
-    this.activeRuns = /* @__PURE__ */ new Map();
-    this.desktopNotificationRunIds = /* @__PURE__ */ new Set();
-    this.nextDesktopNotificationRunId = 1;
-    this.stickToBottom = true;
+    Object.assign(this, createViewState(t2));
   }
   // The mixin modules above add their methods, and some of their state, to this
   // instance at runtime via Object.assign at the end of this file. There is no

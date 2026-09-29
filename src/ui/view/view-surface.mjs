@@ -42,47 +42,52 @@
  * @property {any} app Obsidian app instance.
  * @property {any} renderedThreadId Thread id currently rendered.
  * @property {any} runningThreadId Thread id of the run in progress.
- * @property {any} currentRunContextUsage Context usage of the current run.
- * @property {any} pendingActivity Queued activity update, when sticky.
- * @property {any} pendingActivityTimer Timer handle for the pending activity.
- * @property {any} pendingActivityGuard Stale-callback guard for the pending activity.
- * @property {any} activityCoalesceTimer Timer handle for coalesced activity.
- * @property {any} activityCoalesceGuard Stale-callback guard for coalesced activity.
- * @property {any} streamingFlushRaf Frame handle for the streaming flush.
- * @property {any} streamingFlushGuard Stale-callback guard for the streaming flush.
- * @property {any} lifecycle View lifecycle owning timers and cleanup handles.
+ * State fields are derived from `ViewState` in `./view-state.mjs` rather than
+ * repeated here, so there is one definition of each field and its type.
+ *
+ * @property {import("./view-state.mjs").ViewState["currentRunContextUsage"]} currentRunContextUsage
+ * @property {import("./view-state.mjs").ViewState["pendingActivity"]} pendingActivity
+ * @property {import("./view-state.mjs").ViewState["pendingActivityTimer"]} pendingActivityTimer
+ * @property {import("./view-state.mjs").ViewState["pendingActivityGuard"]} pendingActivityGuard
+ * @property {import("./view-state.mjs").ViewState["activityCoalesceTimer"]} activityCoalesceTimer
+ * @property {import("./view-state.mjs").ViewState["activityCoalesceGuard"]} activityCoalesceGuard
+ * @property {import("./view-state.mjs").ViewState["activityCoalescePending"]} activityCoalescePending
+ * @property {import("./view-state.mjs").ViewState["streamingFlushRaf"]} streamingFlushRaf
+ * @property {import("./view-state.mjs").ViewState["streamingFlushGuard"]} streamingFlushGuard
+ * @property {import("./view-state.mjs").ViewState["streamingFlushCleanup"]} streamingFlushCleanup
+ * @property {import("./view-state.mjs").ViewState["running"]} running
+ * @property {import("./view-state.mjs").ViewState["canceling"]} canceling
+ * @property {import("./view-state.mjs").ViewState["stickToBottom"]} stickToBottom
+ * @property {import("./view-state.mjs").ViewState["isRenderingMessages"]} isRenderingMessages
+ * @property {import("./view-state.mjs").ViewState["streamingAnswerDirty"]} streamingAnswerDirty
+ * @property {import("./view-state.mjs").ViewState["streamingThinkingDirty"]} streamingThinkingDirty
+ * @property {import("./view-state.mjs").ViewState["thinkingDisclosureExpanded"]} thinkingDisclosureExpanded
+ * @property {import("./view-state.mjs").ViewState["thinkingDisclosureUserSet"]} thinkingDisclosureUserSet
+ * @property {import("./view-state.mjs").ViewState["activityText"]} activityText
+ * @property {import("./view-state.mjs").ViewState["activityKind"]} activityKind
+ * @property {import("./view-state.mjs").ViewState["activityDetail"]} activityDetail
+ * @property {import("./view-state.mjs").ViewState["activityStickyUntil"]} activityStickyUntil
+ * @property {import("./view-state.mjs").ViewState["threadGeneration"]} threadGeneration
+ * @property {import("./view-state.mjs").ViewState["runGenerationCounter"]} runGenerationCounter
+ * @property {import("./view-state.mjs").ViewState["streamingAssistantContent"]} streamingAssistantContent
+ * @property {import("./view-state.mjs").ViewState["streamingThinkingContent"]} streamingThinkingContent
+ * @property {import("./view-state.mjs").ViewState["invalidatedContextThreadIds"]} invalidatedContextThreadIds
+ * @property {import("./view-state.mjs").ViewState["steeringPromptIds"]} steeringPromptIds
+ * @property {import("./view-state.mjs").ViewState["desktopNotificationRunIds"]} desktopNotificationRunIds
+ * @property {import("./view-state.mjs").ViewState["activeToolCalls"]} activeToolCalls
+ * @property {import("./view-state.mjs").ViewState["activeRuns"]} activeRuns
+ * @property {import("./view-state.mjs").ViewState["completedThinkingExpansion"]} completedThinkingExpansion
+ * @property {import("./view-state.mjs").ViewState["promptQueue"]} promptQueue
+ * @property {import("./view-state.mjs").ViewState["composerImages"]} composerImages
+ * @property {import("./view-state.mjs").ViewState["composerAttachments"]} composerAttachments
+ * @property {import("./view-state.mjs").ViewState["messageRenderComponents"]} messageRenderComponents
+ * @property {import("./view-state.mjs").ViewState["messageRenderComponentByElement"]} messageRenderComponentByElement
+ *
+ * @property {import("./lifecycle.mjs").ViewLifecycle} lifecycle Timers and cleanup handles owned by this view.
  * @property {any} composerBarCleanup Release handle for the composer-bar observer.
- * @property {any} streamingFlushCleanup Release handle for the streaming frame.
+ * @property {boolean} showingThreadList Whether the thread list replaces the chat.
  * @property {(...args: any[]) => any} releaseStreamingFlushCleanup
  * @property {(...args: any[]) => any} cleanupComposerBarObserver
- * @property {boolean} running Whether any run is active for the rendered thread.
- * @property {boolean} canceling Whether the current run is being cancelled.
- * @property {boolean} stickToBottom Whether the message list follows new content.
- * @property {boolean} showingThreadList Whether the thread list replaces the chat.
- * @property {boolean} isRenderingMessages Re-entrancy guard for message rendering.
- * @property {boolean} streamingAnswerDirty Whether the answer element needs a repaint.
- * @property {boolean} streamingThinkingDirty Whether the thinking element needs a repaint.
- * @property {boolean} thinkingDisclosureExpanded Whether thinking is expanded.
- * @property {boolean} thinkingDisclosureUserSet Whether the user toggled thinking.
- * @property {string} activityText Current activity label.
- * @property {string} activityKind Current activity kind.
- * @property {string} activityDetail Current activity detail line.
- * @property {number} activityStickyUntil Timestamp until the activity stays sticky.
- * @property {number} threadGeneration Generation counter for thread switches.
- * @property {number} runGenerationCounter Counter for run generations.
- * @property {string} streamingAssistantContent Accumulated assistant answer text.
- * @property {string} streamingThinkingContent Accumulated thinking text.
- * @property {Set<any>} invalidatedContextThreadIds Threads with invalidated context.
- * @property {Set<any>} steeringPromptIds Prompt ids already steered.
- * @property {Set<any>} desktopNotificationRunIds Runs already notified.
- * @property {Map<any, any>} activeToolCalls Tool calls in flight.
- * @property {Map<any, any>} activeRuns Runs in flight by thread id.
- * @property {Map<any, any>} completedThinkingExpansion Thinking expansion by message key.
- * @property {any[]} promptQueue Local prompt queue.
- * @property {any[]} composerImages Attached images.
- * @property {any[]} composerAttachments Attached text files.
- * @property {any[]} messageRenderComponents Markdown render components to unload.
- * @property {WeakMap<any, any>} messageRenderComponentByElement Components by element.
  *
  * @property {(...args: any[]) => any} getCurrentThreadId
  * @property {(...args: any[]) => any} isCurrentThread
