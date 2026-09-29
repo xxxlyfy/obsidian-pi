@@ -73,13 +73,22 @@ settings round-trip, and no console error appears.
 `--run` adds the scenarios that need a real Pi process:
 
 - one prompt completes through the RPC pipeline and renders a reply;
-- **cancelling a run mid-stream**: a long prompt is started, the harness waits
-  until content is actually streaming, calls `cancelCurrentRun()`, then asserts
-  the run settles immediately with no timer, animation frame, stale guard,
-  pending activity or active run left behind, and that the in-flight streaming
-  cleanup was released;
+- **cancelling a run mid-flight**: a long prompt is started, the harness waits
+  until the run is genuinely registered as running, plants a pending activity
+  timer, then calls `cancelCurrentRun()` and asserts the run settles
+  immediately, the planted timer is gone before it can fire, and no timer,
+  animation frame, stale guard, pending activity or active run is left behind;
 - a further prompt still runs normally in the same view, proving the cancelled
   run left no residue.
+
+Two notes for anyone extending this harness:
+
+- `view.running` is a render flag for the displayed thread, not "a run is in
+  flight". The run registers in `view.activeRuns` as soon as it starts, so that
+  is the signal to wait on.
+- A streaming animation frame is only pending for about one frame, so an
+  assertion that samples it at one instant is a coin flip. The harness plants
+  the pending timer it wants to test instead of waiting to catch one.
 
 ### Architecture
 

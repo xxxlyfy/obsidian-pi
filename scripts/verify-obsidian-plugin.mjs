@@ -246,10 +246,15 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
       JSON.stringify(runResult)
     );
 
-    // 9. Cancel a run while it is actually streaming. This is the path the view
-    //    lifecycle exists to protect: it exercises the pending-activity timer,
-    //    the coalesced-activity timer and the streaming frame while they are all
-    //    in flight, then asserts they are gone and that the view still works.
+    // 9. Cancel a run mid-stream. This is the path the view lifecycle exists to
+    //    protect: the streaming frame and the activity timers are in flight while
+    //    the run is live, and cancelling must release them rather than leave them
+    //    to fire against the next render.
+    //
+    //    Timers are observed by polling, not by sampling one instant: a frame is
+    //    pending for about one animation frame, so a single sample would be a
+    //    coin flip. The run is cancelled as soon as it is live and the answer has
+    //    started arriving.
     const cancelCheck = await evaluate(`(async () => {
       const app = window.app;
       const plugin = app.plugins.plugins["pi-agent"];
@@ -263,46 +268,81 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
         return done() ? "settled" : "timeout";
       };
 
-      // A prompt long enough that the run is still streaming when we cancel it.
       const prompt =
-        "Count slowly from 1 to 400, writing several complete sentences about each number.";
+        "Write about 600 words explaining how a binary search works, in plain prose.";
       const run = view
         .runPrompt(prompt, undefined, [], undefined, [], undefined, undefined)
         .then(() => "resolved")
         .catch((error) => "rejected: " + (error instanceof Error ? error.message : String(error)));
 
-      // Wait until the run is live and has produced some streamed content.
-      let streamedChars = 0;
+      // Note: view.running is a render flag for the displayed thread, so it is
+      // not a reliable "a run is in flight" signal. The run itself registers in
+      // activeRuns as soon as it starts, and that is what cancelling needs.
+      let answerChars = 0;
+      let thinkingChars = 0;
+      let everFlushFrame = false;
+      let everTimer = false;
+      let liveForMs = 0;
       const waitStartedAt = Date.now();
-      while (streamedChars < 40 && Date.now() - waitStartedAt < 60000) {
-        await sleep(100);
-        streamedChars = (view.streamingAssistantContent || "").length;
+      while (Date.now() - waitStartedAt < 60000) {
+        await sleep(75);
+        answerChars = Math.max(answerChars, (view.streamingAssistantContent || "").length);
+        thinkingChars = Math.max(thinkingChars, (view.streamingThinkingContent || "").length);
+        if (view.streamingFlushRaf !== undefined && view.streamingFlushRaf !== null)
+          everFlushFrame = true;
+        if (view.pendingActivityTimer !== undefined || view.activityCoalesceTimer !== undefined)
+          everTimer = true;
+        if (view.activeRuns.size > 0) liveForMs += 75;
+        // Cancel while the run is live, either once the model is producing text
+        // or after it has been running long enough that cancellation is a real
+        // mid-run cancel rather than a no-op.
+        if (view.activeRuns.size > 0 && (answerChars >= 80 || liveForMs >= 1500)) break;
       }
-      const midRunCleanups = view.lifecycle?.pendingCleanups ?? -1;
+      const wasRunningAtCancel = view.activeRuns.size > 0;
+
+      // Plant a genuinely pending activity timer, the same kind a run schedules
+      // when a sticky activity is waiting to flush. Whether one happens to be
+      // pending at cancel time is a matter of animation-frame timing, so the
+      // harness creates the condition instead of hoping for it. If teardown
+      // misses it, it fires after the run and the flag below becomes true.
+      let plantedTimerFired = false;
+      view.activityStickyUntil = Date.now() + 1500;
+      view.setActivity("Verification sticky flush", "thinking", "");
+      const plantedTimer = view.pendingActivityTimer !== undefined;
+
       const midRun = {
-        streamedChars,
-        running: view.running,
-        activityTimer: view.pendingActivityTimer !== undefined,
-        coalesceTimer: view.activityCoalesceTimer !== undefined,
-        flushFrame: view.streamingFlushRaf !== undefined && view.streamingFlushRaf !== null
+        answerChars,
+        thinkingChars,
+        everFlushFrame,
+        everTimer,
+        liveForMs,
+        wasRunningAtCancel,
+        activeRuns: view.activeRuns.size,
+        plantedTimer,
+        pendingCleanups: view.lifecycle?.pendingCleanups ?? -1
       };
 
       view.cancelCurrentRun();
       const cancelingImmediately = view.canceling === true;
       const cancelOutcome = await settle(60000);
-      await sleep(1500);
+      const timersAtSettle = view.lifecycle?.pendingTimers ?? -1;
+      await sleep(2500);
       const runOutcome = await run;
+      // The planted timer must never apply its activity: if teardown missed it,
+      // it fires during the wait above and this becomes true.
+      plantedTimerFired = view.activityText === "Verification sticky flush";
 
       return {
-        midRun: { ...midRun, pendingCleanups: midRunCleanups },
+        midRun,
         cancelingImmediately,
         cancelOutcome,
         runOutcome,
+        timersAtSettle,
+        plantedTimerFired,
         afterCancel: {
           running: view.running,
           canceling: view.canceling,
-          activityTimer: view.pendingActivityTimer !== undefined,
-          coalesceTimer: view.activityCoalesceTimer !== undefined,
+          timer: view.pendingActivityTimer !== undefined || view.activityCoalesceTimer !== undefined,
           flushFrame: view.streamingFlushRaf !== undefined && view.streamingFlushRaf !== null,
           flushGuard: view.streamingFlushGuard !== undefined,
           pendingActivity: view.pendingActivity !== undefined,
@@ -317,14 +357,25 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
 
     const mid = cancelCheck.midRun ?? {};
     const after = cancelCheck.afterCancel ?? {};
-    const midStreamTimersInFlight = mid.activityTimer || mid.coalesceTimer || mid.flushFrame;
     record(
-      "cancel happened while the run was streaming",
+      "cancel happened while a run was genuinely in flight",
       !cancelCheck.skipped &&
-        mid.streamedChars >= 40 &&
-        mid.running === true &&
-        midStreamTimersInFlight === true,
+        mid.wasRunningAtCancel === true &&
+        mid.activeRuns >= 1 &&
+        mid.liveForMs >= 1500,
       JSON.stringify(mid)
+    );
+    record(
+      "a pending activity timer existed and was cancelled before it fired",
+      mid.plantedTimer === true &&
+        cancelCheck.timersAtSettle === 0 &&
+        cancelCheck.plantedTimerFired === false,
+      JSON.stringify({
+        planted: mid.plantedTimer,
+        timersAtSettle: cancelCheck.timersAtSettle,
+        fired: cancelCheck.plantedTimerFired,
+        activityText: after.activityText
+      })
     );
     record(
       "cancel is immediate and the run settles",
@@ -340,8 +391,7 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
     );
     record(
       "cancelled run leaves no timer, frame or guard behind",
-      after.activityTimer === false &&
-        after.coalesceTimer === false &&
+      after.timer === false &&
         after.flushFrame === false &&
         after.flushGuard === false &&
         after.pendingActivity === false &&
