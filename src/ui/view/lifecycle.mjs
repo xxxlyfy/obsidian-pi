@@ -1,3 +1,5 @@
+import { hostTimers } from "../../shared/runtime.mjs";
+
 /**
  * @typedef {object} ViewLifecycle
  * @property {boolean} disposed Whether teardown already ran.
@@ -25,11 +27,6 @@ export function createViewLifecycle() {
   const cleanups = new Set();
   let disposed = false;
 
-  const clearTimeoutSafe = (handle) => {
-    if (typeof window !== "undefined") window.clearTimeout(handle);
-    else clearTimeout(handle);
-  };
-
   return {
     get disposed() {
       return disposed;
@@ -54,7 +51,8 @@ export function createViewLifecycle() {
      */
     setTimer(callback, delayMs) {
       if (disposed) return undefined;
-      const handle = setTimeout(() => {
+      const timersApi = hostTimers();
+      const handle = timersApi.setTimeout(() => {
         timers.delete(handle);
         if (disposed) return;
         callback();
@@ -69,7 +67,7 @@ export function createViewLifecycle() {
     clearTimer(handle) {
       if (handle === undefined || handle === null) return;
       timers.delete(handle);
-      clearTimeoutSafe(handle);
+      hostTimers().clearTimeout(handle);
     },
 
     /**
@@ -101,9 +99,10 @@ export function createViewLifecycle() {
     dispose() {
       if (disposed) return;
       disposed = true;
+      const timersApi = hostTimers();
       for (const handle of [...timers]) {
         timers.delete(handle);
-        clearTimeoutSafe(handle);
+        timersApi.clearTimeout(handle);
       }
       for (const release of [...cleanups]) {
         cleanups.delete(release);

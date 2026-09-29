@@ -67,6 +67,16 @@ function structuredCloneSafe(value) {
 function hostGlobals() {
   return globalThis;
 }
+function hostTimers() {
+  const activeWindow =
+    /** @type {any} */
+    resolveActiveWindow();
+  if (activeWindow) return activeWindow;
+  return (
+    /** @type {any} */
+    hostGlobals()
+  );
+}
 function now() {
   const performanceApi = resolveActiveWindow()?.performance ?? hostGlobals().performance;
   return performanceApi?.now ? performanceApi.now() : Date.now();
@@ -9281,10 +9291,6 @@ function createViewLifecycle() {
   const timers = /* @__PURE__ */ new Set();
   const cleanups = /* @__PURE__ */ new Set();
   let disposed = false;
-  const clearTimeoutSafe = (handle) => {
-    if (typeof window !== "undefined") window.clearTimeout(handle);
-    else clearTimeout(handle);
-  };
   return {
     get disposed() {
       return disposed;
@@ -9306,7 +9312,8 @@ function createViewLifecycle() {
      */
     setTimer(callback, delayMs) {
       if (disposed) return void 0;
-      const handle = setTimeout(() => {
+      const timersApi = hostTimers();
+      const handle = timersApi.setTimeout(() => {
         timers.delete(handle);
         if (disposed) return;
         callback();
@@ -9320,7 +9327,7 @@ function createViewLifecycle() {
     clearTimer(handle) {
       if (handle === void 0 || handle === null) return;
       timers.delete(handle);
-      clearTimeoutSafe(handle);
+      hostTimers().clearTimeout(handle);
     },
     /**
      * Register a disconnect/release function to run on dispose.
@@ -9350,9 +9357,10 @@ function createViewLifecycle() {
     dispose() {
       if (disposed) return;
       disposed = true;
+      const timersApi = hostTimers();
       for (const handle of [...timers]) {
         timers.delete(handle);
-        clearTimeoutSafe(handle);
+        timersApi.clearTimeout(handle);
       }
       for (const release of [...cleanups]) {
         cleanups.delete(release);

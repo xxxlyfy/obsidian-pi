@@ -58,6 +58,20 @@ export function hostGlobals() {
 }
 
 /**
+ * The timer functions for the window the UI acts on, falling back to the host
+ * global in environments without a DOM (unit tests under Node). Callers that
+ * schedule or clear timers should go through this instead of the bare globals so
+ * a view in a popout window schedules against its own window.
+ *
+ * @returns {{ setTimeout: (fn: () => void, ms: number) => any, clearTimeout: (handle: any) => void }}
+ */
+export function hostTimers() {
+  const activeWindow = /** @type {any} */ (resolveActiveWindow());
+  if (activeWindow) return activeWindow;
+  return /** @type {any} */ (hostGlobals());
+}
+
+/**
  * High-resolution timestamp for profiling and drain budgets. Prefers the active
  * window's `performance` so measurements stay correct when a view lives in a
  * popout window, and falls back to the host global or `Date.now()` so Node
