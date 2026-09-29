@@ -127,6 +127,34 @@ callbacks → the view coalesces them into DOM updates.
 - `data.json` may still contain retired settings (`dryRun`, `maxSearchResults`,
   `maxSearchFiles`, `maxFileChars`, `maxChangeSnapshotFiles`). They are ignored
   on load and kept only so old files keep opening.
-- The test suite is the only automated check of UI behavior: there is no
-  Obsidian-level integration test, so changes to layout or platform APIs need a
-  manual pass in a real vault.
+
+### Deliberate gaps in the quality gate
+
+Three gaps are known and intentional. They are listed so nobody rediscovers
+them as bugs, and so it is clear what `npm run ci` does _not_ prove.
+
+- **`src/ui/PiAgentView.mjs` opts out of type checking** with an explained
+  `@ts-nocheck`. That class composes its mixins at runtime, and plain JavaScript
+  has no way to declare those members without creating real instance fields,
+  which shadow the mixin methods with `undefined`. (TypeScript's `declare` would
+  work, but Obsidian loads this bundle untranspiled, where `declare` is a syntax
+  error.) The mixins, `view-surface.mjs` and `view-state.mjs` are checked, so the
+  composition has types even though this one file does not.
+- **One Obsidian lint warning remains** on purpose:
+  `obsidianmd/prefer-window-timers` wants `window.requestAnimationFrame`, while
+  this plugin calls it on the active window so a view in a popout window
+  schedules against its own window. Satisfying the rule would regress popout
+  support, so the warning is accepted rather than silenced.
+- **The Obsidian harness is not part of CI.** `npm run test:obsidian:run`
+  needs a running Obsidian with the debugging port open, which CI does not have.
+  It is a local gate; run it before releasing anything that touches the view,
+  the lifecycle, or the RPC path. `npm run ci` alone would not have caught the
+  mixin-shadowing crash that this harness found.
+
+## Before releasing
+
+```bash
+npm run ci                  # build, format, lint, types, unit tests, versions
+npm run test:pi             # the Pi CLI is installed and speaks the expected protocol
+npm run test:obsidian:run   # real Obsidian: lifecycle, settings, live run, cancel
+```
