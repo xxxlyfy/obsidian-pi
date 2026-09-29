@@ -1,9 +1,9 @@
-// PATCH 2: RunState / ActiveTools / DiagnosticRing (spec §5.1-5.9).
+// RunState / ActiveTools / DiagnosticRing.
 //
 // Business state is updated incrementally per event and never derived from
 // retained history. The retained `events` log is transitional: it exists only
-// for the legacy compaction consistency assertion (spec §5.6) and must be
-// deleted after three clean real full-vault health checks.
+// for the legacy compaction consistency assertion and must be deleted after
+// three clean real full-vault health checks.
 
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
 
@@ -43,7 +43,7 @@ export class DiagnosticRing {
 }
 
 // Fields kept in the bounded diagnostic copy of an event. Raw payloads (and
-// large tool results) are intentionally dropped (spec §5.8).
+// large tool results) are intentionally dropped.
 const RETAINED_EVENT_KEYS = [
   "toolName",
   "toolCallId",

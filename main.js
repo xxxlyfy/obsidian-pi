@@ -45,6 +45,58 @@ module.exports = __toCommonJS(main_exports);
 var import_node_fs5 = __toESM(require("node:fs"), 1);
 var P = __toESM(require("obsidian"), 1);
 
+// src/shared/runtime.mjs
+function createId() {
+  const activeWindow = resolveActiveWindow();
+  return (
+    activeWindow?.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+}
+function resolveActiveWindow() {
+  return typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
+}
+function resolveViewWindow(view) {
+  return view?.app?.workspace?.containerEl?.ownerDocument?.defaultView ?? resolveActiveWindow();
+}
+function structuredCloneSafe(value) {
+  const activeWindow = resolveActiveWindow();
+  return typeof activeWindow?.structuredClone === "function"
+    ? activeWindow.structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+}
+function hostGlobals() {
+  return globalThis;
+}
+function now() {
+  const performanceApi = resolveActiveWindow()?.performance ?? hostGlobals().performance;
+  return performanceApi?.now ? performanceApi.now() : Date.now();
+}
+function requestFrame(callback) {
+  const activeWindow = resolveActiveWindow();
+  if (typeof activeWindow?.requestAnimationFrame === "function") {
+    return activeWindow.requestAnimationFrame(callback);
+  }
+  const frameApi = hostGlobals().requestAnimationFrame;
+  return typeof frameApi === "function"
+    ? frameApi(callback)
+    : hostGlobals().setTimeout(callback, 16);
+}
+function cancelFrame(handle) {
+  const activeWindow = resolveActiveWindow();
+  if (typeof activeWindow?.cancelAnimationFrame === "function") {
+    activeWindow.cancelAnimationFrame(handle);
+    return;
+  }
+  const cancelApi = hostGlobals().cancelAnimationFrame;
+  if (typeof cancelApi === "function") cancelApi(handle);
+  else hostGlobals().clearTimeout(handle);
+}
+function heapUsedBytes() {
+  const performanceApi = resolveActiveWindow()?.performance ?? hostGlobals().performance;
+  const used = performanceApi?.memory?.usedJSHeapSize;
+  return Number.isFinite(used) ? used : void 0;
+}
+
 // src/annotations/annotation-model.mjs
 var ANNOTATION_SCHEMA_VERSION = 1;
 var ANNOTATION_LIMITS = Object.freeze({
@@ -136,12 +188,12 @@ function normalizeAnnotation(raw, pathOverride) {
     updatedAt
   };
 }
-function createAnnotation(input, now = /* @__PURE__ */ new Date().toISOString(), id = createId()) {
+function createAnnotation(input, now2 = /* @__PURE__ */ new Date().toISOString(), id = createId()) {
   return normalizeAnnotation({
     ...input,
     id: input?.id ?? id,
-    createdAt: input?.createdAt ?? now,
-    updatedAt: input?.updatedAt ?? now,
+    createdAt: input?.createdAt ?? now2,
+    updatedAt: input?.updatedAt ?? now2,
     status: input?.status ?? "attached"
   });
 }
@@ -212,12 +264,6 @@ function nonNegativeInteger(value) {
 function normalizeTimestamp(value, fallback = /* @__PURE__ */ new Date(0).toISOString()) {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return fallback;
   return new Date(value).toISOString();
-}
-function createId() {
-  const activeWindow = typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
-  return (
-    activeWindow?.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
 }
 function annotationDataBytes(data) {
   return utf8Bytes(JSON.stringify(data));
@@ -392,7 +438,7 @@ var AnnotationStore = class {
     const items = this.data.annotations[key];
     if (!items) return [];
     let didChange = false;
-    const now = /* @__PURE__ */ new Date().toISOString();
+    const now2 = /* @__PURE__ */ new Date().toISOString();
     const reconciled = items.map((annotation) => {
       const result = reanchorAnnotation(annotation, text);
       const anchorChanged =
@@ -405,7 +451,7 @@ var AnnotationStore = class {
         result.range.end.ch !== annotation.range.end.ch;
       if (!anchorChanged) return annotation;
       didChange = true;
-      return { ...result, updatedAt: now };
+      return { ...result, updatedAt: now2 };
     });
     if (didChange) {
       this.data.annotations[key] = reconciled;
@@ -442,12 +488,6 @@ var AnnotationStore = class {
     this.onChange(this.toJSON());
   }
 };
-function structuredCloneSafe(value) {
-  const activeWindow = typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
-  return typeof activeWindow?.structuredClone === "function"
-    ? activeWindow.structuredClone(value)
-    : JSON.parse(JSON.stringify(value));
-}
 
 // src/annotations/markdown-annotations-controller.mjs
 var import_obsidian2 = require("obsidian");
@@ -817,7 +857,7 @@ var AnnotationRenderChild = class extends import_obsidian2.MarkdownRenderChild {
   }
 };
 var MarkdownAnnotationsController = class {
-  constructor(plugin, hostWindow = resolveActiveWindow(plugin)) {
+  constructor(plugin, hostWindow = resolveViewWindow(plugin)) {
     this.plugin = plugin;
     this.hostWindow = hostWindow;
     this.leaves = /* @__PURE__ */ new Map();
@@ -1111,13 +1151,13 @@ var MarkdownAnnotationsController = class {
     if (!path6) return false;
     const signature = `${selection.from}:${selection.to}`;
     const previous = this.selectionPicks.get(view);
-    const now = Date.now();
-    if (previous?.signature === signature && now - previous.at < 100) return true;
+    const now2 = Date.now();
+    if (previous?.signature === signature && now2 - previous.at < 100) return true;
     if (selection.to - selection.from > ANNOTATION_LIMITS.quote) {
       new import_obsidian2.Notice("The selected Markdown text is too large to annotate.");
       return true;
     }
-    this.selectionPicks.set(view, { signature, at: now });
+    this.selectionPicks.set(view, { signature, at: now2 });
     this.openCreateModal(
       path6,
       captureAnchor(view.state.doc.toString(), selection.from, selection.to),
@@ -1593,7 +1633,7 @@ var MarkdownAnnotationsController = class {
     const combined = new Map(
       [...previous, ...items].map((annotation) => [
         `${annotation.path}:${annotation.id || `${annotation.range.from}:${annotation.range.to}`}`,
-        structuredCloneSafe2(annotation)
+        structuredCloneSafe(annotation)
       ])
     );
     this.processingByThread.set(key, [...combined.values()]);
@@ -1622,7 +1662,7 @@ var MarkdownAnnotationsController = class {
     return [...this.processingByThread.values()].flatMap((annotations) =>
       annotations
         .filter((annotation) => annotation.path === target)
-        .map((annotation) => structuredCloneSafe2(annotation))
+        .map((annotation) => structuredCloneSafe(annotation))
     );
   }
   handleMarkdownFileModified(file) {
@@ -1837,18 +1877,6 @@ function mergeIntervals(intervals) {
     else previous.to = Math.max(previous.to, interval.to);
   }
   return merged;
-}
-function structuredCloneSafe2(value) {
-  const activeWindow = typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
-  return typeof activeWindow?.structuredClone === "function"
-    ? activeWindow.structuredClone(value)
-    : JSON.parse(JSON.stringify(value));
-}
-function resolveActiveWindow(plugin) {
-  return (
-    plugin?.app?.workspace?.containerEl?.ownerDocument?.defaultView ??
-    (typeof window === "undefined" ? void 0 : (window.activeWindow ?? window))
-  );
 }
 function elementFromNode(node) {
   return node?.nodeType === 1 ? node : node?.parentElement;
@@ -2302,15 +2330,6 @@ function formatTemplate(template, params) {
 
 // src/plugin/settings.mjs
 var CUSTOM_MODEL_VALUE = "__custom";
-var REASONING_LABELS = {
-  off: "Off",
-  minimal: "Minimal - may be unavailable with tools",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "XHigh",
-  max: "Max - deepest"
-};
 var DEFAULT_SETTINGS = {
   model: "",
   customModel: "",
@@ -2318,7 +2337,6 @@ var DEFAULT_SETTINGS = {
   sandboxMode: "read-only",
   acknowledgedToolRisk: false,
   availableModels: [],
-  dryRun: false,
   ignoredFolders: [".git", "node_modules", "Templates"],
   customInstructions: "",
   piExecutablePath: "",
@@ -2336,6 +2354,7 @@ function normalizeSettings(rawSettings = {}) {
     maxSearchFiles: _maxSearchFiles,
     maxFileChars: _maxFileChars,
     maxChangeSnapshotFiles: _maxChangeSnapshotFiles,
+    dryRun: _dryRun,
     ...supportedSettings
   } = rawSettings;
   const settings = { ...DEFAULT_SETTINGS, ...supportedSettings };
@@ -2347,7 +2366,6 @@ function normalizeSettings(rawSettings = {}) {
   settings.availableModels = Array.isArray(settings.availableModels)
     ? settings.availableModels
     : [];
-  settings.dryRun = false;
   settings.ignoredFolders = normalizeStringList(
     settings.ignoredFolders,
     DEFAULT_SETTINGS.ignoredFolders
@@ -2370,12 +2388,14 @@ function getReasoningOptions(settings) {
     ? model?.defaultReasoningLevel || settings.effectiveReasoning
     : settings.effectiveReasoning || model?.defaultReasoningLevel;
   const effective = resolvedDefault
-    ? (REASONING_LABELS[resolvedDefault] ?? resolvedDefault)
-    : "Automatic";
+    ? getLocalizedReasoningLabel(resolvedDefault, { locale: DEFAULT_LOCALE })
+    : t("reasoning.automatic", {}, DEFAULT_LOCALE);
   if (supportedReasoningLevels.length === 0) return { "": effective };
   const options = { "": effective };
   for (const reasoningLevel of supportedReasoningLevels) {
-    options[reasoningLevel] = REASONING_LABELS[reasoningLevel] ?? reasoningLevel;
+    options[reasoningLevel] = getLocalizedReasoningLabel(reasoningLevel, {
+      locale: DEFAULT_LOCALE
+    });
   }
   return options;
 }
@@ -2396,7 +2416,7 @@ function getLocalizedReasoningLabel(value, options = {}) {
   const key = REASONING_KEYS[value];
   if (!key) return value;
   const shortKey = options.short ? REASONING_SHORT_KEYS[value] : void 0;
-  return t(shortKey ?? key);
+  return t(shortKey ?? key, {}, options.locale);
 }
 function getLocalizedReasoningOptions(settings) {
   const options = getReasoningOptions(settings);
@@ -2867,8 +2887,7 @@ ${contextPacket}`;
       run: {
         model: this.getEffectiveModelSummary(),
         reasoning: getResolvedReasoning(this.settings),
-        mode: this.settings.sandboxMode,
-        dryRun: this.settings.dryRun
+        mode: this.settings.sandboxMode
       }
     };
   }
@@ -3673,12 +3692,16 @@ function compareVersions(left, right) {
 }
 
 // src/pi/rpc-client.mjs
-var import_node_child_process2 = require("node:child_process");
+var import_node_child_process3 = require("node:child_process");
 var import_node_string_decoder = require("node:string_decoder");
 var import_node_timers = require("node:timers");
 
 // src/shared/performance-profiler.mjs
-var textEncoder = new globalThis.TextEncoder();
+function createTextEncoder() {
+  const Encoder = resolveActiveWindow()?.TextEncoder ?? hostGlobals().TextEncoder;
+  return new Encoder();
+}
+var textEncoder;
 var PerformanceProfiler = class {
   constructor() {
     this.enabled = false;
@@ -3692,13 +3715,13 @@ var PerformanceProfiler = class {
     this.startedAt = Date.now();
   }
   /**
-   * PATCH 5 §8.1: mark JS-heap samples for the run lifecycle. `before`/`after`
-   * store the latest sample, `during` keeps the peak between marks. Chromium
-   * exposes `performance.memory`; other hosts are silently ignored.
+   * Mark JS-heap samples for the run lifecycle. `before`/`after` store the
+   * latest sample, `during` keeps the peak between marks. Hosts that do not
+   * expose heap usage are silently ignored.
    */
   markHeap(stage) {
     if (!this.enabled) return;
-    const used = globalThis.performance?.memory?.usedJSHeapSize;
+    const used = heapUsedBytes();
     if (!Number.isFinite(used)) return;
     const key = String(stage);
     if (key === "during") this.heap[key] = Math.max(this.heap[key] ?? 0, used);
@@ -3727,6 +3750,7 @@ var PerformanceProfiler = class {
   recordJsonEvent(line) {
     if (!this.enabled) return;
     this.incrementCounter("rpcEventsProcessed");
+    textEncoder ??= createTextEncoder();
     this.recordMax("jsonLineBytes", textEncoder.encode(line).length);
   }
   snapshot() {
@@ -3763,19 +3787,19 @@ var PerformanceProfiler = class {
         maxNormalizeDuration: durations.normalize?.max ?? 0,
         maxRunStateDuration: durations.runState?.max ?? 0,
         diagnosticBufferSize: maxima.diagnosticsSize ?? 0,
-        // PATCH 3 streaming rendering metrics (spec §6.9).
+        // Streaming rendering metrics.
         streamDeltaCount: counters.streamDeltaCount ?? 0,
         streamFlushCount: counters.streamFlushCount ?? 0,
         markdownRenderCount: counters.markdownRenderCount ?? 0,
         maxUiCallbackDuration: durations.uiCallback?.max ?? 0,
         maxStreamFlushDuration: durations.streamFlush?.max ?? 0,
-        // PATCH 4 activity coalescing + stale callback metrics (spec §7.6).
+        // Activity coalescing and stale-callback metrics.
         activityFlushCount: counters.activityFlushCount ?? 0,
         activityCoalescedEvents: counters.activityCoalescedEvents ?? 0,
         activityCoalescedFlushes: counters.activityCoalescedFlushes ?? 0,
         maxActivityUpdateDuration: durations.activityUpdate?.max ?? 0,
         staleCallbackPrevented: counters.staleCallbackPrevented ?? 0,
-        // PATCH 5 queue + heap metrics (spec §8.1).
+        // RPC queue and heap metrics.
         maxRpcQueueDepth: maxima.rpcQueueDepth ?? 0,
         maxRpcQueueBytes: maxima.rpcQueueBytes ?? 0,
         heapUsedBefore: this.heap.before ?? 0,
@@ -3787,18 +3811,49 @@ var PerformanceProfiler = class {
 };
 var performanceProfiler = new PerformanceProfiler();
 
+// src/shared/process-tree.mjs
+var import_node_child_process2 = require("node:child_process");
+function terminateProcessTree(child, { signal = "SIGTERM", timeoutMs = 2e3 } = {}) {
+  if (!child) return;
+  try {
+    if (process.platform === "win32" && child.pid) {
+      (0, import_node_child_process2.execFileSync)(
+        "taskkill",
+        ["/pid", String(child.pid), "/T", "/F"],
+        {
+          timeout: timeoutMs,
+          windowsHide: true
+        }
+      );
+    } else if (child.pid) {
+      process.kill(-child.pid, signal);
+    } else {
+      child.kill(signal);
+    }
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {}
+  }
+}
+
 // src/pi/yield-scheduler.mjs
 function defaultChannelFactory() {
-  return typeof globalThis.MessageChannel === "function"
-    ? () => new globalThis.MessageChannel()
-    : void 0;
+  const MessageChannelApi = resolveActiveWindow()?.MessageChannel ?? hostGlobals().MessageChannel;
+  return typeof MessageChannelApi === "function" ? () => new MessageChannelApi() : void 0;
+}
+function defaultTimerHost() {
+  return resolveActiveWindow() ?? hostGlobals();
+}
+function defaultScheduler() {
+  return resolveActiveWindow()?.scheduler;
 }
 var YieldScheduler = class {
   constructor(options = {}) {
-    this.scheduler = "scheduler" in options ? options.scheduler : globalThis.scheduler;
+    this.scheduler = "scheduler" in options ? options.scheduler : defaultScheduler();
     this.channelFactory =
       "channelFactory" in options ? options.channelFactory : defaultChannelFactory();
-    this.timeoutHost = options.timeoutHost ?? globalThis;
+    this.timeoutHost = options.timeoutHost ?? defaultTimerHost();
     this.forceStrategy = options.strategy;
     this.disposed = false;
     this.channel = void 0;
@@ -3814,7 +3869,7 @@ var YieldScheduler = class {
   async yield() {
     if (this.disposed) return;
     const profiler = performanceProfiler;
-    const startedAt = globalThis.performance.now();
+    const startedAt = now();
     try {
       if (this.strategy === "scheduler") {
         await this.scheduler.yield();
@@ -3828,7 +3883,7 @@ var YieldScheduler = class {
     }
     if (profiler.enabled) {
       profiler.incrementCounter("yieldCount");
-      profiler.recordDuration("yield", globalThis.performance.now() - startedAt);
+      profiler.recordDuration("yield", now() - startedAt);
     }
   }
   channelYield() {
@@ -3899,7 +3954,7 @@ function createExtensionUiHandler(handlers = {}, hostWindow) {
       return void 0;
     }
     const timeout = normalizeTimeout(request?.timeout);
-    const window2 = hostWindow ?? resolveActiveWindow2();
+    const window2 = hostWindow ?? resolveActiveWindow();
     const controller = timeout ? new window2.AbortController() : void 0;
     const handlerPromise = Promise.resolve(
       handler(controller ? { ...request, signal: controller.signal } : request)
@@ -3920,9 +3975,6 @@ function createExtensionUiHandler(handlers = {}, hostWindow) {
     if (method === "confirm") return { confirmed: value === true };
     return { value: String(value) };
   };
-}
-function resolveActiveWindow2() {
-  return typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
 }
 function normalizeTimeout(timeout) {
   const value = Number(timeout);
@@ -3968,9 +4020,6 @@ var nodeTimerHost = {
   setTimeout: import_node_timers.setTimeout,
   clearTimeout: import_node_timers.clearTimeout
 };
-function resolveActiveWindow3() {
-  return typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
-}
 var UNSUPPORTED_COMMAND_PATTERNS = [
   /unknown (?:rpc )?command/i,
   /unsupported (?:rpc )?command/i,
@@ -4027,7 +4076,7 @@ var PiRpcClient = class {
           detached: process.platform !== "win32"
         }
       );
-      const child = (0, import_node_child_process2.spawn)(
+      const child = (0, import_node_child_process3.spawn)(
         invocation.command,
         invocation.args,
         invocation.options
@@ -4083,7 +4132,7 @@ var PiRpcClient = class {
     const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const command = { id, type, ...payload };
     return new Promise((resolve, reject) => {
-      const timerHost = this.timerHost ?? resolveActiveWindow3() ?? nodeTimerHost;
+      const timerHost = this.timerHost ?? resolveActiveWindow() ?? nodeTimerHost;
       const timeout =
         timeoutMs > 0
           ? timerHost.setTimeout(() => {
@@ -4148,7 +4197,7 @@ var PiRpcClient = class {
     this.measureQueue();
     this.scheduleDrain();
   }
-  // PATCH 5 §8.1: bounded queue observations (enabled-only; O(chunk) scan).
+  // Bounded queue observations (enabled-only; O(chunk) scan of buffered lines).
   measureQueue() {
     const profiler = performanceProfiler;
     if (!profiler.enabled || !this.stdoutBuffer) return;
@@ -4161,9 +4210,9 @@ var PiRpcClient = class {
     profiler.recordMax("rpcQueueDepth", depth);
     profiler.recordMax("rpcQueueBytes", Buffer.byteLength(buffer, "utf8"));
   }
-  // PATCH 1: at most one pending drain; new chunks only append to the parser
-  // buffer. Batches are bounded by event count and time, and yields happen only
-  // between complete JSONL lines (partial lines stay in the buffer).
+  // At most one pending drain; new chunks only append to the parser buffer.
+  // Batches are bounded by event count and time, and yields happen only between
+  // complete JSONL lines (partial lines stay in the buffer).
   scheduleDrain() {
     if (this.disposed || this.drainPending) return;
     this.drainPending = true;
@@ -4191,7 +4240,7 @@ var PiRpcClient = class {
   }
   drainBatch() {
     const profiler = performanceProfiler;
-    const startedAt = globalThis.performance.now();
+    const startedAt = now();
     let processed = 0;
     while (processed < this.drainBudget.maxEvents) {
       let line;
@@ -4208,10 +4257,9 @@ var PiRpcClient = class {
       if (line.endsWith("\r")) line = line.slice(0, -1);
       this.handleLine(line);
       processed += 1;
-      if (globalThis.performance.now() - startedAt >= this.drainBudget.maxMs) break;
+      if (now() - startedAt >= this.drainBudget.maxMs) break;
     }
-    if (profiler.enabled && processed > 0)
-      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
+    if (profiler.enabled && processed > 0) profiler.recordDuration("drain", now() - startedAt);
   }
   hasDrainWork() {
     if (this.stdoutBuffer.includes("\n")) return true;
@@ -4230,7 +4278,7 @@ var PiRpcClient = class {
     if (!line.trim()) return;
     const profiler = performanceProfiler;
     const profiling = profiler.enabled;
-    const parseStartedAt = profiling ? globalThis.performance.now() : 0;
+    const parseStartedAt = profiling ? now() : 0;
     let message;
     try {
       message = JSON.parse(line);
@@ -4240,7 +4288,7 @@ var PiRpcClient = class {
     }
     if (profiling) {
       profiler.recordMax("jsonLineBytes", Buffer.byteLength(line, "utf8"));
-      profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
+      profiler.recordDuration("jsonParse", now() - parseStartedAt);
     }
     if (message.type === "response" && message.id) {
       const pending = this.pending.get(message.id);
@@ -4298,28 +4346,7 @@ var PiRpcClient = class {
     }
   }
   terminate(signal = "SIGTERM") {
-    const child = this.child;
-    if (!child) return;
-    try {
-      if (process.platform === "win32" && child.pid) {
-        (0, import_node_child_process2.execFileSync)(
-          "taskkill",
-          ["/pid", String(child.pid), "/T", "/F"],
-          {
-            timeout: 2e3,
-            windowsHide: true
-          }
-        );
-      } else if (child.pid) {
-        process.kill(-child.pid, signal);
-      } else {
-        child.kill(signal);
-      }
-    } catch {
-      try {
-        child.kill(signal);
-      } catch {}
-    }
+    terminateProcessTree(this.child, { signal });
   }
   dispose() {
     this.disposed = true;
@@ -4459,7 +4486,6 @@ function getSupportedReasoningLevels(model) {
 }
 
 // src/pi/runner.mjs
-var import_node_child_process3 = require("node:child_process");
 var import_node_fs2 = __toESM(require("node:fs"), 1);
 var import_node_path3 = __toESM(require("node:path"), 1);
 
@@ -4714,35 +4740,18 @@ function applyCompactionEnd(state, rawEvent) {
 function handlePiEvent(event, state, callbacks) {
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
-  const normalizeStartedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
+  const normalizeStartedAt = profiling ? now() : 0;
   if (profiling) profiler.incrementCounter("rpcEventsProcessed");
   try {
     normalizePiEvent(event, state, callbacks);
   } finally {
     if (profiling) {
-      const now = globalThis.performance.now();
-      profiler.recordDuration("normalize", now - normalizeStartedAt);
-      profiler.recordDuration("event", now - startedAt);
+      const now2 = now2();
+      profiler.recordDuration("normalize", now2 - normalizeStartedAt);
+      profiler.recordDuration("event", now2 - startedAt);
     }
   }
-}
-function handlePiJsonEventLine(line, state, callbacks) {
-  if (!line.trim()) return;
-  const profiler = performanceProfiler;
-  const profiling = profiler.enabled;
-  const parseStartedAt = profiling ? globalThis.performance.now() : 0;
-  let event;
-  try {
-    event = JSON.parse(line);
-  } catch {
-    return;
-  }
-  if (profiling) {
-    profiler.recordJsonEvent(line);
-    profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
-  }
-  handlePiEvent(event, state, callbacks);
 }
 function publishEvent(state, callbacks, normalizedEvent) {
   retainEvent(state, normalizedEvent);
@@ -4752,7 +4761,7 @@ function captureRunStateIfNeeded(state, event) {
   if (!needsRunStateCapture(event)) return;
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
   if (profiling) profiler.incrementCounter("runStateCaptures");
   const runState = getAssistantRunState(event.message ?? event.messages);
   if (runState) {
@@ -4760,7 +4769,7 @@ function captureRunStateIfNeeded(state, event) {
     state.errorMessage = runState.errorMessage;
     state.tokenUsage = runState.tokenUsage;
   }
-  if (profiling) profiler.recordDuration("runState", globalThis.performance.now() - startedAt);
+  if (profiling) profiler.recordDuration("runState", now() - startedAt);
 }
 function needsRunStateCapture(event) {
   if (Array.isArray(event.messages)) return true;
@@ -4778,14 +4787,14 @@ function normalizePiEvent(event, state, callbacks) {
     const toolArgs = event.args ?? {};
     const profiler = performanceProfiler;
     const profiling = profiler.enabled;
-    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const startedAt = profiling ? now() : 0;
     const toolKey = trackToolEvent(state, {
       toolCallId,
       toolName,
       toolArgs,
       isStart: type === "tool_execution_start"
     });
-    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+    if (profiling) profiler.recordDuration("toolLookup", now() - startedAt);
     publishEvent(state, callbacks, {
       type: type === "tool_execution_start" ? "tool_start" : "tool_update",
       toolName,
@@ -4800,12 +4809,12 @@ function normalizePiEvent(event, state, callbacks) {
     const eventToolName = String(event.toolName ?? "tool");
     const profiler = performanceProfiler;
     const profiling = profiler.enabled;
-    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const startedAt = profiling ? now() : 0;
     const { key: toolKey, entry } = finishToolEvent(state, {
       toolCallId,
       toolName: eventToolName
     });
-    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+    if (profiling) profiler.recordDuration("toolLookup", now() - startedAt);
     publishEvent(state, callbacks, {
       type: "tool_end",
       toolName: String(event.toolName ?? entry?.toolName ?? "tool"),
@@ -5052,7 +5061,7 @@ function createQueuedPrompt({
   const normalizedAnnotations = normalizePromptAnnotations(annotations);
   if (!normalizedPrompt && normalizedImages.length === 0 && normalizedAttachments.length === 0)
     return void 0;
-  const normalizedId = String(id || createId2());
+  const normalizedId = String(id || createId());
   return {
     id: normalizedId,
     prompt: normalizedPrompt,
@@ -5086,7 +5095,7 @@ function normalizePromptImages(images) {
           : estimateBase64Bytes(stripDataUrlPrefix(image.data)) <= MAX_PROMPT_IMAGE_BYTES)
     )
     .map((image) => ({
-      id: String(image.id || createId2()),
+      id: String(image.id || createId()),
       fileName: String(image.fileName || "image"),
       mimeType: image.mimeType,
       data: stripDataUrlPrefix(image.data),
@@ -5115,7 +5124,7 @@ function normalizeTextAttachments(attachments, maxTotalBytes = MAX_TOTAL_TEXT_AT
       ? Math.max(attachment.originalSize, bytes.length)
       : bytes.length;
     normalized.push({
-      id: String(attachment.id || createId2()),
+      id: String(attachment.id || createId()),
       kind: "text",
       fileName,
       mimeType: mimeType || "text/plain",
@@ -5199,7 +5208,7 @@ function createPromptTextAttachment(
   return normalizeTextAttachments(
     [
       {
-        id: createId2(),
+        id: createId(),
         kind: "text",
         fileName,
         mimeType: mimeType || "text/plain",
@@ -5269,7 +5278,7 @@ function bytesToPromptImage({ bytes, fileName, mimeType, source = "vault", path:
   for (let offset = 0; offset < data.length; offset += 32768)
     binary += String.fromCharCode(...data.subarray(offset, offset + 32768));
   return {
-    id: createId2(),
+    id: createId(),
     fileName: fileName || "image",
     mimeType,
     data: encodeBase64(binary),
@@ -5284,7 +5293,7 @@ async function fileToPromptImage(file, metadata = {}) {
   if (file.size > MAX_PROMPT_IMAGE_BYTES) throw new Error("Images must be 20 MB or smaller.");
   const dataUrl = await readFileAsDataUrl(file);
   return {
-    id: createId2(),
+    id: createId(),
     fileName: file.name || "image",
     mimeType: file.type,
     data: stripDataUrlPrefix(dataUrl),
@@ -5323,14 +5332,14 @@ function estimateBase64Bytes(data) {
   return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
 }
 function encodeBase64(binary) {
-  const activeWindow = resolveActiveWindow4();
+  const activeWindow = resolveActiveWindow();
   return activeWindow?.btoa
     ? activeWindow.btoa(binary)
     : Buffer.from(binary, "binary").toString("base64");
 }
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
-    const FileReader = resolveActiveWindow4()?.FileReader;
+    const FileReader = resolveActiveWindow()?.FileReader;
     if (!FileReader) {
       reject(new Error("Could not read image."));
       return;
@@ -5341,17 +5350,8 @@ function readFileAsDataUrl(file) {
     reader.readAsDataURL(file);
   });
 }
-function resolveActiveWindow4() {
-  return typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
-}
-function createId2() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 // src/pi/runner.mjs
-function isPiCliCommandPrompt(prompt) {
-  return /^\/(compact)(?:\s|$)/i.test(prompt.trim());
-}
 function getCompactInstructions(prompt) {
   const match = prompt.trim().match(/^\/compact(?:\s+([\s\S]+))?$/i);
   return match ? (match[1] ?? "").trim() : void 0;
@@ -5377,9 +5377,7 @@ var PiRunner = class {
     if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== void 0)
-      return this.settings.dryRun
-        ? this.formatDryRunCompactResponse(sessionId)
-        : this.runPiRpcCompact(sessionId, compactInstructions, callbacks);
+      return this.runPiRpcCompact(sessionId, compactInstructions, callbacks);
     const effectivePrompt = context?.userPrompt ?? prompt;
     const formattedPrompt = this.contextBuilder.formatPrompt(
       effectivePrompt,
@@ -5387,49 +5385,11 @@ var PiRunner = class {
       threadHistory
     );
     if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
-    return this.settings.dryRun
-      ? {
-          finalResponse: this.formatDryRunResponse(prompt, context),
-          sessionId,
-          threadId: sessionId
-        }
-      : this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
+    return this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
   }
   cancelCurrentRun() {
     this.cancelRequested = true;
-    if (this.rpcClient) {
-      this.rpcClient.abort();
-      return;
-    }
-    if (!this.activeChild) return;
-    this.terminateActiveChild("SIGTERM");
-    window.setTimeout(() => {
-      if (this.activeChild) this.terminateActiveChild("SIGKILL");
-    }, 1500);
-  }
-  terminateActiveChild(signal) {
-    const child = this.activeChild;
-    if (!child) return;
-    try {
-      if (process.platform === "win32" && child.pid) {
-        (0, import_node_child_process3.execFileSync)(
-          "taskkill",
-          ["/pid", String(child.pid), "/T", "/F"],
-          {
-            timeout: 2e3,
-            windowsHide: true
-          }
-        );
-      } else if (child.pid) {
-        process.kill(-child.pid, signal);
-      } else {
-        child.kill(signal);
-      }
-    } catch {
-      try {
-        child.kill(signal);
-      } catch {}
-    }
+    this.rpcClient?.abort();
   }
   async getOrCreateRpcClient(sessionReference) {
     if (this.rpcClient) {
@@ -5534,95 +5494,6 @@ var PiRunner = class {
     await this.rpcClient.request("steer", {
       message: String(prompt || ""),
       ...(rpcImages.length > 0 ? { images: rpcImages } : {})
-    });
-  }
-  runPiCli(prompt, sessionId, callbacks) {
-    if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
-    const session = this.resolveOrCreateSession(sessionId);
-    const args = this.buildPiArgs(session.path, "json");
-    return new Promise((resolve, reject) => {
-      this.cancelRequested = false;
-      const piExecutable = findPiExecutable(this.settings.piExecutablePath);
-      const invocation = buildPiProcessInvocation(piExecutable, args, {
-        cwd: this.workingDirectory ?? this.pluginDirectory,
-        detached: process.platform !== "win32"
-      });
-      const child = (0, import_node_child_process3.spawn)(
-        invocation.command,
-        invocation.args,
-        invocation.options
-      );
-      this.activeChild = child;
-      callbacks?.onEvent?.({
-        type: "pi_start",
-        raw: {
-          args: args.slice(1),
-          cwd: this.workingDirectory ?? this.pluginDirectory
-        }
-      });
-      let stdoutBuffer = "";
-      let stderr = "";
-      let settled = false;
-      const state = createRunState();
-      const failOnce = (error) => {
-        if (!settled) {
-          settled = true;
-          reject(error);
-        }
-      };
-      const handleLine = (line) => handlePiJsonEventLine(line, state, callbacks);
-      const flushStdoutBuffer = () => {
-        if (!stdoutBuffer.trim()) return;
-        handleLine(stdoutBuffer.trim());
-        stdoutBuffer = "";
-      };
-      const getErrorText = () => state.errorMessage ?? stderr.trim() ?? state.fallbackText.trim();
-      child.stdout.on("data", (chunk) => {
-        stdoutBuffer += chunk.toString("utf8");
-        const lines = stdoutBuffer.split(/\r?\n/);
-        stdoutBuffer = lines.pop() ?? "";
-        for (const line of lines) handleLine(line);
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.once("error", (error) => {
-        failOnce(createPiCliError({ error }));
-      });
-      child.once("close", (exitCode) => {
-        if (this.activeChild === child) this.activeChild = void 0;
-        if (settled) return;
-        if (this.cancelRequested) {
-          this.cancelRequested = false;
-          failOnce(new Error("Pi run canceled."));
-          return;
-        }
-        flushStdoutBuffer();
-        const errorText = getErrorText();
-        if (exitCode && exitCode !== 0) {
-          failOnce(
-            new Error(formatPiCliFailure({ context: "Pi run failed", stderr: errorText, exitCode }))
-          );
-          return;
-        }
-        if (state.errorMessage) {
-          failOnce(new Error(state.errorMessage));
-          return;
-        }
-        settled = true;
-        resolve({
-          finalResponse: this.getFinalResponse(state, isPiCliCommandPrompt(prompt)),
-          sessionId: session.reference,
-          threadId: session.reference,
-          contextUsage: this.getRunContextUsage(state.tokenUsage, state),
-          contextCompacted: state.sawSuccessfulCompaction,
-          tokenUsage: state.tokenUsage ?? void 0,
-          diagnostics: state.diagnostics.snapshot()
-        });
-      });
-      child.stdin.write(prompt);
-      child.stdin.end();
     });
   }
   async runPiRpcCompact(sessionId, customInstructions = "", callbacks) {
@@ -5811,59 +5682,6 @@ var PiRunner = class {
     const { client } = await this.getExistingSessionRpcClient(sessionReference);
     return client.request("get_entries", since ? { since } : {});
   }
-  formatDryRunCompactResponse(sessionId) {
-    return {
-      finalResponse: "Dry run: context would be compacted.",
-      sessionId,
-      threadId: sessionId,
-      contextCompacted: true
-    };
-  }
-  formatDryRunResponse(prompt, context) {
-    const lines = [
-      "Dry run: Pi CLI was not called.",
-      "",
-      `Prompt: ${prompt}`,
-      "",
-      context.activeNote
-        ? `Active note: [[${context.activeNote.path.replace(/\.md$/i, "")}]]`
-        : "Active note: none",
-      `Automatic search results: ${context.searchResults.length}`,
-      `Linked notes: ${context.linkedNeighborhood.length}`
-    ];
-    if (context.activeNote) {
-      lines.push(
-        "",
-        "Backlinks:",
-        ...context.activeNote.backlinks
-          .slice(0, 8)
-          .map((backlink) => `- [[${backlink.path.replace(/\.md$/i, "")}]] (${backlink.count})`),
-        "",
-        "Outgoing links:",
-        ...context.activeNote.outgoingLinks
-          .slice(0, 8)
-          .map(
-            (outgoingLink) =>
-              `- [[${outgoingLink.path.replace(/\.md$/i, "")}]] (${outgoingLink.count})`
-          ),
-        "",
-        "Unresolved links:",
-        ...context.activeNote.unresolvedLinks
-          .slice(0, 8)
-          .map((unresolvedLink) => `- [[${unresolvedLink.display}]] (${unresolvedLink.count})`)
-      );
-    }
-    if (context.searchResults.length > 0) {
-      lines.push(
-        "",
-        "Automatic note matches:",
-        ...context.searchResults.map(
-          (result) => `- [[${result.path.replace(/\.md$/i, "")}]] score=${result.score}`
-        )
-      );
-    }
-    return lines.join("\n");
-  }
 };
 function isSafeRelativePath(relativePath) {
   return (
@@ -5938,12 +5756,12 @@ var RuntimeCatalogRefreshGate = class {
     return this.inFlight;
   }
 };
-function needsRuntimeCatalogRefresh(settings, refreshedAt, now = Date.now(), maxAge = 3e4) {
+function needsRuntimeCatalogRefresh(settings, refreshedAt, now2 = Date.now(), maxAge = 3e4) {
   return (
     !Array.isArray(settings.availableModels) ||
     settings.availableModels.length === 0 ||
     !refreshedAt ||
-    now - refreshedAt >= maxAge
+    now2 - refreshedAt >= maxAge
   );
 }
 function createRuntimeCatalogSnapshot(models, effectiveConfig) {
@@ -6183,7 +6001,7 @@ function formatReasoningLabel(value) {
 // src/ui/desktop-notifications.mjs
 async function requestDesktopNotificationPermission(NotificationApi) {
   const activeNotificationApi =
-    NotificationApi === void 0 ? resolveActiveWindow5()?.Notification : NotificationApi;
+    NotificationApi === void 0 ? resolveActiveWindow()?.Notification : NotificationApi;
   if (typeof activeNotificationApi !== "function") return false;
   if (activeNotificationApi.permission === "granted") return true;
   if (
@@ -6214,7 +6032,7 @@ function showDesktopRunNotification({
   documentRef,
   windowRef
 }) {
-  const activeWindow = resolveActiveWindow5();
+  const activeWindow = resolveActiveWindow();
   const activeNotificationApi =
     NotificationApi === void 0 ? activeWindow?.Notification : NotificationApi;
   const activeDocument = documentRef === void 0 ? activeWindow?.document : documentRef;
@@ -6247,9 +6065,6 @@ function showDesktopRunNotification({
     console.warn("Pi Agent: desktop notification failed", error);
     return false;
   }
-}
-function resolveActiveWindow5() {
-  return typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
 }
 function isDocumentUnfocused(documentRef) {
   try {
@@ -7963,7 +7778,7 @@ function revealLine(leaf, line) {
     leaf.view?.containerEl?.ownerDocument?.defaultView ??
     this?.plugin?.app?.workspace?.containerEl?.ownerDocument?.defaultView ??
     this?.activeWindow ??
-    resolveActiveWindow6();
+    resolveActiveWindow();
   window2?.setTimeout(() => {
     const editor = leaf.view?.editor;
     if (!editor) return;
@@ -7972,9 +7787,6 @@ function revealLine(leaf, line) {
     editor.scrollIntoView?.({ from: position, to: position }, true);
     editor.focus?.();
   }, 50);
-}
-function resolveActiveWindow6() {
-  return typeof window === "undefined" ? void 0 : (window.activeWindow ?? window);
 }
 async function openVaultPath(value, newLeaf = "tab") {
   return this.openVaultLink(value, newLeaf === true || newLeaf === "tab");
@@ -8247,11 +8059,6 @@ function appendStreamingThinkingDelta(delta) {
 }
 function scheduleStreamingFlush() {
   if (this.streamingFlushRaf !== void 0) return;
-  const requestFrame = globalThis.requestAnimationFrame;
-  if (typeof requestFrame !== "function") {
-    this.flushStreaming();
-    return;
-  }
   this.streamingFlushGuard = this.captureUiCallbackGuard?.();
   this.streamingFlushRaf = requestFrame(() => {
     this.streamingFlushRaf = void 0;
@@ -8268,7 +8075,7 @@ function scheduleStreamingFlush() {
 }
 function cancelStreamingFlush() {
   if (this.streamingFlushRaf !== void 0) {
-    globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
+    cancelFrame(this.streamingFlushRaf);
     this.streamingFlushRaf = void 0;
   }
   this.streamingFlushGuard = void 0;
@@ -8277,7 +8084,7 @@ function flushStreaming() {
   if (!this.streamingAnswerDirty && !this.streamingThinkingDirty) return;
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
   try {
     if (this.streamingAnswerDirty && !this.renderStreamingAnswer()) {
       this.renderMessages();
@@ -8294,7 +8101,7 @@ function flushStreaming() {
   } finally {
     if (profiling) {
       profiler.incrementCounter("streamFlushCount");
-      profiler.recordDuration("streamFlush", globalThis.performance.now() - startedAt);
+      profiler.recordDuration("streamFlush", now() - startedAt);
     }
   }
 }
@@ -8558,11 +8365,11 @@ function applyActivity(e, t2, n = "", s = 0) {
   if (a) return;
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
   if (!this.updateActivityDom()) this.renderMessages();
   if (profiling) {
     profiler.incrementCounter("activityFlushCount");
-    profiler.recordDuration("activityUpdate", globalThis.performance.now() - startedAt);
+    profiler.recordDuration("activityUpdate", now() - startedAt);
   }
 }
 function queuePendingActivity(e, t2, n = "") {
@@ -10166,7 +9973,7 @@ var PiAgentView = class extends f4.ItemView {
     this.running = !!e;
     this.canceling = e?.canceling === true;
   }
-  // PATCH 4 §7.3: unified stale-view / stale-run guard for delayed UI
+  // Unified stale-view / stale-run guard for delayed UI
   // callbacks (activity timers, streaming rAF, pending sticky state).
   captureUiCallbackGuard() {
     return {
@@ -10320,7 +10127,7 @@ var PiAgentView = class extends f4.ItemView {
       thinkingExpanded: false,
       thinkingUserSet: false,
       toolErrors: [],
-      // PATCH 4 §7.3: identifies this run for stale-callback checks.
+      // Identifies this run for stale-callback checks.
       runGeneration: ++this.runGenerationCounter
     };
     let skipQueueDrain = false;
@@ -10376,7 +10183,7 @@ var PiAgentView = class extends f4.ItemView {
           isCanceled: () => n.canceling,
           onEvent: (o) => {
             const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? globalThis.performance.now() : 0;
+            const startedAt = profiling ? now() : 0;
             try {
               const thinkingDelta = getThinkingDelta(o);
               if (thinkingDelta) {
@@ -10402,16 +10209,12 @@ var PiAgentView = class extends f4.ItemView {
                 this.appendStreamingThinkingDelta(thinkingDelta);
               }
             } finally {
-              if (profiling)
-                performanceProfiler.recordDuration(
-                  "uiCallback",
-                  globalThis.performance.now() - startedAt
-                );
+              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
             }
           },
           onTextDelta: (o) => {
             const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? globalThis.performance.now() : 0;
+            const startedAt = profiling ? now() : 0;
             try {
               performanceProfiler.incrementCounter("streamDeltaCount");
               if (!n.thinkingUserSet) n.thinkingExpanded = false;
@@ -10424,11 +10227,7 @@ var PiAgentView = class extends f4.ItemView {
               this.liveThinkingSetExpanded?.(n.thinkingExpanded);
               this.appendStreamingDelta(o);
             } finally {
-              if (profiling)
-                performanceProfiler.recordDuration(
-                  "uiCallback",
-                  globalThis.performance.now() - startedAt
-                );
+              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
             }
           },
           onPromptAccepted: acknowledgeQueuedDelivery
@@ -11084,8 +10883,8 @@ var ThreadStore = class {
       .map(cloneThread);
   }
   startNewThread(title) {
-    const now = Date.now();
-    const thread = createThread({ title, now });
+    const now2 = Date.now();
+    const thread = createThread({ title, now: now2 });
     this.history = {
       currentThreadId: thread.id,
       threads: [thread, ...this.history.threads]
@@ -11095,10 +10894,10 @@ var ThreadStore = class {
   forkCurrentThread(piSessionId) {
     const current = this.getMutableCurrentThread();
     if (current.messages.length === 0) return void 0;
-    const now = Date.now();
+    const now2 = Date.now();
     const thread = createThread({
       title: t("thread.forkTitle", { title: current.title }),
-      now,
+      now: now2,
       messages: current.messages,
       piSessionId
     });
@@ -11115,25 +10914,25 @@ var ThreadStore = class {
     return true;
   }
   archiveThread(threadId = this.history.currentThreadId) {
-    return this.updateThread(threadId, (thread, now) => {
+    return this.updateThread(threadId, (thread, now2) => {
       thread.archived = true;
-      thread.updatedAt = now;
+      thread.updatedAt = now2;
     });
   }
   unarchiveThread(threadId) {
-    return this.updateThread(threadId, (thread, now) => {
+    return this.updateThread(threadId, (thread, now2) => {
       thread.archived = false;
-      thread.updatedAt = now;
+      thread.updatedAt = now2;
     });
   }
   archiveThreads(threadIds) {
     const requested = new Set(threadIds);
     const archivedIds = [];
-    const now = Date.now();
+    const now2 = Date.now();
     for (const thread of this.history.threads) {
       if (!requested.has(thread.id) || thread.archived) continue;
       thread.archived = true;
-      thread.updatedAt = now;
+      thread.updatedAt = now2;
       archivedIds.push(thread.id);
     }
     return archivedIds;
@@ -11172,15 +10971,15 @@ var ThreadStore = class {
   }
   renameThread(threadId, title) {
     const nextTitle = normalizeTitle(title);
-    return this.updateThread(threadId, (thread, now) => {
+    return this.updateThread(threadId, (thread, now2) => {
       thread.title = nextTitle;
-      thread.updatedAt = now;
+      thread.updatedAt = now2;
     });
   }
   setThreadFavorite(threadId, favorite) {
-    return this.updateThread(threadId, (thread, now) => {
+    return this.updateThread(threadId, (thread, now2) => {
       thread.favorite = favorite === true;
-      thread.updatedAt = now;
+      thread.updatedAt = now2;
     });
   }
   toggleThreadFavorite(threadId) {
@@ -11211,9 +11010,9 @@ var ThreadStore = class {
     return this.setThreadPiSessionId(this.history.currentThreadId, piSessionId);
   }
   setThreadPiSessionId(threadId, piSessionId) {
-    return this.updateThread(threadId, (thread, now) => {
+    return this.updateThread(threadId, (thread, now2) => {
       thread.piSessionId = piSessionId;
-      thread.updatedAt = now;
+      thread.updatedAt = now2;
     });
   }
   toJSON() {
@@ -11262,12 +11061,12 @@ function normalizeThreadHistory(history, legacyMessages, legacyPiSessionId) {
 function normalizeThread(thread, seenIds) {
   if (!isPlainObject(thread)) return void 0;
   const messages = normalizeMessages(thread.messages);
-  const now = Date.now();
-  const createdAt = normalizeTimestamp2(thread.createdAt) ?? messages[0]?.createdAt ?? now;
+  const now2 = Date.now();
+  const createdAt = normalizeTimestamp2(thread.createdAt) ?? messages[0]?.createdAt ?? now2;
   const updatedAt =
     normalizeTimestamp2(thread.updatedAt) ?? messages[messages.length - 1]?.createdAt ?? createdAt;
   const sourceId = typeof thread.id === "string" && thread.id.trim() ? thread.id : "";
-  const id = sourceId && !seenIds.has(sourceId) ? sourceId : createThreadId(now);
+  const id = sourceId && !seenIds.has(sourceId) ? sourceId : createThreadId(now2);
   seenIds.add(id);
   return {
     id,
@@ -11286,10 +11085,10 @@ function normalizeThread(thread, seenIds) {
 }
 function createLegacyThread(legacyMessages, legacyPiSessionId) {
   const messages = normalizeMessages(legacyMessages);
-  const now = Date.now();
+  const now2 = Date.now();
   return createThread({
     title: inferThreadTitle(messages),
-    now,
+    now: now2,
     messages,
     piSessionId: normalizeOptionalString(legacyPiSessionId)
   });
@@ -11368,8 +11167,8 @@ function inferThreadTitle(messages) {
 function titleFromPrompt(prompt) {
   return normalizeTitle(prompt.replace(/^#+\s*/g, "").replace(/[`*_#[\]()>]/g, ""));
 }
-function createThreadId(now) {
-  return `thread-${now}-${Math.random().toString(36).slice(2, 10)}`;
+function createThreadId(now2) {
+  return `thread-${now2}-${Math.random().toString(36).slice(2, 10)}`;
 }
 function getMostRecentThread(threads) {
   return [...threads].sort((left, right) => right.updatedAt - left.updatedAt)[0];
@@ -11452,9 +11251,6 @@ Pi CLI tools are controlled by the selected tool mode. They are not an OS-level 
 - A good Base starts from the fields already used in a folder.
 - Suggested fields: type, status, tags, project, area, created, updated.
 - Propose a Base config before creating it unless the user explicitly asks you to create it immediately.`;
-function previewSuggestedFrontmatter(markdown, patch) {
-  return previewFrontmatterPatch(markdown, patch);
-}
 var PiAgentPlugin = class extends P.Plugin {
   constructor() {
     super(...arguments);
@@ -11497,9 +11293,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
     this.annotationController.start();
-    if (!this.settings.dryRun) {
-      warmupPiCli(this.settings.piExecutablePath, this.getPluginDirectory());
-    }
+    warmupPiCli(this.settings.piExecutablePath, this.getPluginDirectory());
     this.refreshCurrentContextFile();
     void this.refreshCommandCatalog(false);
     this.registerEvent(
@@ -12465,7 +12259,7 @@ var PiAgentPlugin = class extends P.Plugin {
     }
     let t2 = await this.app.vault.cachedRead(e),
       n = /* @__PURE__ */ new Date().toISOString().slice(0, 10),
-      s = previewSuggestedFrontmatter(t2, {
+      s = previewFrontmatterPatch(t2, {
         type: "note",
         status: "draft",
         updated: n,

@@ -1,28 +1,36 @@
-// Cooperative yield scheduler for the RPC stdout drain (spec PATCH 1 §4.3-4.4).
+// Cooperative yield scheduler for the RPC stdout drain.
 //
-// Strategy is chosen once at construction, following the PATCH 0 runtime spike
-// (perf/baseline.md):
-//   1. scheduler.yield()  - primary (Chromium 150; p95 0.1ms, priority continuation OK)
+// Strategy is chosen once at construction, because the cheapest available
+// primitive does not change while the plugin is loaded:
+//   1. scheduler.yield()  - primary (priority continuation, sub-millisecond)
 //   2. MessageChannel     - fallback (reuses one channel for all yields)
-//   3. setTimeout(0)      - last resort (clamped, ~15ms median in Obsidian)
+//   3. setTimeout(0)      - last resort (clamped, so the slowest by far)
 //
 // The channel is created lazily on first use and is owned by this scheduler:
 // dispose() closes it and resolves any pending yield callbacks.
 
+import { hostGlobals, now, resolveActiveWindow } from "../shared/runtime.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
 
 function defaultChannelFactory() {
-  return typeof globalThis.MessageChannel === "function"
-    ? () => new globalThis.MessageChannel()
-    : undefined;
+  const MessageChannelApi = resolveActiveWindow()?.MessageChannel ?? hostGlobals().MessageChannel;
+  return typeof MessageChannelApi === "function" ? () => new MessageChannelApi() : undefined;
+}
+
+function defaultTimerHost() {
+  return resolveActiveWindow() ?? hostGlobals();
+}
+
+function defaultScheduler() {
+  return resolveActiveWindow()?.scheduler;
 }
 
 export class YieldScheduler {
   constructor(options = {}) {
-    this.scheduler = "scheduler" in options ? options.scheduler : globalThis.scheduler;
+    this.scheduler = "scheduler" in options ? options.scheduler : defaultScheduler();
     this.channelFactory =
       "channelFactory" in options ? options.channelFactory : defaultChannelFactory();
-    this.timeoutHost = options.timeoutHost ?? globalThis;
+    this.timeoutHost = options.timeoutHost ?? defaultTimerHost();
     this.forceStrategy = options.strategy;
     this.disposed = false;
     this.channel = undefined;
@@ -40,7 +48,7 @@ export class YieldScheduler {
   async yield() {
     if (this.disposed) return;
     const profiler = performanceProfiler;
-    const startedAt = globalThis.performance.now();
+    const startedAt = now();
     try {
       if (this.strategy === "scheduler") {
         await this.scheduler.yield();
@@ -54,7 +62,7 @@ export class YieldScheduler {
     }
     if (profiler.enabled) {
       profiler.incrementCounter("yieldCount");
-      profiler.recordDuration("yield", globalThis.performance.now() - startedAt);
+      profiler.recordDuration("yield", now() - startedAt);
     }
   }
 

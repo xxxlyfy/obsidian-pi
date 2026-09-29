@@ -1,4 +1,5 @@
 import { Notice } from "obsidian";
+import { resolveActiveWindow } from "../shared/runtime.mjs";
 
 const EXTERNAL_LINK_PATTERN = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i;
 const LEGACY_LINE_PATTERN = /^(.*):(\d+)$/;
@@ -94,10 +95,6 @@ export function revealLine(leaf, line) {
     editor.scrollIntoView?.({ from: position, to: position }, true);
     editor.focus?.();
   }, 50);
-}
-
-function resolveActiveWindow() {
-  return typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
 }
 
 export async function openVaultPath(value, newLeaf = "tab") {

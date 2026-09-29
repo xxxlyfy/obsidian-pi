@@ -1,5 +1,6 @@
 import { TextDecoder, TextEncoder } from "node:util";
 import { ANNOTATION_LIMITS, normalizeAnnotation } from "../annotations/annotation-model.mjs";
+import { createId, resolveActiveWindow } from "../shared/runtime.mjs";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8");
@@ -422,12 +423,4 @@ function readFileAsDataUrl(file) {
     reader.onerror = () => reject(reader.error || new Error("Could not read image."));
     reader.readAsDataURL(file);
   });
-}
-
-function resolveActiveWindow() {
-  return typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
-}
-
-function createId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

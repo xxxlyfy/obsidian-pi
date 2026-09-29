@@ -97,7 +97,7 @@ describe("PiRunner", () => {
 
   it("honors cancellation before spawning Pi", async () => {
     await expect(
-      createRunner({ dryRun: true }).run(
+      createRunner().run(
         "hello",
         {
           activeNote: undefined,
@@ -109,24 +109,6 @@ describe("PiRunner", () => {
         { isCanceled: () => true }
       )
     ).rejects.toThrow("Pi run canceled.");
-  });
-
-  it("returns dry run responses without spawning Pi", async () => {
-    const result = await createRunner({ dryRun: true }).run(
-      "hello",
-      {
-        activeNote: undefined,
-        searchResults: [],
-        linkedNeighborhood: []
-      },
-      "session-id"
-    );
-
-    expect(result).toMatchObject({
-      finalResponse: expect.stringContaining("Dry run: Pi CLI was not called."),
-      sessionId: "session-id"
-    });
-    expect(result).not.toHaveProperty("changeStats");
   });
 
   it("reuses an injected RPC client and streams run events", async () => {

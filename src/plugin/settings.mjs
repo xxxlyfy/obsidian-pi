@@ -1,16 +1,6 @@
-import { t } from "../shared/i18n/index.mjs";
+import { DEFAULT_LOCALE, t } from "../shared/i18n/index.mjs";
 
 export const CUSTOM_MODEL_VALUE = "__custom";
-
-const REASONING_LABELS = {
-  off: "Off",
-  minimal: "Minimal - may be unavailable with tools",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "XHigh",
-  max: "Max - deepest"
-};
 
 export const DEFAULT_SETTINGS = {
   model: "",
@@ -19,7 +9,6 @@ export const DEFAULT_SETTINGS = {
   sandboxMode: "read-only",
   acknowledgedToolRisk: false,
   availableModels: [],
-  dryRun: false,
   ignoredFolders: [".git", "node_modules", "Templates"],
   customInstructions: "",
   piExecutablePath: "",
@@ -33,11 +22,15 @@ export const DEFAULT_SETTINGS = {
 };
 
 export function normalizeSettings(rawSettings = {}) {
+  // Settings removed from earlier versions, plus the retired dry-run flag, are
+  // dropped here so an existing data.json keeps loading. This is deliberate
+  // compatibility reading, not dead code to clean up.
   const {
     maxSearchResults: _maxSearchResults,
     maxSearchFiles: _maxSearchFiles,
     maxFileChars: _maxFileChars,
     maxChangeSnapshotFiles: _maxChangeSnapshotFiles,
+    dryRun: _dryRun,
     ...supportedSettings
   } = rawSettings;
   const settings = { ...DEFAULT_SETTINGS, ...supportedSettings };
@@ -50,7 +43,6 @@ export function normalizeSettings(rawSettings = {}) {
   settings.availableModels = Array.isArray(settings.availableModels)
     ? settings.availableModels
     : [];
-  settings.dryRun = false;
   settings.ignoredFolders = normalizeStringList(
     settings.ignoredFolders,
     DEFAULT_SETTINGS.ignoredFolders
@@ -84,15 +76,19 @@ export function getReasoningOptions(settings) {
   const resolvedDefault = settings.model
     ? model?.defaultReasoningLevel || settings.effectiveReasoning
     : settings.effectiveReasoning || model?.defaultReasoningLevel;
+  // Labels come from the dictionaries only. Surfaces that are not localized yet
+  // ask for English explicitly, so there is one place to edit a label.
   const effective = resolvedDefault
-    ? (REASONING_LABELS[resolvedDefault] ?? resolvedDefault)
-    : "Automatic";
+    ? getLocalizedReasoningLabel(resolvedDefault, { locale: DEFAULT_LOCALE })
+    : t("reasoning.automatic", {}, DEFAULT_LOCALE);
 
   if (supportedReasoningLevels.length === 0) return { "": effective };
 
   const options = { "": effective };
   for (const reasoningLevel of supportedReasoningLevels) {
-    options[reasoningLevel] = REASONING_LABELS[reasoningLevel] ?? reasoningLevel;
+    options[reasoningLevel] = getLocalizedReasoningLabel(reasoningLevel, {
+      locale: DEFAULT_LOCALE
+    });
   }
 
   return options;
@@ -117,7 +113,7 @@ export function getLocalizedReasoningLabel(value, options = {}) {
   const key = REASONING_KEYS[value];
   if (!key) return value;
   const shortKey = options.short ? REASONING_SHORT_KEYS[value] : undefined;
-  return t(shortKey ?? key);
+  return t(shortKey ?? key, {}, options.locale);
 }
 
 export function getLocalizedReasoningOptions(settings) {

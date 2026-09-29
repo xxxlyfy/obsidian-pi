@@ -1,4 +1,5 @@
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+import { now } from "../shared/runtime.mjs";
 import {
   applyCompactionEnd,
   finishToolEvent,
@@ -9,22 +10,22 @@ import {
 import { normalizeTokenUsage } from "./token-usage.mjs";
 
 /**
- * PATCH 2 object path: the persistent RPC client already delivers parsed
- * objects, so no JSON.stringify -> JSON.parse round trip is needed (spec §5.3).
+ * Object path used by the persistent RPC client, which already delivers
+ * parsed objects, so no JSON.stringify -> JSON.parse round trip is needed.
  * `state` is a RunState instance from ./run-state.mjs.
  */
 export function handlePiEvent(event, state, callbacks) {
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
-  const normalizeStartedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
+  const normalizeStartedAt = profiling ? now() : 0;
 
   if (profiling) profiler.incrementCounter("rpcEventsProcessed");
   try {
     normalizePiEvent(event, state, callbacks);
   } finally {
     if (profiling) {
-      const now = globalThis.performance.now();
+      const now = now();
       profiler.recordDuration("normalize", now - normalizeStartedAt);
       profiler.recordDuration("event", now - startedAt);
     }
@@ -39,7 +40,7 @@ export function handlePiJsonEventLine(line, state, callbacks) {
 
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const parseStartedAt = profiling ? globalThis.performance.now() : 0;
+  const parseStartedAt = profiling ? now() : 0;
   let event;
   try {
     event = JSON.parse(line);
@@ -48,7 +49,7 @@ export function handlePiJsonEventLine(line, state, callbacks) {
   }
   if (profiling) {
     profiler.recordJsonEvent(line);
-    profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
+    profiler.recordDuration("jsonParse", now() - parseStartedAt);
   }
 
   handlePiEvent(event, state, callbacks);
@@ -64,7 +65,7 @@ function captureRunStateIfNeeded(state, event) {
 
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
   if (profiling) profiler.incrementCounter("runStateCaptures");
 
   const runState = getAssistantRunState(event.message ?? event.messages);
@@ -74,7 +75,7 @@ function captureRunStateIfNeeded(state, event) {
     state.tokenUsage = runState.tokenUsage;
   }
 
-  if (profiling) profiler.recordDuration("runState", globalThis.performance.now() - startedAt);
+  if (profiling) profiler.recordDuration("runState", now() - startedAt);
 }
 
 function needsRunStateCapture(event) {
@@ -84,7 +85,7 @@ function needsRunStateCapture(event) {
   if (!message) return false;
   if (message.usage || message.stopReason || message.errorMessage) return true;
   // High-frequency streaming updates must not trigger full text extraction or
-  // token parsing on every delta (spec §5.7). Boundary events still capture.
+  // token parsing on every delta. Boundary events still capture.
   return event.type !== "message_update";
 }
 
@@ -99,14 +100,14 @@ function normalizePiEvent(event, state, callbacks) {
 
     const profiler = performanceProfiler;
     const profiling = profiler.enabled;
-    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const startedAt = profiling ? now() : 0;
     const toolKey = trackToolEvent(state, {
       toolCallId,
       toolName,
       toolArgs,
       isStart: type === "tool_execution_start"
     });
-    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+    if (profiling) profiler.recordDuration("toolLookup", now() - startedAt);
 
     publishEvent(state, callbacks, {
       type: type === "tool_execution_start" ? "tool_start" : "tool_update",
@@ -124,12 +125,12 @@ function normalizePiEvent(event, state, callbacks) {
 
     const profiler = performanceProfiler;
     const profiling = profiler.enabled;
-    const startedAt = profiling ? globalThis.performance.now() : 0;
+    const startedAt = profiling ? now() : 0;
     const { key: toolKey, entry } = finishToolEvent(state, {
       toolCallId,
       toolName: eventToolName
     });
-    if (profiling) profiler.recordDuration("toolLookup", globalThis.performance.now() - startedAt);
+    if (profiling) profiler.recordDuration("toolLookup", now() - startedAt);
 
     publishEvent(state, callbacks, {
       type: "tool_end",

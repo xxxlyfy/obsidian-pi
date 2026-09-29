@@ -314,8 +314,7 @@ export class ContextBuilder {
       run: {
         model: this.getEffectiveModelSummary(),
         reasoning: getResolvedReasoning(this.settings),
-        mode: this.settings.sandboxMode,
-        dryRun: this.settings.dryRun
+        mode: this.settings.sandboxMode
       }
     };
   }

@@ -1,4 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
+import { resolveActiveWindow } from "../shared/runtime.mjs";
 
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 // String controls carry arbitrary payloads that Node's ANSI helper may leave behind.
@@ -61,10 +62,6 @@ export function createExtensionUiHandler(handlers = {}, hostWindow) {
     if (method === "confirm") return { confirmed: value === true };
     return { value: String(value) };
   };
-}
-
-function resolveActiveWindow() {
-  return typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
 }
 
 function normalizeTimeout(timeout) {

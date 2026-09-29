@@ -1,3 +1,5 @@
+import { createId } from "../shared/runtime.mjs";
+
 export const ANNOTATION_SCHEMA_VERSION = 1;
 export const ANNOTATION_LIMITS = Object.freeze({
   paths: 500,
@@ -180,13 +182,6 @@ function nonNegativeInteger(value) {
 function normalizeTimestamp(value, fallback = new Date(0).toISOString()) {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return fallback;
   return new Date(value).toISOString();
-}
-
-function createId() {
-  const activeWindow = typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
-  return (
-    activeWindow?.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
 }
 
 export function annotationDataBytes(data) {

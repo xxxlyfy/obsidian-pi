@@ -37,6 +37,7 @@ import {
 } from "./editor-file-refresh.mjs";
 import { openNotificationThread, showDesktopRunNotification } from "./desktop-notifications.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+import { now } from "../shared/runtime.mjs";
 // Aliased: `t` is already a local identifier throughout this view.
 import { t as tr } from "../shared/i18n/index.mjs";
 
@@ -797,7 +798,7 @@ export class PiAgentView extends f.ItemView {
     this.running = !!e;
     this.canceling = e?.canceling === !0;
   }
-  // PATCH 4 §7.3: unified stale-view / stale-run guard for delayed UI
+  // Unified stale-view / stale-run guard for delayed UI
   // callbacks (activity timers, streaming rAF, pending sticky state).
   captureUiCallbackGuard() {
     return {
@@ -953,7 +954,7 @@ export class PiAgentView extends f.ItemView {
       thinkingExpanded: false,
       thinkingUserSet: false,
       toolErrors: [],
-      // PATCH 4 §7.3: identifies this run for stale-callback checks.
+      // Identifies this run for stale-callback checks.
       runGeneration: ++this.runGenerationCounter
     };
     let skipQueueDrain = false;
@@ -997,7 +998,7 @@ export class PiAgentView extends f.ItemView {
     this.thinkingDisclosureExpanded = false;
     this.thinkingDisclosureUserSet = false;
     this.stickToBottom = !0;
-    // PATCH 5 §8.1: heap samples for the run lifecycle (profiler-only).
+    // Heap samples for the run lifecycle (profiler-only).
     performanceProfiler.markHeap("before");
     this.plugin.beginAnnotationProcessing(t, annotations);
     this.setRunningState(this.running);
@@ -1010,7 +1011,7 @@ export class PiAgentView extends f.ItemView {
           isCanceled: () => n.canceling,
           onEvent: (o) => {
             const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? globalThis.performance.now() : 0;
+            const startedAt = profiling ? now() : 0;
             try {
               const thinkingDelta = getThinkingDelta(o);
               if (thinkingDelta) {
@@ -1036,16 +1037,12 @@ export class PiAgentView extends f.ItemView {
                 this.appendStreamingThinkingDelta(thinkingDelta);
               }
             } finally {
-              if (profiling)
-                performanceProfiler.recordDuration(
-                  "uiCallback",
-                  globalThis.performance.now() - startedAt
-                );
+              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
             }
           },
           onTextDelta: (o) => {
             const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? globalThis.performance.now() : 0;
+            const startedAt = profiling ? now() : 0;
             try {
               performanceProfiler.incrementCounter("streamDeltaCount");
               if (!n.thinkingUserSet) n.thinkingExpanded = false;
@@ -1058,11 +1055,7 @@ export class PiAgentView extends f.ItemView {
               this.liveThinkingSetExpanded?.(n.thinkingExpanded);
               this.appendStreamingDelta(o);
             } finally {
-              if (profiling)
-                performanceProfiler.recordDuration(
-                  "uiCallback",
-                  globalThis.performance.now() - startedAt
-                );
+              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
             }
           },
           onPromptAccepted: acknowledgeQueuedDelivery

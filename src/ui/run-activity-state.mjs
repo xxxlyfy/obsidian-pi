@@ -5,6 +5,7 @@ import {
   formatTokenCount
 } from "../pi/token-usage.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+import { now } from "../shared/runtime.mjs";
 import {
   formatRetryDetail,
   formatToolStatus,
@@ -15,10 +16,9 @@ import {
 
 const ACTIVITY_STICKY_MS = 1200;
 
-// PATCH 4 §7.1: tool_update statuses are coalesced into one activity update per
-// window; tool_start/tool_end/error/agent_end/cancel stay immediate. The
-// initial experimental window is 100-200ms; the final value is chosen from
-// profiler data (see perf/PROGRESS.md and perf/baseline.md).
+// tool_update statuses are coalesced into one activity update per window;
+// tool_start/tool_end/error/agent_end/cancel stay immediate. The window is
+// short enough to feel instant and long enough to absorb update bursts.
 const ACTIVITY_COALESCE_MS = 150;
 
 export function setActivity(e, t, n = "") {
@@ -46,11 +46,11 @@ export function applyActivity(e, t, n = "", s = 0) {
 
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
   if (!this.updateActivityDom()) this.renderMessages();
   if (profiling) {
     profiler.incrementCounter("activityFlushCount");
-    profiler.recordDuration("activityUpdate", globalThis.performance.now() - startedAt);
+    profiler.recordDuration("activityUpdate", now() - startedAt);
   }
 }
 
@@ -61,7 +61,7 @@ export function queuePendingActivity(e, t, n = "") {
 
 export function schedulePendingActivity() {
   if (this.pendingActivityTimer) return;
-  // PATCH 4 §7.3: the sticky-window flush is a delayed callback; capture the
+  // The sticky-window flush is a delayed callback; capture the
   // run/thread generation so a settled run or switched thread cannot apply it.
   this.pendingActivityGuard = this.captureUiCallbackGuard?.();
   let e = Math.max(0, this.activityStickyUntil - Date.now());
@@ -99,7 +99,7 @@ export function flushPendingActivity() {
   this.applyActivity(e.text, e.kind, e.detail);
 }
 
-// PATCH 4 §7.1: coalesce tool_update activity status into one update per
+// Coalesce tool_update activity status into one update per
 // ACTIVITY_COALESCE_MS window. Immediate events call clearCoalescedActivity()
 // because they already reflect the latest state.
 export function scheduleCoalescedActivity() {
@@ -273,7 +273,7 @@ export function handleRunEvent(e) {
     return;
   }
   if (t === "tool_update") {
-    // PATCH 4 §7.1/§7.2: only the tracked state updates per event; the status
+    // Only the tracked state updates per event; the status
     // label is coalesced so RPC event frequency != activity render frequency.
     this.trackActiveTool(e);
     this.scheduleCoalescedActivity();
@@ -304,12 +304,12 @@ export function handleRunEvent(e) {
   }
   if (t === "agent_end") {
     this.clearCoalescedActivity?.();
-    // PATCH 3 §6.4: cancel the pending rAF and flush the streaming state
+    // Cancel the pending frame and flush the streaming state
     // synchronously (single source -> one final Markdown render). Never wait
     // for the next frame. A full re-render is only needed when there is no
     // connected streaming DOM to finalize.
     const finalizedStreaming = this.finalizeStreamingContent?.() === true;
-    // PATCH 5 §8.1: sample the heap while the run's UI state is still retained.
+    // Sample the heap while the run's UI state is still retained.
     performanceProfiler.markHeap("during");
     this.activityText = "";
     this.activityDetail = "";

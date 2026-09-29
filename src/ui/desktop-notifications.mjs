@@ -1,3 +1,5 @@
+import { resolveActiveWindow } from "../shared/runtime.mjs";
+
 export async function requestDesktopNotificationPermission(NotificationApi) {
   const activeNotificationApi =
     NotificationApi === undefined ? resolveActiveWindow()?.Notification : NotificationApi;
@@ -68,10 +70,6 @@ export function showDesktopRunNotification({
     console.warn("Pi Agent: desktop notification failed", error);
     return false;
   }
-}
-
-function resolveActiveWindow() {
-  return typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
 }
 
 function isDocumentUnfocused(documentRef) {

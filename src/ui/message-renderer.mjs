@@ -1,5 +1,6 @@
 import * as f from "obsidian";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+import { cancelFrame, now, requestFrame } from "../shared/runtime.mjs";
 
 export function renderMessages() {
   this.syncCurrentRunFlags();
@@ -177,7 +178,7 @@ export function renderStreamingAssistantMessage() {
   const response = item.createDiv({
     cls: "pi-agent-message-content pi-agent-message-content-streaming"
   });
-  // PATCH 3 (spec §6.2/§6.7): the streaming phase is plain text. No Markdown
+  // The streaming phase is plain text. No Markdown
   // render, no per-delta Component churn; the final Markdown render happens
   // once via finalizeStreamingContent when the run settles.
   const rendered = this.renderThinkingDisclosure(
@@ -251,7 +252,7 @@ export function appendStreamingDelta(delta) {
   this.activityStickyUntil = 0;
   this.pendingActivity = void 0;
   this.clearPendingActivityTimer();
-  // PATCH 3 §6.1/§6.2: the delta only appends to the single source of truth;
+  // The delta only appends to the single source of truth;
   // the low-cost DOM update is coalesced into the next animation frame.
   this.streamingAssistantContent += delta;
   this.streamingAnswerDirty = true;
@@ -261,24 +262,20 @@ export function appendStreamingDelta(delta) {
 
 export function appendStreamingThinkingDelta(delta) {
   if (!delta) return;
-  // PATCH 3 §6.3/§6.7: thinking uses the same single source -> rAF
+  // Thinking uses the same single source -> frame
   // coalescing -> plain text pipeline as the assistant answer.
   this.streamingThinkingDirty = true;
   this.scheduleStreamingFlush();
 }
 
 /**
- * PATCH 3 §6.3: at most one streaming flush per animation frame. Multiple
+ * At most one streaming flush per animation frame. Multiple
  * deltas collapse into a single rAF, then a single low-cost text DOM update.
  */
 export function scheduleStreamingFlush() {
   if (this.streamingFlushRaf !== undefined) return;
-  const requestFrame = globalThis.requestAnimationFrame;
-  if (typeof requestFrame !== "function") {
-    this.flushStreaming();
-    return;
-  }
-  // PATCH 4 §7.3: the delayed frame callback carries a run/thread generation
+  // requestFrame() falls back to a timer when the window has no rAF.
+  // The delayed frame callback carries a run/thread generation
   // guard so a settled run or switched thread cannot repaint stale content.
   this.streamingFlushGuard = this.captureUiCallbackGuard?.();
   this.streamingFlushRaf = requestFrame(() => {
@@ -297,7 +294,7 @@ export function scheduleStreamingFlush() {
 
 export function cancelStreamingFlush() {
   if (this.streamingFlushRaf !== undefined) {
-    globalThis.cancelAnimationFrame?.(this.streamingFlushRaf);
+    cancelFrame(this.streamingFlushRaf);
     this.streamingFlushRaf = undefined;
   }
   this.streamingFlushGuard = undefined;
@@ -308,7 +305,7 @@ export function flushStreaming() {
 
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
-  const startedAt = profiling ? globalThis.performance.now() : 0;
+  const startedAt = profiling ? now() : 0;
   try {
     if (this.streamingAnswerDirty && !this.renderStreamingAnswer()) {
       this.renderMessages();
@@ -325,13 +322,13 @@ export function flushStreaming() {
   } finally {
     if (profiling) {
       profiler.incrementCounter("streamFlushCount");
-      profiler.recordDuration("streamFlush", globalThis.performance.now() - startedAt);
+      profiler.recordDuration("streamFlush", now() - startedAt);
     }
   }
 }
 
 /**
- * PATCH 3 §6.4/§6.5: cancel the pending frame, flush synchronously and replace
+ * Cancel the pending frame, flush synchronously and replace
  * the plain-text streaming container with one final Markdown render based on
  * the single source of truth. Never waits for the next frame.
  *

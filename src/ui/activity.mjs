@@ -77,9 +77,10 @@ export function getSkillCommandName(prompt) {
 }
 
 export function getToolEventKey(event) {
-  // PATCH 2: normalized tool events carry a lifecycle `toolKey` (stable
-  // toolCallId, or an internal fallback key assigned by the ActiveTools map).
-  // No JSON.stringify(toolArgs) as a high-frequency key (spec §5.2).
+  // Normalized tool events carry a lifecycle `toolKey` (stable toolCallId, or an
+  // internal fallback key assigned by the ActiveTools map). Tool arguments are
+  // deliberately not part of the key: stringifying them on every update would be
+  // a high-frequency parse on the streaming path.
   return String(event.toolKey || event.toolCallId || event.toolName || event.message || "tool");
 }
 

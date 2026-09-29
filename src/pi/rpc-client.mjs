@@ -1,7 +1,9 @@
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { clearTimeout as clearNodeTimeout, setTimeout as setNodeTimeout } from "node:timers";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
+import { terminateProcessTree } from "../shared/process-tree.mjs";
+import { now, resolveActiveWindow } from "../shared/runtime.mjs";
 import { YieldScheduler } from "./yield-scheduler.mjs";
 import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
 import { createPiCliError, formatPiCliFailure } from "./diagnostics.mjs";
@@ -9,14 +11,12 @@ import { isExtensionUiDialog, isExtensionUiMethod } from "./extension-ui.mjs";
 import { MINIMUM_PI_VERSION } from "./health.mjs";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-// PATCH 1 bounded drain budgets (spec initial values: 32-64 events / 4-8ms).
+// Bounded drain budgets for one cooperative batch (64 events or 6ms, whichever
+// comes first) so a burst of Pi output cannot block the Obsidian UI thread.
 const DRAIN_BATCH_MAX_EVENTS = 64;
 const DRAIN_BATCH_MAX_MS = 6;
 const nodeTimerHost = { setTimeout: setNodeTimeout, clearTimeout: clearNodeTimeout };
 
-function resolveActiveWindow() {
-  return typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
-}
 const UNSUPPORTED_COMMAND_PATTERNS = [
   /unknown (?:rpc )?command/i,
   /unsupported (?:rpc )?command/i,
@@ -211,7 +211,7 @@ export class PiRpcClient {
     this.scheduleDrain();
   }
 
-  // PATCH 5 §8.1: bounded queue observations (enabled-only; O(chunk) scan).
+  // Bounded queue observations (enabled-only; O(chunk) scan of buffered lines).
   measureQueue() {
     const profiler = performanceProfiler;
     if (!profiler.enabled || !this.stdoutBuffer) return;
@@ -225,9 +225,9 @@ export class PiRpcClient {
     profiler.recordMax("rpcQueueBytes", Buffer.byteLength(buffer, "utf8"));
   }
 
-  // PATCH 1: at most one pending drain; new chunks only append to the parser
-  // buffer. Batches are bounded by event count and time, and yields happen only
-  // between complete JSONL lines (partial lines stay in the buffer).
+  // At most one pending drain; new chunks only append to the parser buffer.
+  // Batches are bounded by event count and time, and yields happen only between
+  // complete JSONL lines (partial lines stay in the buffer).
   scheduleDrain() {
     if (this.disposed || this.drainPending) return;
     this.drainPending = true;
@@ -257,7 +257,7 @@ export class PiRpcClient {
 
   drainBatch() {
     const profiler = performanceProfiler;
-    const startedAt = globalThis.performance.now();
+    const startedAt = now();
     let processed = 0;
     while (processed < this.drainBudget.maxEvents) {
       let line;
@@ -274,10 +274,9 @@ export class PiRpcClient {
       if (line.endsWith("\r")) line = line.slice(0, -1);
       this.handleLine(line);
       processed += 1;
-      if (globalThis.performance.now() - startedAt >= this.drainBudget.maxMs) break;
+      if (now() - startedAt >= this.drainBudget.maxMs) break;
     }
-    if (profiler.enabled && processed > 0)
-      profiler.recordDuration("drain", globalThis.performance.now() - startedAt);
+    if (profiler.enabled && processed > 0) profiler.recordDuration("drain", now() - startedAt);
   }
 
   hasDrainWork() {
@@ -299,11 +298,11 @@ export class PiRpcClient {
 
   handleLine(line) {
     if (!line.trim()) return;
-    // PATCH 5 §9: measure the unavoidable single JSON.parse and the raw line
-    // size on the object path too (enabled-only).
+    // Measure the unavoidable single JSON.parse and the raw line size
+    // (enabled-only).
     const profiler = performanceProfiler;
     const profiling = profiler.enabled;
-    const parseStartedAt = profiling ? globalThis.performance.now() : 0;
+    const parseStartedAt = profiling ? now() : 0;
     let message;
     try {
       message = JSON.parse(line);
@@ -313,7 +312,7 @@ export class PiRpcClient {
     }
     if (profiling) {
       profiler.recordMax("jsonLineBytes", Buffer.byteLength(line, "utf8"));
-      profiler.recordDuration("jsonParse", globalThis.performance.now() - parseStartedAt);
+      profiler.recordDuration("jsonParse", now() - parseStartedAt);
     }
 
     if (message.type === "response" && message.id) {
@@ -379,26 +378,7 @@ export class PiRpcClient {
   }
 
   terminate(signal = "SIGTERM") {
-    const child = this.child;
-    if (!child) return;
-    try {
-      if (process.platform === "win32" && child.pid) {
-        execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-          timeout: 2_000,
-          windowsHide: true
-        });
-      } else if (child.pid) {
-        process.kill(-child.pid, signal);
-      } else {
-        child.kill(signal);
-      }
-    } catch {
-      try {
-        child.kill(signal);
-      } catch {
-        // Process already exited.
-      }
-    }
+    terminateProcessTree(this.child, { signal });
   }
 
   dispose() {

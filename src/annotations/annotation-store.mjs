@@ -1,3 +1,4 @@
+import { structuredCloneSafe } from "../shared/runtime.mjs";
 import { reanchorAnnotation } from "./annotation-anchors.mjs";
 import {
   ANNOTATION_LIMITS,
@@ -180,11 +181,4 @@ export class AnnotationStore {
   changed() {
     this.onChange(this.toJSON());
   }
-}
-
-function structuredCloneSafe(value) {
-  const activeWindow = typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
-  return typeof activeWindow?.structuredClone === "function"
-    ? activeWindow.structuredClone(value)
-    : JSON.parse(JSON.stringify(value));
 }

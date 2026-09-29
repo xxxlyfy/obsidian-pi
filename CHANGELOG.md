@@ -3,6 +3,11 @@
 ## Unreleased
 
 - Removed repository documentation files (README, PRIVACY, TESTING, RELEASE, AGENTS).
+- Removed the retired dry-run mode, including its always-false settings branch and the unreachable non-RPC run path it kept alive. The `/context` diagnostic output no longer reports `run.dryRun`.
+- Consolidated process termination into one shared helper, so a cancelled run always tears down the Pi process tree the same way.
+- Made reasoning labels come from the translation dictionaries only; the English fallback labels no longer live in a second hard-coded map.
+- Routed timers, animation frames, and performance timing through the active window, so a chat view in a popout window measures and schedules correctly.
+- Extended the translation key test to fail on unused keys and mismatched placeholders, not just missing keys.
 
 ## 0.0.18
 

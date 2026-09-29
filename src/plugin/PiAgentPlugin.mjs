@@ -124,9 +124,6 @@ Pi CLI tools are controlled by the selected tool mode. They are not an OS-level 
 - A good Base starts from the fields already used in a folder.
 - Suggested fields: type, status, tags, project, area, created, updated.
 - Propose a Base config before creating it unless the user explicitly asks you to create it immediately.`;
-function previewSuggestedFrontmatter(markdown, patch) {
-  return previewFrontmatterPatch(markdown, patch);
-}
 export class PiAgentPlugin extends P.Plugin {
   constructor() {
     super(...arguments);
@@ -173,9 +170,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.annotationController = new MarkdownAnnotationsController(this);
     this.annotationController.start();
 
-    if (!this.settings.dryRun) {
-      warmupPiCli(this.settings.piExecutablePath, this.getPluginDirectory());
-    }
+    warmupPiCli(this.settings.piExecutablePath, this.getPluginDirectory());
 
     this.refreshCurrentContextFile();
     // Start Pi extensions and populate skills, prompts, and extension commands
@@ -1166,7 +1161,7 @@ export class PiAgentPlugin extends P.Plugin {
     }
     let t = await this.app.vault.cachedRead(e),
       n = new Date().toISOString().slice(0, 10),
-      s = previewSuggestedFrontmatter(t, {
+      s = previewFrontmatterPatch(t, {
         type: "note",
         status: "draft",
         updated: n,

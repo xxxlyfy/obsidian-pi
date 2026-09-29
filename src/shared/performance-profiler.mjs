@@ -1,14 +1,18 @@
 // Minimal opt-in performance profiler for the UI-responsiveness work.
 //
-// Contract (spec PATCH 0 §3.6):
+// Contract:
 // - Disabled by default; enable explicitly via `profiler.enabled = true`.
 // - Never keyed off NODE_ENV.
 // - Counters and durations only; no UI.
-//
-// Wired into the RPC event path in PATCH 0. Later patches add queue/stream/
-// activity metrics as they land (see perf/PROGRESS.md).
 
-const textEncoder = new globalThis.TextEncoder();
+import { heapUsedBytes, hostGlobals, resolveActiveWindow } from "./runtime.mjs";
+
+function createTextEncoder() {
+  const Encoder = resolveActiveWindow()?.TextEncoder ?? hostGlobals().TextEncoder;
+  return new Encoder();
+}
+
+let textEncoder;
 
 export class PerformanceProfiler {
   constructor() {
@@ -25,13 +29,13 @@ export class PerformanceProfiler {
   }
 
   /**
-   * PATCH 5 §8.1: mark JS-heap samples for the run lifecycle. `before`/`after`
-   * store the latest sample, `during` keeps the peak between marks. Chromium
-   * exposes `performance.memory`; other hosts are silently ignored.
+   * Mark JS-heap samples for the run lifecycle. `before`/`after` store the
+   * latest sample, `during` keeps the peak between marks. Hosts that do not
+   * expose heap usage are silently ignored.
    */
   markHeap(stage) {
     if (!this.enabled) return;
-    const used = globalThis.performance?.memory?.usedJSHeapSize;
+    const used = heapUsedBytes();
     if (!Number.isFinite(used)) return;
     const key = String(stage);
     if (key === "during") this.heap[key] = Math.max(this.heap[key] ?? 0, used);
@@ -64,6 +68,8 @@ export class PerformanceProfiler {
   recordJsonEvent(line) {
     if (!this.enabled) return;
     this.incrementCounter("rpcEventsProcessed");
+    // Built lazily: the encoder must come from whichever window is active.
+    textEncoder ??= createTextEncoder();
     this.recordMax("jsonLineBytes", textEncoder.encode(line).length);
   }
 
@@ -102,19 +108,19 @@ export class PerformanceProfiler {
         maxNormalizeDuration: durations.normalize?.max ?? 0,
         maxRunStateDuration: durations.runState?.max ?? 0,
         diagnosticBufferSize: maxima.diagnosticsSize ?? 0,
-        // PATCH 3 streaming rendering metrics (spec §6.9).
+        // Streaming rendering metrics.
         streamDeltaCount: counters.streamDeltaCount ?? 0,
         streamFlushCount: counters.streamFlushCount ?? 0,
         markdownRenderCount: counters.markdownRenderCount ?? 0,
         maxUiCallbackDuration: durations.uiCallback?.max ?? 0,
         maxStreamFlushDuration: durations.streamFlush?.max ?? 0,
-        // PATCH 4 activity coalescing + stale callback metrics (spec §7.6).
+        // Activity coalescing and stale-callback metrics.
         activityFlushCount: counters.activityFlushCount ?? 0,
         activityCoalescedEvents: counters.activityCoalescedEvents ?? 0,
         activityCoalescedFlushes: counters.activityCoalescedFlushes ?? 0,
         maxActivityUpdateDuration: durations.activityUpdate?.max ?? 0,
         staleCallbackPrevented: counters.staleCallbackPrevented ?? 0,
-        // PATCH 5 queue + heap metrics (spec §8.1).
+        // RPC queue and heap metrics.
         maxRpcQueueDepth: maxima.rpcQueueDepth ?? 0,
         maxRpcQueueBytes: maxima.rpcQueueBytes ?? 0,
         heapUsedBefore: this.heap.before ?? 0,

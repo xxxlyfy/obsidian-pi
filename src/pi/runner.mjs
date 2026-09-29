@@ -1,19 +1,12 @@
-import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { getConfiguredSkillPaths } from "../context/skills.mjs";
 import { CUSTOM_MODEL_VALUE } from "../plugin/settings.mjs";
 import { createContextUsage } from "./token-usage.mjs";
-import { createPiCliError, formatPiCliFailure } from "./diagnostics.mjs";
-import { buildPiProcessInvocation, findPiExecutable } from "./environment.mjs";
-import { handlePiEvent, handlePiJsonEventLine } from "./events.mjs";
+import { handlePiEvent } from "./events.mjs";
 import { createRunState } from "./run-state.mjs";
 import { PiRpcClient } from "./rpc-client.mjs";
 import { toRpcImages } from "../ui/prompt-payload.mjs";
-
-export function isPiCliCommandPrompt(prompt) {
-  return /^\/(compact)(?:\s|$)/i.test(prompt.trim());
-}
 
 export function getCompactInstructions(prompt) {
   const match = prompt.trim().match(/^\/compact(?:\s+([\s\S]+))?$/i);
@@ -42,9 +35,7 @@ export class PiRunner {
     if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== undefined)
-      return this.settings.dryRun
-        ? this.formatDryRunCompactResponse(sessionId)
-        : this.runPiRpcCompact(sessionId, compactInstructions, callbacks);
+      return this.runPiRpcCompact(sessionId, compactInstructions, callbacks);
 
     const effectivePrompt = context?.userPrompt ?? prompt;
     const formattedPrompt = this.contextBuilder.formatPrompt(
@@ -54,51 +45,12 @@ export class PiRunner {
     );
     if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
-    return this.settings.dryRun
-      ? {
-          finalResponse: this.formatDryRunResponse(prompt, context),
-          sessionId,
-          threadId: sessionId
-        }
-      : this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
+    return this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
   }
 
   cancelCurrentRun() {
     this.cancelRequested = true;
-    if (this.rpcClient) {
-      this.rpcClient.abort();
-      return;
-    }
-    if (!this.activeChild) return;
-
-    this.terminateActiveChild("SIGTERM");
-    window.setTimeout(() => {
-      if (this.activeChild) this.terminateActiveChild("SIGKILL");
-    }, 1500);
-  }
-
-  terminateActiveChild(signal) {
-    const child = this.activeChild;
-    if (!child) return;
-
-    try {
-      if (process.platform === "win32" && child.pid) {
-        execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-          timeout: 2000,
-          windowsHide: true
-        });
-      } else if (child.pid) {
-        process.kill(-child.pid, signal);
-      } else {
-        child.kill(signal);
-      }
-    } catch {
-      try {
-        child.kill(signal);
-      } catch {
-        // Ignore process termination races.
-      }
-    }
+    this.rpcClient?.abort();
   }
 
   async getOrCreateRpcClient(sessionReference) {
@@ -163,7 +115,7 @@ export class PiRunner {
           if (!settled) rejectRun(new Error(event.error || "Pi RPC process stopped."));
           return;
         }
-        // PATCH 2: parsed objects flow straight into the event handler; no
+        // Parsed objects flow straight into the event handler; no
         // JSON.stringify -> JSON.parse round trip on the persistent RPC path.
         handlePiEvent(event, state, callbacks);
         if (event.type === "agent_settled" && !settled) {
@@ -214,102 +166,6 @@ export class PiRunner {
     await this.rpcClient.request("steer", {
       message: String(prompt || ""),
       ...(rpcImages.length > 0 ? { images: rpcImages } : {})
-    });
-  }
-
-  runPiCli(prompt, sessionId, callbacks) {
-    if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
-
-    const session = this.resolveOrCreateSession(sessionId);
-    const args = this.buildPiArgs(session.path, "json");
-
-    return new Promise((resolve, reject) => {
-      this.cancelRequested = false;
-      const piExecutable = findPiExecutable(this.settings.piExecutablePath);
-      const invocation = buildPiProcessInvocation(piExecutable, args, {
-        cwd: this.workingDirectory ?? this.pluginDirectory,
-        detached: process.platform !== "win32"
-      });
-      const child = spawn(invocation.command, invocation.args, invocation.options);
-      this.activeChild = child;
-      callbacks?.onEvent?.({
-        type: "pi_start",
-        raw: {
-          args: args.slice(1),
-          cwd: this.workingDirectory ?? this.pluginDirectory
-        }
-      });
-
-      let stdoutBuffer = "";
-      let stderr = "";
-      let settled = false;
-      const state = createRunState();
-      const failOnce = (error) => {
-        if (!settled) {
-          settled = true;
-          reject(error);
-        }
-      };
-      const handleLine = (line) => handlePiJsonEventLine(line, state, callbacks);
-      const flushStdoutBuffer = () => {
-        if (!stdoutBuffer.trim()) return;
-
-        handleLine(stdoutBuffer.trim());
-        stdoutBuffer = "";
-      };
-      const getErrorText = () => state.errorMessage ?? stderr.trim() ?? state.fallbackText.trim();
-
-      child.stdout.on("data", (chunk) => {
-        stdoutBuffer += chunk.toString("utf8");
-        const lines = stdoutBuffer.split(/\r?\n/);
-        stdoutBuffer = lines.pop() ?? "";
-
-        for (const line of lines) handleLine(line);
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.once("error", (error) => {
-        failOnce(createPiCliError({ error }));
-      });
-      child.once("close", (exitCode) => {
-        if (this.activeChild === child) this.activeChild = undefined;
-        if (settled) return;
-
-        if (this.cancelRequested) {
-          this.cancelRequested = false;
-          failOnce(new Error("Pi run canceled."));
-          return;
-        }
-
-        flushStdoutBuffer();
-        const errorText = getErrorText();
-        if (exitCode && exitCode !== 0) {
-          failOnce(
-            new Error(formatPiCliFailure({ context: "Pi run failed", stderr: errorText, exitCode }))
-          );
-          return;
-        }
-        if (state.errorMessage) {
-          failOnce(new Error(state.errorMessage));
-          return;
-        }
-
-        settled = true;
-        resolve({
-          finalResponse: this.getFinalResponse(state, isPiCliCommandPrompt(prompt)),
-          sessionId: session.reference,
-          threadId: session.reference,
-          contextUsage: this.getRunContextUsage(state.tokenUsage, state),
-          contextCompacted: state.sawSuccessfulCompaction,
-          tokenUsage: state.tokenUsage ?? undefined,
-          diagnostics: state.diagnostics.snapshot()
-        });
-      });
-
-      child.stdin.write(prompt);
-      child.stdin.end();
     });
   }
 
@@ -529,64 +385,6 @@ export class PiRunner {
   async getSessionEntries(sessionReference, since) {
     const { client } = await this.getExistingSessionRpcClient(sessionReference);
     return client.request("get_entries", since ? { since } : {});
-  }
-
-  formatDryRunCompactResponse(sessionId) {
-    return {
-      finalResponse: "Dry run: context would be compacted.",
-      sessionId,
-      threadId: sessionId,
-      contextCompacted: true
-    };
-  }
-
-  formatDryRunResponse(prompt, context) {
-    const lines = [
-      "Dry run: Pi CLI was not called.",
-      "",
-      `Prompt: ${prompt}`,
-      "",
-      context.activeNote
-        ? `Active note: [[${context.activeNote.path.replace(/\.md$/i, "")}]]`
-        : "Active note: none",
-      `Automatic search results: ${context.searchResults.length}`,
-      `Linked notes: ${context.linkedNeighborhood.length}`
-    ];
-
-    if (context.activeNote) {
-      lines.push(
-        "",
-        "Backlinks:",
-        ...context.activeNote.backlinks
-          .slice(0, 8)
-          .map((backlink) => `- [[${backlink.path.replace(/\.md$/i, "")}]] (${backlink.count})`),
-        "",
-        "Outgoing links:",
-        ...context.activeNote.outgoingLinks
-          .slice(0, 8)
-          .map(
-            (outgoingLink) =>
-              `- [[${outgoingLink.path.replace(/\.md$/i, "")}]] (${outgoingLink.count})`
-          ),
-        "",
-        "Unresolved links:",
-        ...context.activeNote.unresolvedLinks
-          .slice(0, 8)
-          .map((unresolvedLink) => `- [[${unresolvedLink.display}]] (${unresolvedLink.count})`)
-      );
-    }
-
-    if (context.searchResults.length > 0) {
-      lines.push(
-        "",
-        "Automatic note matches:",
-        ...context.searchResults.map(
-          (result) => `- [[${result.path.replace(/\.md$/i, "")}]] score=${result.score}`
-        )
-      );
-    }
-
-    return lines.join("\n");
   }
 }
 

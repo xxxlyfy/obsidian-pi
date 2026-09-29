@@ -1,4 +1,5 @@
 import { MarkdownRenderChild, MarkdownView, Notice, setIcon } from "obsidian";
+import { resolveViewWindow, structuredCloneSafe } from "../shared/runtime.mjs";
 import { captureAnchor } from "./annotation-anchors.mjs";
 import { ANNOTATION_LIMITS, positionToOffset } from "./annotation-model.mjs";
 import { AnnotationModal } from "./annotation-modal.mjs";
@@ -32,7 +33,7 @@ class AnnotationRenderChild extends MarkdownRenderChild {
 }
 
 export class MarkdownAnnotationsController {
-  constructor(plugin, hostWindow = resolveActiveWindow(plugin)) {
+  constructor(plugin, hostWindow = resolveViewWindow(plugin)) {
     this.plugin = plugin;
     this.hostWindow = hostWindow;
     this.leaves = new Map();
@@ -1110,20 +1111,6 @@ function mergeIntervals(intervals) {
     else previous.to = Math.max(previous.to, interval.to);
   }
   return merged;
-}
-
-function structuredCloneSafe(value) {
-  const activeWindow = typeof window === "undefined" ? undefined : (window.activeWindow ?? window);
-  return typeof activeWindow?.structuredClone === "function"
-    ? activeWindow.structuredClone(value)
-    : JSON.parse(JSON.stringify(value));
-}
-
-function resolveActiveWindow(plugin) {
-  return (
-    plugin?.app?.workspace?.containerEl?.ownerDocument?.defaultView ??
-    (typeof window === "undefined" ? undefined : (window.activeWindow ?? window))
-  );
 }
 
 function elementFromNode(node) {
