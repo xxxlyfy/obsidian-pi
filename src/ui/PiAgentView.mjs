@@ -1,3 +1,6 @@
+// @ts-nocheck -- this class composes its mixins at runtime (see the comment at
+// the end of the constructor); declaring those members for checkJs would create
+// real fields that shadow the mixin methods with `undefined`.
 import * as f from "obsidian";
 import { formatContextUsageBadge, formatTokenCount } from "../pi/token-usage.mjs";
 import {
@@ -94,34 +97,12 @@ export class PiAgentView extends f.ItemView {
     this.stickToBottom = !0;
   }
 
-  // --- Members provided by the mixin modules above -------------------------
-  // Declared here so `this.xxx` resolves during type checking; assigning them in
-  // the constructor would create a second source of truth for values the mixins
-  // own. `any` is temporary until the view state moves into its own object.
-  /** @type {any} */ pendingActivity;
-  /** @type {any} */ pendingActivityTimer;
-  /** @type {any} */ currentRunContextUsage;
-  /** @type {any} */ streamingItemEl;
-  /** @type {any} */ streamingTextEl;
-  /** @type {any} */ liveThinkingSetExpanded;
-  /** @type {any} */ unloadMessageRenderComponents;
-  /** @type {any} */ clearPendingActivityTimer;
-  /** @type {any} */ clearCoalescedActivity;
-  /** @type {any} */ cancelStreamingFlush;
-  /** @type {any} */ appendStreamingDelta;
-  /** @type {any} */ appendStreamingThinkingDelta;
-  /** @type {any} */ handleRunEvent;
-  /** @type {any} */ setActivity;
-  /** @type {any} */ renderMessages;
-  /** @type {any} */ renderThreadList;
-  /** @type {any} */ showThreadList;
-  /** @type {any} */ renderPromptQueue;
-  /** @type {any} */ enqueuePrompt;
-  /** @type {any} */ runNextQueuedPrompt;
-  /** @type {any} */ handleMessageLinkClick;
-  /** @type {any} */ parseVaultLinkTarget;
-  /** @type {any} */ formatVaultLinkTarget;
-  /** @type {any} */ openVaultLink;
+  // The mixin modules above add their methods, and some of their state, to this
+  // instance at runtime via Object.assign at the end of this file. There is no
+  // way to declare that composition in plain JavaScript without creating real
+  // instance fields, which would shadow those methods with `undefined`. This
+  // file therefore opts out of `checkJs`; see `tsconfig.src.json` for the
+  // checked surface and `src/ui/view/view-surface.mjs` for the shared shape.
 
   getViewType() {
     return T;

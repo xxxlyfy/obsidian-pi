@@ -6,6 +6,7 @@ const globals = {
   console: "readonly",
   document: "readonly",
   Element: "readonly",
+  fetch: "readonly",
   globalThis: "readonly",
   navigator: "readonly",
   process: "readonly",

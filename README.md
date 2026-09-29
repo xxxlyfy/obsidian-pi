@@ -47,6 +47,30 @@ the real ones. What stays enabled still catches unknown properties, misspelled
 methods, and wrong argument shapes. When the source gains types, flip those
 strict flags on in that file.
 
+`src/ui/PiAgentView.mjs` carries a single `@ts-nocheck`. That class composes its
+mixins at runtime, and in plain JavaScript there is no way to _declare_ those
+members without creating real instance fields — which would shadow the mixin
+methods with `undefined`. The mixins themselves, `view-surface.mjs` and
+`view-state.mjs`, remain checked.
+
+### Verifying inside a real Obsidian
+
+`npm test` covers logic, but not plugin loading, view lifecycle, or the Pi
+process. For that, point a debugging-enabled Obsidian at the script:
+
+```bash
+# Obsidian must be running with the remote debugging port open
+node scripts/verify-obsidian-plugin.mjs         # lifecycle, settings, teardown
+node scripts/verify-obsidian-plugin.mjs --run   # also sends one real Pi prompt
+```
+
+The script reloads the plugin from disk, so install the build first with
+`npm run dev:install -- <vault>/.obsidian/plugins/pi-agent`. It asserts that the
+plugin loads, the view renders and reopens after teardown, timers and render
+components are released across 20 open/close cycles, heap growth stays bounded,
+settings round-trip, and no console error appears. `--run` additionally checks
+that a real prompt completes through the RPC pipeline and renders a reply.
+
 ### Architecture
 
 | Area        | Modules                                       | Responsibility                                                                                                                                                                                                                                                                                                          |
