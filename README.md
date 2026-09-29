@@ -68,8 +68,18 @@ The script reloads the plugin from disk, so install the build first with
 `npm run dev:install -- <vault>/.obsidian/plugins/pi-agent`. It asserts that the
 plugin loads, the view renders and reopens after teardown, timers and render
 components are released across 20 open/close cycles, heap growth stays bounded,
-settings round-trip, and no console error appears. `--run` additionally checks
-that a real prompt completes through the RPC pipeline and renders a reply.
+settings round-trip, and no console error appears.
+
+`--run` adds the scenarios that need a real Pi process:
+
+- one prompt completes through the RPC pipeline and renders a reply;
+- **cancelling a run mid-stream**: a long prompt is started, the harness waits
+  until content is actually streaming, calls `cancelCurrentRun()`, then asserts
+  the run settles immediately with no timer, animation frame, stale guard,
+  pending activity or active run left behind, and that the in-flight streaming
+  cleanup was released;
+- a further prompt still runs normally in the same view, proving the cancelled
+  run left no residue.
 
 ### Architecture
 

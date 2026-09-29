@@ -245,6 +245,138 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
         runResult.renderedChars > 0,
       JSON.stringify(runResult)
     );
+
+    // 9. Cancel a run while it is actually streaming. This is the path the view
+    //    lifecycle exists to protect: it exercises the pending-activity timer,
+    //    the coalesced-activity timer and the streaming frame while they are all
+    //    in flight, then asserts they are gone and that the view still works.
+    const cancelCheck = await evaluate(`(async () => {
+      const app = window.app;
+      const plugin = app.plugins.plugins["pi-agent"];
+      const view = app.workspace.getLeavesOfType("pi-agent-view")[0]?.view;
+      if (!view) return { skipped: "no view" };
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const settle = async (limitMs) => {
+        const done = () => view.running === false && view.canceling === false;
+        const startedAt = Date.now();
+        while (!done() && Date.now() - startedAt < limitMs) await sleep(50);
+        return done() ? "settled" : "timeout";
+      };
+
+      // A prompt long enough that the run is still streaming when we cancel it.
+      const prompt =
+        "Count slowly from 1 to 400, writing several complete sentences about each number.";
+      const run = view
+        .runPrompt(prompt, undefined, [], undefined, [], undefined, undefined)
+        .then(() => "resolved")
+        .catch((error) => "rejected: " + (error instanceof Error ? error.message : String(error)));
+
+      // Wait until the run is live and has produced some streamed content.
+      let streamedChars = 0;
+      const waitStartedAt = Date.now();
+      while (streamedChars < 40 && Date.now() - waitStartedAt < 60000) {
+        await sleep(100);
+        streamedChars = (view.streamingAssistantContent || "").length;
+      }
+      const midRunCleanups = view.lifecycle?.pendingCleanups ?? -1;
+      const midRun = {
+        streamedChars,
+        running: view.running,
+        activityTimer: view.pendingActivityTimer !== undefined,
+        coalesceTimer: view.activityCoalesceTimer !== undefined,
+        flushFrame: view.streamingFlushRaf !== undefined && view.streamingFlushRaf !== null
+      };
+
+      view.cancelCurrentRun();
+      const cancelingImmediately = view.canceling === true;
+      const cancelOutcome = await settle(60000);
+      await sleep(1500);
+      const runOutcome = await run;
+
+      return {
+        midRun: { ...midRun, pendingCleanups: midRunCleanups },
+        cancelingImmediately,
+        cancelOutcome,
+        runOutcome,
+        afterCancel: {
+          running: view.running,
+          canceling: view.canceling,
+          activityTimer: view.pendingActivityTimer !== undefined,
+          coalesceTimer: view.activityCoalesceTimer !== undefined,
+          flushFrame: view.streamingFlushRaf !== undefined && view.streamingFlushRaf !== null,
+          flushGuard: view.streamingFlushGuard !== undefined,
+          pendingActivity: view.pendingActivity !== undefined,
+          pendingTimers: view.lifecycle?.pendingTimers ?? -1,
+          // A live view legitimately holds one: the composer-bar observer. What
+          // matters is that cancelling a run does not add more.
+          pendingCleanups: view.lifecycle?.pendingCleanups ?? -1,
+          activeRuns: view.activeRuns.size
+        }
+      };
+    })()`);
+
+    const mid = cancelCheck.midRun ?? {};
+    const after = cancelCheck.afterCancel ?? {};
+    const midStreamTimersInFlight = mid.activityTimer || mid.coalesceTimer || mid.flushFrame;
+    record(
+      "cancel happened while the run was streaming",
+      !cancelCheck.skipped &&
+        mid.streamedChars >= 40 &&
+        mid.running === true &&
+        midStreamTimersInFlight === true,
+      JSON.stringify(mid)
+    );
+    record(
+      "cancel is immediate and the run settles",
+      cancelCheck.cancelingImmediately === true &&
+        cancelCheck.cancelOutcome === "settled" &&
+        after.running === false &&
+        after.canceling === false,
+      JSON.stringify({
+        immediately: cancelCheck.cancelingImmediately,
+        settle: cancelCheck.cancelOutcome,
+        run: cancelCheck.runOutcome
+      })
+    );
+    record(
+      "cancelled run leaves no timer, frame or guard behind",
+      after.activityTimer === false &&
+        after.coalesceTimer === false &&
+        after.flushFrame === false &&
+        after.flushGuard === false &&
+        after.pendingActivity === false &&
+        after.pendingTimers === 0 &&
+        after.pendingCleanups <= mid.pendingCleanups &&
+        after.activeRuns === 0,
+      JSON.stringify({ mid: mid.pendingCleanups, after })
+    );
+
+    // 10. The view must still be usable after the cancelled run.
+    const recovery = await evaluate(`(async () => {
+      const app = window.app;
+      const plugin = app.plugins.plugins["pi-agent"];
+      const view = app.workspace.getLeavesOfType("pi-agent-view")[0]?.view;
+      const before = plugin.messages.length;
+      const result = await view
+        .runPrompt("Reply with exactly: OK", undefined, [], undefined, [], undefined, undefined)
+        .then(() => "done")
+        .catch((error) => "error: " + (error instanceof Error ? error.message : String(error)));
+      return {
+        result,
+        before,
+        after: plugin.messages.length,
+        running: view.running,
+        flushFrame: view.streamingFlushRaf !== undefined && view.streamingFlushRaf !== null
+      };
+    })()`);
+    record(
+      "view runs a fresh prompt after the cancelled one",
+      recovery.result === "done" &&
+        recovery.after > recovery.before &&
+        recovery.running === false &&
+        recovery.flushFrame === false,
+      JSON.stringify(recovery)
+    );
   }
 
   const realErrors = consoleErrors.filter(
