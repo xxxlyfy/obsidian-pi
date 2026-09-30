@@ -7005,6 +7005,187 @@ function normalizeArchiveFolder(folder) {
   return (0, import_obsidian12.normalizePath)(normalizeVaultFolder(folder, "Pi"));
 }
 
+// src/ui/view/composer-attachments.mjs
+var import_obsidian13 = require("obsidian");
+function mimeForName(name) {
+  const extension = String(name || "")
+    .toLowerCase()
+    .split(".")
+    .pop();
+  return (
+    {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      webp: "image/webp",
+      md: "text/markdown",
+      txt: "text/plain",
+      csv: "text/csv",
+      json: "application/json",
+      yaml: "application/yaml",
+      yml: "application/yaml",
+      xml: "application/xml",
+      html: "text/html",
+      css: "text/css",
+      js: "text/javascript",
+      mjs: "text/javascript",
+      ts: "text/typescript",
+      py: "text/x-python"
+    }[extension] || ""
+  );
+}
+function showAttachmentMenu(event) {
+  const menu = new import_obsidian13.Menu();
+  menu.addItem((item) =>
+    item
+      .setTitle(t("composer.vaultFile"))
+      .setIcon("vault")
+      .onClick(() => this.showVaultFilePicker())
+  );
+  menu.addItem((item) =>
+    item
+      .setTitle(t("composer.localFile"))
+      .setIcon("hard-drive")
+      .onClick(() => this.imageInputEl?.click())
+  );
+  menu.showAtMouseEvent(event);
+}
+function showVaultFilePicker() {
+  const getAttachableFiles = () =>
+    this.plugin.app.vault
+      .getFiles()
+      .filter((file) => this.isAttachableFile(file.name, mimeForName(file.name)));
+  const addVaultFile2 = (file) => this.addVaultFile(file);
+  class VaultFileModal extends import_obsidian13.FuzzySuggestModal {
+    getItems() {
+      return getAttachableFiles();
+    }
+    getItemText(file) {
+      return file.path;
+    }
+    onChooseItem(file) {
+      addVaultFile2(file);
+    }
+  }
+  const modal = new VaultFileModal(this.plugin.app);
+  modal.setPlaceholder(t("composer.chooseFile"));
+  modal.open();
+}
+function isAttachableFile(name, mimeType) {
+  return SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType) || isSupportedTextFile(name, mimeType);
+}
+function getImageFiles(files) {
+  return [...(files || [])].filter((file) => SUPPORTED_IMAGE_MIME_TYPES.includes(file.type));
+}
+async function addLocalFiles(files) {
+  for (const file of [...(files || [])]) {
+    try {
+      if (SUPPORTED_IMAGE_MIME_TYPES.includes(file.type)) await this.addImageFiles([file]);
+      else {
+        const remaining =
+          MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments);
+        const bytes = new Uint8Array(
+          await file.slice(0, Math.min(file.size, remaining + 4)).arrayBuffer()
+        );
+        const attachment = createPromptTextAttachment(
+          /** @type {any} */
+          {
+            bytes,
+            fileName: file.name,
+            mimeType: file.type,
+            source: "local",
+            originalSize: file.size
+          },
+          remaining
+        );
+        this.state.composerAttachments.push(attachment);
+      }
+    } catch (error) {
+      new import_obsidian13.Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+  this.renderComposerImages();
+  this.setRunningState(this.state.running);
+}
+async function addVaultFile(file) {
+  try {
+    const mimeType = mimeForName(file.name);
+    const bytes = new Uint8Array(await this.plugin.app.vault.readBinary(file));
+    if (SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType)) {
+      await this.plugin.ensureModelCatalogLoaded();
+      if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
+        throw new Error("The selected Pi model does not support image input.");
+      this.state.composerImages.push(
+        bytesToPromptImage({
+          bytes,
+          fileName: file.name,
+          mimeType,
+          source: "vault",
+          path: file.path
+        })
+      );
+    } else {
+      this.state.composerAttachments.push(
+        createPromptTextAttachment(
+          /** @type {any} */
+          {
+            bytes,
+            fileName: file.name,
+            mimeType,
+            source: "vault",
+            path: file.path
+          },
+          MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments)
+        )
+      );
+    }
+    this.renderComposerImages();
+    this.setRunningState(this.state.running);
+  } catch (error) {
+    new import_obsidian13.Notice(error instanceof Error ? error.message : String(error));
+  }
+}
+async function addImageFiles(files) {
+  const imageFiles = [...(files || [])];
+  if (imageFiles.length === 0) return;
+  await this.plugin.ensureModelCatalogLoaded();
+  if (!modelSupportsImages(this.plugin.getSelectedModelInfo())) {
+    new import_obsidian13.Notice("The selected Pi model does not support image input.");
+    return;
+  }
+  try {
+    const images = await Promise.all(imageFiles.map(fileToPromptImage));
+    this.state.composerImages.push(...images);
+    this.renderComposerImages();
+    this.setRunningState(this.state.running);
+  } catch (error) {
+    new import_obsidian13.Notice(error instanceof Error ? error.message : String(error));
+  }
+}
+function handleImagePaste(event) {
+  const files = this.getImageFiles(event.clipboardData?.files);
+  if (files.length === 0) return;
+  event.preventDefault();
+  this.addImageFiles(files);
+}
+function handleImageDrop(event) {
+  const files = [...(event.dataTransfer?.files || [])];
+  if (files.length === 0) return;
+  event.preventDefault();
+  this.addLocalFiles(files);
+}
+var composerAttachmentMethods = {
+  addImageFiles,
+  addLocalFiles,
+  addVaultFile,
+  getImageFiles,
+  handleImageDrop,
+  handleImagePaste,
+  isAttachableFile,
+  showAttachmentMenu,
+  showVaultFilePicker
+};
+
 // src/ui/prompt-queue.mjs
 var prompt_queue_exports = {};
 __export(prompt_queue_exports, {
@@ -7340,14 +7521,14 @@ __export(thread_list_view_exports, {
 var f2 = __toESM(require("obsidian"), 1);
 
 // src/ui/modals/delete-thread-modal.mjs
-var import_obsidian13 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 function chooseThreadDeletion(app, thread) {
   return new Promise((resolve) => new DeleteThreadModal(app, thread, resolve).open());
 }
 function getThreadDeletionChoices(thread) {
   return thread?.piSessionId ? ["cancel", "chat", "both"] : ["cancel", "chat"];
 }
-var DeleteThreadModal = class extends import_obsidian13.Modal {
+var DeleteThreadModal = class extends import_obsidian14.Modal {
   constructor(app, thread, resolve) {
     super(app);
     this.thread = thread;
@@ -7386,7 +7567,7 @@ var DeleteThreadModal = class extends import_obsidian13.Modal {
 };
 
 // src/ui/modals/delete-threads-modal.mjs
-var import_obsidian14 = require("obsidian");
+var import_obsidian15 = require("obsidian");
 function chooseBulkThreadDeletion(app, plan) {
   return new Promise((resolve) => new DeleteThreadsModal(app, plan, resolve).open());
 }
@@ -7404,7 +7585,7 @@ function getBulkThreadDeletionChoices(plan) {
     }
   ];
 }
-var DeleteThreadsModal = class extends import_obsidian14.Modal {
+var DeleteThreadsModal = class extends import_obsidian15.Modal {
   constructor(app, plan, resolve) {
     super(app);
     this.plan = plan;
@@ -7777,7 +7958,7 @@ __export(vault_link_actions_exports, {
   parseVaultLinkTarget: () => parseVaultLinkTarget,
   revealLine: () => revealLine
 });
-var import_obsidian15 = require("obsidian");
+var import_obsidian16 = require("obsidian");
 var EXTERNAL_LINK_PATTERN = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i;
 var LEGACY_LINE_PATTERN = /^(.*):(\d+)$/;
 function classifyVaultLinkTarget(value) {
@@ -7803,7 +7984,7 @@ async function openVaultLink(value, newLeaf = false) {
         ? { kind: "internal", linkText: value.path, line: value.line }
         : { kind: "invalid" };
   if (target.kind !== "internal") {
-    if (target.kind === "invalid") new import_obsidian15.Notice(`Note not found: ${String(value)}`);
+    if (target.kind === "invalid") new import_obsidian16.Notice(`Note not found: ${String(value)}`);
     return false;
   }
   try {
@@ -7816,7 +7997,7 @@ async function openVaultLink(value, newLeaf = false) {
     return true;
   } catch (error) {
     console.error("Pi Agent: failed to open vault link", error);
-    new import_obsidian15.Notice(`Note not found: ${this.formatVaultLinkTarget(target)}`);
+    new import_obsidian16.Notice(`Note not found: ${this.formatVaultLinkTarget(target)}`);
     return false;
   }
 }
@@ -8735,11 +8916,11 @@ function formatActiveToolStatus() {
 }
 
 // src/ui/run-settings.mjs
-var import_obsidian17 = require("obsidian");
+var import_obsidian18 = require("obsidian");
 
 // src/ui/modals/tool-mode-picker-modal.mjs
-var import_obsidian16 = require("obsidian");
-var ToolModePickerModal = class extends import_obsidian16.SuggestModal {
+var import_obsidian17 = require("obsidian");
+var ToolModePickerModal = class extends import_obsidian17.SuggestModal {
   constructor(app, settings, onChoose) {
     super(app);
     this.settings = settings;
@@ -8773,7 +8954,7 @@ var ToolModePickerModal = class extends import_obsidian16.SuggestModal {
   }
   onChooseSuggestion(item) {
     Promise.resolve(this.onChoose(item.value)).catch((error) => {
-      new import_obsidian16.Notice(error instanceof Error ? error.message : String(error));
+      new import_obsidian17.Notice(error instanceof Error ? error.message : String(error));
     });
   }
 };
@@ -8839,7 +9020,7 @@ var RunSettingsControls = class {
       attr: { "aria-label": `${name}: ${label}`, title: `${name}: ${label}` }
     });
     if (icon && typeof icon === "object") renderProviderIcon(buttonEl, icon.provider);
-    else (0, import_obsidian17.setIcon)(buttonEl, icon);
+    else (0, import_obsidian18.setIcon)(buttonEl, icon);
     const labelEl = buttonEl.createSpan({ cls: "pi-agent-control-label", text: label });
     buttonEl.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -8848,7 +9029,7 @@ var RunSettingsControls = class {
       try {
         await onClick();
       } catch (error) {
-        new import_obsidian17.Notice(error instanceof Error ? error.message : String(error));
+        new import_obsidian18.Notice(error instanceof Error ? error.message : String(error));
       } finally {
         if (buttonEl.isConnected) {
           buttonEl.disabled = false;
@@ -9136,7 +9317,7 @@ var ComposerSuggestions = class {
 };
 
 // src/ui/thread-actions.mjs
-var import_obsidian18 = require("obsidian");
+var import_obsidian19 = require("obsidian");
 var ThreadActions = class {
   constructor(plugin, callbacks) {
     this.plugin = plugin;
@@ -9158,13 +9339,16 @@ var ThreadActions = class {
         this.callbacks.renderMessages();
         this.callbacks.renderToolBadges?.();
       } else {
-        new import_obsidian18.Notice(t("view.nothingToFork"));
+        new import_obsidian19.Notice(t("view.nothingToFork"));
       }
     } catch (error) {
-      new import_obsidian18.Notice(error instanceof Error ? error.message : String(error));
+      new import_obsidian19.Notice(error instanceof Error ? error.message : String(error));
     }
   }
 };
+
+// src/ui/view/run-lifecycle.mjs
+var import_obsidian20 = require("obsidian");
 
 // src/ui/view/run-metadata.mjs
 function getCurrentRunMetadata(settings, runtimeState) {
@@ -9203,8 +9387,232 @@ function getDisplayedModel(settings, runtimeState) {
   return model?.displayName || settings.model || "Pi default";
 }
 
+// src/ui/view/run-lifecycle.mjs
+function conciseAttachmentSummary(images, attachments) {
+  const count = images.length + attachments.length;
+  return `[${count} attached file${count === 1 ? "" : "s"}]`;
+}
+function createRunEventHandlers(view, run, threadId, onPromptAccepted) {
+  return {
+    onEvent: (event) => {
+      const profiling = performanceProfiler.enabled;
+      const startedAt = profiling ? now() : 0;
+      try {
+        const thinkingDelta = getThinkingDelta(event);
+        if (thinkingDelta) {
+          performanceProfiler.incrementCounter("streamDeltaCount");
+          run.thinking += thinkingDelta;
+          if (!run.thinkingUserSet) run.thinkingExpanded = true;
+        }
+        const toolError = formatToolError(event);
+        if (toolError && run.toolErrors[run.toolErrors.length - 1] !== toolError)
+          run.toolErrors.push(toolError);
+        view.handleSuccessfulToolMutation(event, threadId);
+        if (!view.isCurrentThread(threadId)) return;
+        if (view.state.activeRuns.get(threadId) !== run) {
+          view.noteStaleUiCallback();
+          return;
+        }
+        view.state.streamingThinkingContent = run.thinking;
+        view.state.thinkingDisclosureExpanded = run.thinkingExpanded;
+        view.state.thinkingDisclosureUserSet = run.thinkingUserSet;
+        view.handleRunEvent(event);
+        if (thinkingDelta) {
+          view.liveThinkingSetExpanded?.(run.thinkingExpanded);
+          view.appendStreamingThinkingDelta(thinkingDelta);
+        }
+      } finally {
+        if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
+      }
+    },
+    onTextDelta: (text) => {
+      const profiling = performanceProfiler.enabled;
+      const startedAt = profiling ? now() : 0;
+      try {
+        performanceProfiler.incrementCounter("streamDeltaCount");
+        if (!run.thinkingUserSet) run.thinkingExpanded = false;
+        if (!view.isCurrentThread(threadId)) return;
+        if (view.state.activeRuns.get(threadId) !== run) {
+          view.noteStaleUiCallback();
+          return;
+        }
+        view.state.thinkingDisclosureExpanded = run.thinkingExpanded;
+        view.liveThinkingSetExpanded?.(run.thinkingExpanded);
+        view.appendStreamingDelta(text);
+      } finally {
+        if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
+      }
+    },
+    onPromptAccepted: () => {
+      onPromptAccepted();
+    }
+  };
+}
+function settleRunSuccess(view, run, threadId, result) {
+  const createdAt = Date.now();
+  view.state.completedThinkingExpansion.set(
+    `${threadId}:${createdAt}`,
+    run.thinkingUserSet ? run.thinkingExpanded : false
+  );
+  const runMetadata = getCurrentRunMetadata(view.plugin.settings, result.runtimeState);
+  view.cancelStreamingFlush();
+  view.state.streamingAssistantContent = "";
+  view.state.streamingAnswerDirty = false;
+  view.state.streamingThinkingContent = "";
+  view.state.streamingThinkingDirty = false;
+  view.streamingItemEl = void 0;
+  view.streamingTextEl = void 0;
+  view.plugin.addMessageToThread(threadId, {
+    role: "assistant",
+    content: result.finalResponse,
+    createdAt,
+    contextUsage: result.contextUsage,
+    tokenUsage: result.tokenUsage,
+    runMetadata,
+    thinking: run.thinking || void 0,
+    toolErrors: run.toolErrors.length > 0 ? run.toolErrors : void 0
+  });
+  if (result.contextUsage && !result.contextCompacted)
+    view.state.invalidatedContextThreadIds.delete(threadId);
+  if (result.contextCompacted) view.state.invalidatedContextThreadIds.add(threadId);
+  if (view.isCurrentThread(threadId)) {
+    view.renderThreadTitle();
+    view.renderMessages();
+    view.renderToolBadges();
+  }
+  view.notifyRunCompleted(run.notificationRunId, threadId);
+}
+function settleRunFailure(view, run, threadId, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === "Pi run canceled.") {
+    new import_obsidian20.Notice("Agent run canceled.");
+    return "canceled";
+  }
+  const createdAt = Date.now();
+  view.state.completedThinkingExpansion.set(
+    `${threadId}:${createdAt}`,
+    run.thinkingUserSet ? run.thinkingExpanded : false
+  );
+  view.plugin.addMessageToThread(threadId, {
+    role: "assistant",
+    content: `Agent run failed: ${message}`,
+    createdAt,
+    thinking: run.thinking || void 0,
+    toolErrors: run.toolErrors.length > 0 ? run.toolErrors : void 0
+  });
+  if (view.isCurrentThread(threadId)) {
+    view.renderThreadTitle();
+    view.renderMessages();
+    view.renderToolBadges();
+  }
+  new import_obsidian20.Notice(message);
+  view.notifyRunCompleted(
+    run.notificationRunId,
+    threadId,
+    "Agent run failed. Click to open the chat."
+  );
+  return "failed";
+}
+function beginTrackedRun(view, request) {
+  const { prompt, threadId, images, attachments, queuedId } = request;
+  const run = {
+    canceling: false,
+    runner: view.plugin.createPiRunner(threadId),
+    accepted: false,
+    notificationRunId: `${threadId}:${view.state.nextDesktopNotificationRunId++}`,
+    skillName: getSkillCommandName(prompt),
+    thinking: "",
+    thinkingExpanded: false,
+    thinkingUserSet: false,
+    toolErrors: [],
+    // Identifies this run for stale-callback checks.
+    runGeneration: ++view.state.runGenerationCounter
+  };
+  const addUserMessage = () => {
+    if (run.userMessageAdded) return;
+    run.userMessageAdded = true;
+    view.plugin.addMessageToThread(threadId, {
+      role: "user",
+      content: prompt || conciseAttachmentSummary(images, attachments),
+      createdAt: Date.now()
+    });
+    if (view.isCurrentThread(threadId)) {
+      view.renderThreadTitle();
+      view.renderMessages();
+    }
+  };
+  const acknowledgeQueuedDelivery = () => {
+    addUserMessage();
+    if (run.accepted) return;
+    run.accepted = true;
+    if (!queuedId) return;
+    view.state.promptQueue = view.state.promptQueue.filter((item) => item.id !== queuedId);
+    view.plugin.replaceLocalPromptQueue(view.state.promptQueue);
+    view.renderPromptQueue();
+  };
+  view.state.activeRuns.set(threadId, run);
+  view.syncCurrentRunFlags();
+  view.runningThreadId = threadId;
+  view.state.running = view.isCurrentThread(threadId);
+  view.state.canceling = false;
+  view.state.activityText = "Preparing context";
+  view.state.activityKind = "context";
+  view.state.activityDetail =
+    "Collecting current note, links, backlinks, and explicit attachments.";
+  view.state.activityStickyUntil = 0;
+  view.state.pendingActivity = void 0;
+  view.clearPendingActivityTimer();
+  view.state.activeToolCalls.clear();
+  view.state.currentRunContextUsage = void 0;
+  view.state.streamingAssistantContent = "";
+  view.state.streamingThinkingContent = "";
+  view.state.thinkingDisclosureExpanded = false;
+  view.state.thinkingDisclosureUserSet = false;
+  view.state.stickToBottom = true;
+  performanceProfiler.markHeap("before");
+  view.plugin.beginAnnotationProcessing(threadId, request.annotations);
+  view.setRunningState(view.state.running);
+  if (!queuedId) addUserMessage();
+  view.renderThreadListIfVisible();
+  return { run, addUserMessage, acknowledgeQueuedDelivery };
+}
+function settleRunCleanup(view, threadId, skipQueueDrain) {
+  view.state.activeRuns.delete(threadId);
+  view.syncCurrentRunFlags();
+  view.state.running = view.isThreadRunning(view.plugin.getCurrentThread().id);
+  view.state.canceling = view.getCurrentThreadRun()?.canceling === true;
+  performanceProfiler.markHeap("after");
+  view.clearCoalescedActivity();
+  view.cancelStreamingFlush();
+  view.state.streamingAssistantContent = "";
+  view.state.streamingAnswerDirty = false;
+  view.state.streamingThinkingContent = "";
+  view.state.streamingThinkingDirty = false;
+  view.state.thinkingDisclosureExpanded = false;
+  view.state.thinkingDisclosureUserSet = false;
+  view.state.activityStickyUntil = 0;
+  view.state.pendingActivity = void 0;
+  view.clearPendingActivityTimer();
+  view.state.activeToolCalls.clear();
+  view.state.activityText = "";
+  view.state.activityDetail = "";
+  view.state.currentRunContextUsage = void 0;
+  if (view.isCurrentThread(threadId)) view.state.nativePiQueue = void 0;
+  view.renderPromptQueue();
+  view.runningThreadId = void 0;
+  view.setRunningState(view.state.running);
+  if (view.isCurrentThread(threadId)) {
+    view.renderMessages();
+    view.renderToolBadges();
+  }
+  view.renderThreadListIfVisible();
+  view.plugin.endAnnotationProcessingForThread(threadId);
+  view.plugin.rebuildServicesIfPending();
+  if (!skipQueueDrain) view.runNextQueuedPrompt();
+}
+
 // src/ui/view/run-prompt.mjs
-var import_obsidian19 = require("obsidian");
+var import_obsidian21 = require("obsidian");
 async function resolvePromptInput(view, annotationSourcePath, annotations) {
   if (annotations !== void 0) return { annotations, failed: false };
   try {
@@ -9213,7 +9621,7 @@ async function resolvePromptInput(view, annotationSourcePath, annotations) {
       failed: false
     };
   } catch (error) {
-    new import_obsidian19.Notice(error instanceof Error ? error.message : String(error));
+    new import_obsidian21.Notice(error instanceof Error ? error.message : String(error));
     return { annotations: void 0, failed: true };
   }
 }
@@ -9257,6 +9665,27 @@ async function enrichPromptDelivery(view, request) {
     };
   return { ok: true, prompt, images, attachments, promptContext: delivery.promptContext };
 }
+function reportDeliveryFailure(view, delivery, queuedId, restoreUnsentAnnotations) {
+  if (queuedId) requeuePendingPrompt(view, queuedId);
+  else restoreUnsentAnnotations();
+  if (delivery.notice || queuedId) new import_obsidian21.Notice(delivery.failure);
+}
+function enqueueOrRequeue(
+  view,
+  prompt,
+  threadId,
+  images,
+  attachments,
+  annotations,
+  queuedId,
+  annotationSourcePath
+) {
+  if (queuedId) {
+    requeuePendingPrompt(view, queuedId);
+    return;
+  }
+  view.enqueuePrompt(prompt, threadId, images, attachments, annotations, annotationSourcePath);
+}
 function requeuePendingPrompt(view, queuedId) {
   if (!queuedId) return;
   view.state.promptQueue = view.state.promptQueue.map((item) =>
@@ -9267,7 +9696,7 @@ function requeuePendingPrompt(view, queuedId) {
 }
 
 // src/ui/view/chat-dom.mjs
-var import_obsidian20 = require("obsidian");
+var import_obsidian22 = require("obsidian");
 
 // src/ui/send-state.mjs
 function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
@@ -9342,10 +9771,10 @@ function createHeader(root, view) {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": t("view.newChat"), title: t("view.newChat") }
   });
-  (0, import_obsidian20.setIcon)(favoriteButton, "star");
+  (0, import_obsidian22.setIcon)(favoriteButton, "star");
   view.renderThreadFavorite();
   favoriteButton.addEventListener("click", () => view.toggleCurrentThreadFavorite());
-  (0, import_obsidian20.setIcon)(newChatButton, "plus");
+  (0, import_obsidian22.setIcon)(newChatButton, "plus");
   newChatButton.addEventListener("click", (event) => {
     event.preventDefault();
     view.threadMenu?.startNewChat();
@@ -9354,11 +9783,11 @@ function createHeader(root, view) {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": t("view.forkChat"), title: t("view.forkChat") }
   });
-  (0, import_obsidian20.setIcon)(forkButton, "split");
+  (0, import_obsidian22.setIcon)(forkButton, "split");
   forkButton.addEventListener("click", (event) => {
     event.preventDefault();
     if (view.isThreadRunning(view.plugin.getCurrentThread().id)) {
-      new import_obsidian20.Notice(t("view.forkBusy"));
+      new import_obsidian22.Notice(t("view.forkBusy"));
       return;
     }
     view.threadMenu?.forkChat();
@@ -9371,7 +9800,7 @@ function createHeader(root, view) {
       title: t("view.manageThreads")
     }
   });
-  (0, import_obsidian20.setIcon)(manageButton, "list");
+  (0, import_obsidian22.setIcon)(manageButton, "list");
   manageButton.addEventListener("click", (event) => {
     event.preventDefault();
     view.showThreadList();
@@ -9457,7 +9886,7 @@ function createComposer(root, view) {
     cls: "clickable-icon pi-agent-send-button",
     attr: { "aria-label": t("send.sendAria"), title: t("send.sendAria") }
   });
-  (0, import_obsidian20.setIcon)(sendButtonEl, "send");
+  (0, import_obsidian22.setIcon)(sendButtonEl, "send");
   sendButtonEl.createSpan({ cls: "pi-agent-control-label", text: t("send.send") });
   sendButtonEl.addEventListener("click", () => view.handleSendButtonClick());
   view.observeComposerBar(composerBarEl);
@@ -9549,7 +9978,7 @@ function renderPendingBadge(parent, label, options = {}) {
     cls: "clickable-icon pi-agent-context-badge-remove",
     attr: { type: "button", "aria-label": removeLabel, title: removeLabel }
   });
-  (0, import_obsidian20.setIcon)(remove, "x");
+  (0, import_obsidian22.setIcon)(remove, "x");
   remove.addEventListener("click", onRemove);
 }
 function renderToolBadgesContextUsage(container) {
@@ -9631,7 +10060,7 @@ function renderImagePicker(parent) {
     cls: "clickable-icon pi-agent-image-button",
     attr: { "aria-label": t("composer.attach"), title: t("composer.attach") }
   });
-  (0, import_obsidian20.setIcon)(button, "paperclip");
+  (0, import_obsidian22.setIcon)(button, "paperclip");
   button.addEventListener("click", (event) => this.showAttachmentMenu(event));
 }
 function updateComposerBarMode(width) {
@@ -9653,7 +10082,7 @@ function setRunningState(running) {
   });
   if (!this.sendButtonEl) return;
   this.sendButtonEl.empty();
-  (0, import_obsidian20.setIcon)(this.sendButtonEl, action.icon);
+  (0, import_obsidian22.setIcon)(this.sendButtonEl, action.icon);
   this.sendButtonEl.createSpan({ cls: "pi-agent-control-label", text: action.label });
   this.sendButtonEl.toggleAttribute("disabled", action.disabled);
   this.sendButtonEl.setAttr("aria-label", action.ariaLabel);
@@ -10122,146 +10551,6 @@ var PiAgentView = class extends f4.ItemView {
     n.observe(e);
     this.composerBarCleanup = this.lifecycle.addCleanup(a);
   }
-  showAttachmentMenu(event) {
-    const menu = new f4.Menu();
-    menu.addItem((item) =>
-      item
-        .setTitle(t("composer.vaultFile"))
-        .setIcon("vault")
-        .onClick(() => this.showVaultFilePicker())
-    );
-    menu.addItem((item) =>
-      item
-        .setTitle(t("composer.localFile"))
-        .setIcon("hard-drive")
-        .onClick(() => this.imageInputEl?.click())
-    );
-    menu.showAtMouseEvent(event);
-  }
-  showVaultFilePicker() {
-    const getAttachableFiles = () =>
-      this.plugin.app.vault
-        .getFiles()
-        .filter((file) => this.isAttachableFile(file.name, mimeForName(file.name)));
-    const addVaultFile = (file) => this.addVaultFile(file);
-    class VaultFileModal extends f4.FuzzySuggestModal {
-      getItems() {
-        return getAttachableFiles();
-      }
-      getItemText(file) {
-        return file.path;
-      }
-      onChooseItem(file) {
-        addVaultFile(file);
-      }
-    }
-    const modal = new VaultFileModal(this.plugin.app);
-    modal.setPlaceholder(t("composer.chooseFile"));
-    modal.open();
-  }
-  isAttachableFile(name, mimeType) {
-    return SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType) || isSupportedTextFile(name, mimeType);
-  }
-  getImageFiles(files) {
-    return [...(files || [])].filter((file) => SUPPORTED_IMAGE_MIME_TYPES.includes(file.type));
-  }
-  async addLocalFiles(files) {
-    for (const file of [...(files || [])]) {
-      try {
-        if (SUPPORTED_IMAGE_MIME_TYPES.includes(file.type)) await this.addImageFiles([file]);
-        else {
-          const remaining =
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments);
-          const bytes = new Uint8Array(
-            await file.slice(0, Math.min(file.size, remaining + 4)).arrayBuffer()
-          );
-          const attachment = createPromptTextAttachment(
-            /** @type {any} */
-            {
-              bytes,
-              fileName: file.name,
-              mimeType: file.type,
-              source: "local",
-              originalSize: file.size
-            },
-            remaining
-          );
-          this.state.composerAttachments.push(attachment);
-        }
-      } catch (error) {
-        new f4.Notice(error instanceof Error ? error.message : String(error));
-      }
-    }
-    this.renderComposerImages();
-    this.setRunningState(this.state.running);
-  }
-  async addVaultFile(file) {
-    try {
-      const mimeType = mimeForName(file.name);
-      const bytes = new Uint8Array(await this.plugin.app.vault.readBinary(file));
-      if (SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType)) {
-        await this.plugin.ensureModelCatalogLoaded();
-        if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
-          throw new Error("The selected Pi model does not support image input.");
-        this.state.composerImages.push(
-          bytesToPromptImage({
-            bytes,
-            fileName: file.name,
-            mimeType,
-            source: "vault",
-            path: file.path
-          })
-        );
-      } else {
-        this.state.composerAttachments.push(
-          createPromptTextAttachment(
-            /** @type {any} */
-            {
-              bytes,
-              fileName: file.name,
-              mimeType,
-              source: "vault",
-              path: file.path
-            },
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments)
-          )
-        );
-      }
-      this.renderComposerImages();
-      this.setRunningState(this.state.running);
-    } catch (error) {
-      new f4.Notice(error instanceof Error ? error.message : String(error));
-    }
-  }
-  async addImageFiles(files) {
-    const imageFiles = [...(files || [])];
-    if (imageFiles.length === 0) return;
-    await this.plugin.ensureModelCatalogLoaded();
-    if (!modelSupportsImages(this.plugin.getSelectedModelInfo())) {
-      new f4.Notice("The selected Pi model does not support image input.");
-      return;
-    }
-    try {
-      const images = await Promise.all(imageFiles.map(fileToPromptImage));
-      this.state.composerImages.push(...images);
-      this.renderComposerImages();
-      this.setRunningState(this.state.running);
-    } catch (error) {
-      new f4.Notice(error instanceof Error ? error.message : String(error));
-    }
-  }
-  handleImagePaste(event) {
-    const files = this.getImageFiles(event.clipboardData?.files);
-    if (files.length === 0) return;
-    event.preventDefault();
-    this.addImageFiles(files);
-  }
-  handleImageDrop(event) {
-    const files = [...(event.dataTransfer?.files || [])];
-    if (files.length === 0) return;
-    event.preventDefault();
-    this.addLocalFiles(files);
-  }
   renderComposerImages() {
     this.renderToolBadges();
   }
@@ -10350,15 +10639,19 @@ var PiAgentView = class extends f4.ItemView {
     const resolvedInput = await resolvePromptInput(this, annotationSourcePath, annotations);
     if (resolvedInput.failed) return;
     annotations = resolvedInput.annotations;
-    const restoreUnsentAnnotations = () => {
-      if (!queuedId && annotations.length > 0) this.plugin.restoreConsumedAnnotations(annotations);
-    };
+    const restoreUnsentAnnotations = () =>
+      !queuedId && annotations.length > 0 && this.plugin.restoreConsumedAnnotations(annotations);
     if (this.isThreadRunning(t2)) {
-      if (queuedId) {
-        requeuePendingPrompt(this, queuedId);
-      } else {
-        this.enqueuePrompt(e, t2, images, attachments, annotations, annotationSourcePath);
-      }
+      enqueueOrRequeue(
+        this,
+        e,
+        t2,
+        images,
+        attachments,
+        annotations,
+        queuedId,
+        annotationSourcePath
+      );
       return;
     }
     const delivery = await enrichPromptDelivery(this, {
@@ -10370,137 +10663,43 @@ var PiAgentView = class extends f4.ItemView {
       threadId: t2
     });
     if (!delivery.ok) {
-      if (queuedId) requeuePendingPrompt(this, queuedId);
-      else restoreUnsentAnnotations();
-      if (delivery.notice || queuedId) new f4.Notice(delivery.failure);
+      reportDeliveryFailure(this, delivery, queuedId, restoreUnsentAnnotations);
       return;
     }
     e = delivery.prompt;
     images = delivery.images;
     attachments = delivery.attachments;
     if (this.isThreadRunning(t2)) {
-      if (queuedId) {
-        requeuePendingPrompt(this, queuedId);
-      } else {
-        this.enqueuePrompt(e, t2, images, attachments, annotations, annotationSourcePath);
-      }
+      enqueueOrRequeue(
+        this,
+        e,
+        t2,
+        images,
+        attachments,
+        annotations,
+        queuedId,
+        annotationSourcePath
+      );
       return;
     }
-    let n = {
-      canceling: false,
-      runner: this.plugin.createPiRunner(t2),
-      accepted: false,
-      notificationRunId: `${t2}:${this.state.nextDesktopNotificationRunId++}`,
-      skillName: getSkillCommandName(e),
-      thinking: "",
-      thinkingExpanded: false,
-      thinkingUserSet: false,
-      toolErrors: [],
-      // Identifies this run for stale-callback checks.
-      runGeneration: ++this.state.runGenerationCounter
-    };
     let skipQueueDrain = false;
-    const addUserMessage = () => {
-      if (n.userMessageAdded) return;
-      n.userMessageAdded = true;
-      this.plugin.addMessageToThread(t2, {
-        role: "user",
-        content: e || conciseAttachmentSummary(images, attachments),
-        createdAt: Date.now()
-      });
-      if (this.isCurrentThread(t2)) {
-        this.renderThreadTitle();
-        this.renderMessages();
-      }
-    };
-    const acknowledgeQueuedDelivery = () => {
-      addUserMessage();
-      if (n.accepted) return;
-      n.accepted = true;
-      if (!queuedId) return;
-      this.state.promptQueue = this.state.promptQueue.filter((item) => item.id !== queuedId);
-      this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
-      this.renderPromptQueue();
-    };
-    this.state.activeRuns.set(t2, n);
-    this.syncCurrentRunFlags();
-    this.runningThreadId = t2;
-    this.state.running = this.isCurrentThread(t2);
-    this.state.canceling = false;
-    this.state.activityText = "Preparing context";
-    this.state.activityKind = "context";
-    this.state.activityDetail =
-      "Collecting current note, links, backlinks, and explicit attachments.";
-    this.state.activityStickyUntil = 0;
-    this.state.pendingActivity = void 0;
-    this.clearPendingActivityTimer();
-    this.state.activeToolCalls.clear();
-    this.state.currentRunContextUsage = void 0;
-    this.state.streamingAssistantContent = "";
-    this.state.streamingThinkingContent = "";
-    this.state.thinkingDisclosureExpanded = false;
-    this.state.thinkingDisclosureUserSet = false;
-    this.state.stickToBottom = true;
-    performanceProfiler.markHeap("before");
-    this.plugin.beginAnnotationProcessing(t2, annotations);
-    this.setRunningState(this.state.running);
-    if (!queuedId) addUserMessage();
-    this.renderThreadListIfVisible();
+    const { run: n, acknowledgeQueuedDelivery } = beginTrackedRun(this, {
+      prompt: e,
+      threadId: t2,
+      images,
+      attachments,
+      annotations,
+      queuedId
+    });
+    const handlers = createRunEventHandlers(this, n, t2, acknowledgeQueuedDelivery);
     try {
-      let a = await this.plugin.runPiPrompt(
+      const result = await this.plugin.runPiPrompt(
         e,
         {
           isCanceled: () => n.canceling,
-          onEvent: (o) => {
-            const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? now() : 0;
-            try {
-              const thinkingDelta = getThinkingDelta(o);
-              if (thinkingDelta) {
-                performanceProfiler.incrementCounter("streamDeltaCount");
-                n.thinking += thinkingDelta;
-                if (!n.thinkingUserSet) n.thinkingExpanded = true;
-              }
-              const toolError = formatToolError(o);
-              if (toolError && n.toolErrors[n.toolErrors.length - 1] !== toolError)
-                n.toolErrors.push(toolError);
-              this.handleSuccessfulToolMutation(o, t2);
-              if (!this.isCurrentThread(t2)) return;
-              if (this.state.activeRuns.get(t2) !== n) {
-                this.noteStaleUiCallback();
-                return;
-              }
-              this.state.streamingThinkingContent = n.thinking;
-              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
-              this.state.thinkingDisclosureUserSet = n.thinkingUserSet;
-              this.handleRunEvent(o);
-              if (thinkingDelta) {
-                this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-                this.appendStreamingThinkingDelta(thinkingDelta);
-              }
-            } finally {
-              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
-            }
-          },
-          onTextDelta: (o) => {
-            const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? now() : 0;
-            try {
-              performanceProfiler.incrementCounter("streamDeltaCount");
-              if (!n.thinkingUserSet) n.thinkingExpanded = false;
-              if (!this.isCurrentThread(t2)) return;
-              if (this.state.activeRuns.get(t2) !== n) {
-                this.noteStaleUiCallback();
-                return;
-              }
-              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
-              this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-              this.appendStreamingDelta(o);
-            } finally {
-              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
-            }
-          },
-          onPromptAccepted: acknowledgeQueuedDelivery
+          onEvent: handlers.onEvent,
+          onTextDelta: handlers.onTextDelta,
+          onPromptAccepted: handlers.onPromptAccepted
         },
         t2,
         n.runner,
@@ -10508,100 +10707,18 @@ var PiAgentView = class extends f4.ItemView {
         delivery.promptContext
       );
       acknowledgeQueuedDelivery();
-      const createdAt = Date.now();
-      const thinkingKey = `${t2}:${createdAt}`;
-      this.state.completedThinkingExpansion.set(
-        thinkingKey,
-        n.thinkingUserSet ? n.thinkingExpanded : false
-      );
-      const s = getCurrentRunMetadata(this.plugin.settings, a.runtimeState);
-      this.cancelStreamingFlush();
-      this.state.streamingAssistantContent = "";
-      this.state.streamingAnswerDirty = false;
-      this.state.streamingThinkingContent = "";
-      this.state.streamingThinkingDirty = false;
-      this.streamingItemEl = void 0;
-      this.streamingTextEl = void 0;
-      this.plugin.addMessageToThread(t2, {
-        role: "assistant",
-        content: a.finalResponse,
-        createdAt,
-        contextUsage: a.contextUsage,
-        tokenUsage: a.tokenUsage,
-        runMetadata: s,
-        thinking: n.thinking || void 0,
-        toolErrors: n.toolErrors.length > 0 ? n.toolErrors : void 0
-      });
-      if (a.contextUsage && !a.contextCompacted) this.state.invalidatedContextThreadIds.delete(t2);
-      if (a.contextCompacted) this.state.invalidatedContextThreadIds.add(t2);
-      if (this.isCurrentThread(t2)) {
-        this.renderThreadTitle();
-        this.renderMessages();
-        this.renderToolBadges();
-      }
-      this.notifyRunCompleted(n.notificationRunId, t2);
-    } catch (a) {
-      let o = a instanceof Error ? a.message : String(a);
+      settleRunSuccess(this, n, t2, result);
+    } catch (error) {
       if (queuedId && !n.accepted) {
         requeuePendingPrompt(this, queuedId);
         skipQueueDrain = true;
-      } else if (!n.accepted) restoreUnsentAnnotations();
-      if (o === "Pi run canceled.") {
-        new f4.Notice("Agent run canceled.");
-        return;
+      } else if (!n.accepted) {
+        restoreUnsentAnnotations();
       }
-      const createdAt = Date.now();
-      this.state.completedThinkingExpansion.set(
-        `${t2}:${createdAt}`,
-        n.thinkingUserSet ? n.thinkingExpanded : false
-      );
-      this.plugin.addMessageToThread(t2, {
-        role: "assistant",
-        content: `Agent run failed: ${o}`,
-        createdAt,
-        thinking: n.thinking || void 0,
-        toolErrors: n.toolErrors.length > 0 ? n.toolErrors : void 0
-      });
-      if (this.isCurrentThread(t2)) {
-        this.renderThreadTitle();
-        this.renderMessages();
-        this.renderToolBadges();
-      }
-      new f4.Notice(o);
-      this.notifyRunCompleted(n.notificationRunId, t2, "Agent run failed. Click to open the chat.");
+      if (settleRunFailure(this, n, t2, error) === "canceled") return;
+      skipQueueDrain = true;
     } finally {
-      this.state.activeRuns.delete(t2);
-      this.syncCurrentRunFlags();
-      this.state.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
-      this.state.canceling = this.getCurrentThreadRun()?.canceling === true;
-      performanceProfiler.markHeap("after");
-      this.clearCoalescedActivity();
-      this.cancelStreamingFlush();
-      this.state.streamingAssistantContent = "";
-      this.state.streamingAnswerDirty = false;
-      this.state.streamingThinkingContent = "";
-      this.state.streamingThinkingDirty = false;
-      this.state.thinkingDisclosureExpanded = false;
-      this.state.thinkingDisclosureUserSet = false;
-      this.state.activityStickyUntil = 0;
-      this.state.pendingActivity = void 0;
-      this.clearPendingActivityTimer();
-      this.state.activeToolCalls.clear();
-      this.state.activityText = "";
-      this.state.activityDetail = "";
-      this.state.currentRunContextUsage = void 0;
-      if (this.isCurrentThread(t2)) this.state.nativePiQueue = void 0;
-      this.renderPromptQueue();
-      this.runningThreadId = void 0;
-      this.setRunningState(this.state.running);
-      if (this.isCurrentThread(t2)) {
-        this.renderMessages();
-        this.renderToolBadges();
-      }
-      this.renderThreadListIfVisible();
-      this.plugin.endAnnotationProcessingForThread(t2);
-      this.plugin.rebuildServicesIfPending();
-      if (!skipQueueDrain) this.runNextQueuedPrompt();
+      settleRunCleanup(this, t2, skipQueueDrain);
     }
   }
   notifyRunCompleted(runId, threadId, body = "Agent response completed. Click to open the chat.") {
@@ -10636,37 +10753,6 @@ var PiAgentView = class extends f4.ItemView {
     (0, f4.setIcon)(e, PI_AGENT_ICON_ID);
   }
 };
-function mimeForName(name) {
-  const extension = String(name || "")
-    .toLowerCase()
-    .split(".")
-    .pop();
-  return (
-    {
-      png: "image/png",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      webp: "image/webp",
-      md: "text/markdown",
-      txt: "text/plain",
-      csv: "text/csv",
-      json: "application/json",
-      yaml: "application/yaml",
-      yml: "application/yaml",
-      xml: "application/xml",
-      html: "text/html",
-      css: "text/css",
-      js: "text/javascript",
-      mjs: "text/javascript",
-      ts: "text/typescript",
-      py: "text/x-python"
-    }[extension] || ""
-  );
-}
-function conciseAttachmentSummary(images, attachments) {
-  const count = images.length + attachments.length;
-  return `[${count} attached file${count === 1 ? "" : "s"}]`;
-}
 Object.assign(
   PiAgentView.prototype,
   prompt_queue_exports,
@@ -10674,6 +10760,7 @@ Object.assign(
   vault_link_actions_exports,
   message_renderer_exports,
   run_activity_state_exports,
+  composerAttachmentMethods,
   chatDomMethods
 );
 

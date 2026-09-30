@@ -242,6 +242,7 @@ describe("PATCH 4 activity coalescing", () => {
       "ui/PiAgentView.mjs",
       "ui/view/chat-dom.mjs",
       "ui/view/run-prompt.mjs",
+      "ui/view/run-lifecycle.mjs",
       "ui/message-actions.mjs",
       "ui/note-actions.mjs",
       "ui/thread-actions.mjs"
@@ -253,8 +254,8 @@ describe("PATCH 4 activity coalescing", () => {
     );
     expect(viewSources).toMatch(/cancelCurrentRun\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
     expect(viewSources).toContain("this.state.threadGeneration += 1");
-    expect(viewSources).toContain("runGeneration: ++this.state.runGenerationCounter");
-    expect(viewSources).toContain("if (this.state.activeRuns.get(t) !== n)");
+    expect(viewSources).toContain("runGeneration: ++view.state.runGenerationCounter");
+    expect(viewSources).toContain("if (view.state.activeRuns.get(threadId) !== run)");
     expect(viewSources).toContain("isStaleUiCallback(guard)");
   });
 });

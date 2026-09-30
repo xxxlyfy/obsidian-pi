@@ -153,6 +153,13 @@
  * @property {(...args: any[]) => any} addAction
  * @property {(...args: any[]) => any} attachmentSummary
  * @property {(...args: any[]) => any} renderQueueAttachments
+ * @property {(...args: any[]) => any} showAttachmentMenu
+ * @property {(...args: any[]) => any} showVaultFilePicker
+ * @property {(...args: any[]) => any} isAttachableFile
+ * @property {(...args: any[]) => any} getImageFiles
+ * @property {(...args: any[]) => any} addLocalFiles
+ * @property {(...args: any[]) => any} addVaultFile
+ * @property {(...args: any[]) => any} addImageFiles
  *
  * @property {any} streamingItemEl
  * @property {any} streamingTextEl

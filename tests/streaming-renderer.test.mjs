@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { createViewLifecycle } from "../src/ui/view/lifecycle.mjs";
-import { readSources } from "./helpers/view-source.mjs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const markdownRender = vi.fn().mockResolvedValue(undefined);
@@ -266,27 +265,29 @@ describe("PATCH 3 streaming renderer", () => {
 
   it("wires pending-rAF cleanup into unload, thread switch, cancel, and run teardown", () => {
     const viewSource = readFileSync(new URL("../src/ui/PiAgentView.mjs", import.meta.url), "utf8");
+    const lifecycleSource = readFileSync(
+      new URL("../src/ui/view/run-lifecycle.mjs", import.meta.url),
+      "utf8"
+    );
     const activitySource = readFileSync(
       new URL("../src/ui/run-activity-state.mjs", import.meta.url),
       "utf8"
     );
-    // The four cancelStreamingFlush() call sites (onClose, thread switch,
-    // cancel, and run teardown) are frame cancellation owned by the view, the
-    // activity mixin, and the prompt-run stages, so count them across all three.
-    // A smaller number than four means a teardown path lost its cleanup.
-    const cancelFlushSources = readSources([
-      "ui/PiAgentView.mjs",
-      "ui/run-activity-state.mjs",
-      "ui/view/run-prompt.mjs"
-    ]);
-
+    // The four teardown paths each release the pending frame: view close, thread
+    // switch, cancel, and run teardown. Run teardown and the success/close paths
+    // now live in run-lifecycle.mjs, and cancel releases the frame through the
+    // activity mixin, so assert each path by name rather than by a global count
+    // -- the count stopped being meaningful once the paths moved apart, and a
+    // count cannot say *which* teardown lost its cleanup.
     expect(viewSource).toMatch(/onClose\(\) \{[\s\S]*?this\.cancelStreamingFlush\(\)/);
     expect(viewSource).toMatch(
       /resetTransientRunUiState\(\) \{[\s\S]*?this\.cancelStreamingFlush\(\)/
     );
-    expect(
-      cancelFlushSources.match(/this\.cancelStreamingFlush\(\)/g)?.length
-    ).toBeGreaterThanOrEqual(4);
+    expect(viewSource).toMatch(/cancelCurrentRun\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
+    expect(lifecycleSource).toMatch(/settleRunCleanup\(view, threadId, skipQueueDrain\) \{/);
+    expect(lifecycleSource.match(/view\.cancelStreamingFlush\(\)/g)?.length).toBeGreaterThanOrEqual(
+      2
+    );
     expect(activitySource).toContain("this.finalizeStreamingContent?.() === true");
   });
 

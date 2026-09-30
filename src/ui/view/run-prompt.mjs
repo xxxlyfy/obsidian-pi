@@ -93,6 +93,61 @@ export async function enrichPromptDelivery(view, request) {
 }
 
 /**
+ * Report why a delivery was rejected and put the prompt back where it belongs.
+ *
+ * A prompt that came from the queue returns to pending so it is not lost; a
+ * directly-typed one gives its consumed annotations back. The empty-prompt case
+ * is only announced to a queued caller, which is why the notice is conditional:
+ * this preserves the original behaviour exactly.
+ *
+ * @param {any} view Chat view.
+ * @param {{ failure?: string, notice?: boolean }} delivery Rejected delivery.
+ * @param {string | undefined} queuedId Set when this prompt came from the queue.
+ * @param {() => void} restoreUnsentAnnotations Gives consumed annotations back.
+ */
+export function reportDeliveryFailure(view, delivery, queuedId, restoreUnsentAnnotations) {
+  if (queuedId) requeuePendingPrompt(view, queuedId);
+  else restoreUnsentAnnotations();
+  if (delivery.notice || queuedId) new Notice(delivery.failure);
+}
+
+/**
+ * Queue a prompt, or return it to pending when it came from the queue.
+ *
+ * `runPrompt` takes this decision twice -- once for the prompt as typed and once
+ * after enrichment, because enrichment can await long enough for another run to
+ * start -- and both call sites had the same two branches. Positional arguments
+ * keep the call on one line; there are seven of them, which is the point at
+ * which a request object stops being easier to read.
+ *
+ * @param {any} view Chat view.
+ * @param {any} prompt Prompt text.
+ * @param {string} threadId Thread the prompt belongs to.
+ * @param {any[]} images Attached images.
+ * @param {any[]} attachments Attached text files.
+ * @param {any} annotations Annotations the prompt carries.
+ * @param {string | undefined} queuedId Set when this prompt came from the queue.
+ * @param {string | undefined} annotationSourcePath Context file for the queued item.
+ * @returns {void}
+ */
+export function enqueueOrRequeue(
+  view,
+  prompt,
+  threadId,
+  images,
+  attachments,
+  annotations,
+  queuedId,
+  annotationSourcePath
+) {
+  if (queuedId) {
+    requeuePendingPrompt(view, queuedId);
+    return;
+  }
+  view.enqueuePrompt(prompt, threadId, images, attachments, annotations, annotationSourcePath);
+}
+
+/**
  * Return a queued prompt to the pending state so the queue does not lose it.
  *
  * @param {any} view Chat view.

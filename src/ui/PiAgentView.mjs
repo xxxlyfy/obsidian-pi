@@ -19,6 +19,7 @@ import {
 
 import { MessageActions } from "./message-actions.mjs";
 import { NoteActions } from "./note-actions.mjs";
+import { composerAttachmentMethods } from "./view/composer-attachments.mjs";
 import * as promptQueueMethods from "./prompt-queue.mjs";
 import * as threadListMethods from "./thread-list-view.mjs";
 import * as vaultLinkMethods from "./vault-link-actions.mjs";
@@ -27,9 +28,17 @@ import * as runActivityMethods from "./run-activity-state.mjs";
 import { RunSettingsControls } from "./run-settings.mjs";
 import { ComposerSuggestions } from "./suggestions.mjs";
 import { ThreadActions } from "./thread-actions.mjs";
-import { getCurrentRunMetadata } from "./view/run-metadata.mjs";
+import {
+  beginTrackedRun,
+  createRunEventHandlers,
+  settleRunCleanup,
+  settleRunFailure,
+  settleRunSuccess
+} from "./view/run-lifecycle.mjs";
 import {
   enrichPromptDelivery,
+  enqueueOrRequeue,
+  reportDeliveryFailure,
   requeuePendingPrompt,
   resolvePromptInput
 } from "./view/run-prompt.mjs";
@@ -40,24 +49,13 @@ import {
   createHeader,
   createMessagesArea
 } from "./view/chat-dom.mjs";
-import {
-  bytesToPromptImage,
-  createPromptTextAttachment,
-  fileToPromptImage,
-  isSupportedTextFile,
-  modelSupportsImages,
-  SUPPORTED_IMAGE_MIME_TYPES,
-  textAttachmentBytes,
-  MAX_TOTAL_TEXT_ATTACHMENT_BYTES
-} from "./prompt-payload.mjs";
-import { formatToolError, getSkillCommandName, getThinkingDelta } from "./activity.mjs";
+import { modelSupportsImages } from "./prompt-payload.mjs";
 import {
   getSuccessfulMarkdownMutationPath,
   refreshOpenMarkdownViews
 } from "./editor-file-refresh.mjs";
 import { openNotificationThread, showDesktopRunNotification } from "./desktop-notifications.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
-import { now } from "../shared/runtime.mjs";
 import { createViewLifecycle } from "./view/lifecycle.mjs";
 import { createViewState } from "./view/view-state.mjs";
 // Aliased: `t` is already a local identifier throughout this view.
@@ -347,144 +345,6 @@ export class PiAgentView extends f.ItemView {
     n.observe(e);
     this.composerBarCleanup = this.lifecycle.addCleanup(a);
   }
-  showAttachmentMenu(event) {
-    const menu = new f.Menu();
-    menu.addItem((item) =>
-      item
-        .setTitle(tr("composer.vaultFile"))
-        .setIcon("vault")
-        .onClick(() => this.showVaultFilePicker())
-    );
-    menu.addItem((item) =>
-      item
-        .setTitle(tr("composer.localFile"))
-        .setIcon("hard-drive")
-        .onClick(() => this.imageInputEl?.click())
-    );
-    menu.showAtMouseEvent(event);
-  }
-  showVaultFilePicker() {
-    const getAttachableFiles = () =>
-      this.plugin.app.vault
-        .getFiles()
-        .filter((file) => this.isAttachableFile(file.name, mimeForName(file.name)));
-    const addVaultFile = (file) => this.addVaultFile(file);
-    class VaultFileModal extends f.FuzzySuggestModal {
-      getItems() {
-        return getAttachableFiles();
-      }
-      getItemText(file) {
-        return file.path;
-      }
-      onChooseItem(file) {
-        addVaultFile(file);
-      }
-    }
-    const modal = new VaultFileModal(this.plugin.app);
-    modal.setPlaceholder(tr("composer.chooseFile"));
-    modal.open();
-  }
-  isAttachableFile(name, mimeType) {
-    return SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType) || isSupportedTextFile(name, mimeType);
-  }
-  getImageFiles(files) {
-    return [...(files || [])].filter((file) => SUPPORTED_IMAGE_MIME_TYPES.includes(file.type));
-  }
-  async addLocalFiles(files) {
-    for (const file of [...(files || [])]) {
-      try {
-        if (SUPPORTED_IMAGE_MIME_TYPES.includes(file.type)) await this.addImageFiles([file]);
-        else {
-          const remaining =
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments);
-          const bytes = new Uint8Array(
-            await file.slice(0, Math.min(file.size, remaining + 4)).arrayBuffer()
-          );
-          const attachment = createPromptTextAttachment(
-            /** @type {any} */ ({
-              bytes,
-              fileName: file.name,
-              mimeType: file.type,
-              source: "local",
-              originalSize: file.size
-            }),
-            remaining
-          );
-          this.state.composerAttachments.push(attachment);
-        }
-      } catch (error) {
-        new f.Notice(error instanceof Error ? error.message : String(error));
-      }
-    }
-    this.renderComposerImages();
-    this.setRunningState(this.state.running);
-  }
-  async addVaultFile(file) {
-    try {
-      const mimeType = mimeForName(file.name);
-      const bytes = new Uint8Array(await this.plugin.app.vault.readBinary(file));
-      if (SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType)) {
-        await this.plugin.ensureModelCatalogLoaded();
-        if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
-          throw new Error("The selected Pi model does not support image input.");
-        this.state.composerImages.push(
-          bytesToPromptImage({
-            bytes,
-            fileName: file.name,
-            mimeType,
-            source: "vault",
-            path: file.path
-          })
-        );
-      } else {
-        this.state.composerAttachments.push(
-          createPromptTextAttachment(
-            /** @type {any} */ ({
-              bytes,
-              fileName: file.name,
-              mimeType,
-              source: "vault",
-              path: file.path
-            }),
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments)
-          )
-        );
-      }
-      this.renderComposerImages();
-      this.setRunningState(this.state.running);
-    } catch (error) {
-      new f.Notice(error instanceof Error ? error.message : String(error));
-    }
-  }
-  async addImageFiles(files) {
-    const imageFiles = [...(files || [])];
-    if (imageFiles.length === 0) return;
-    await this.plugin.ensureModelCatalogLoaded();
-    if (!modelSupportsImages(this.plugin.getSelectedModelInfo())) {
-      new f.Notice("The selected Pi model does not support image input.");
-      return;
-    }
-    try {
-      const images = await Promise.all(imageFiles.map(fileToPromptImage));
-      this.state.composerImages.push(...images);
-      this.renderComposerImages();
-      this.setRunningState(this.state.running);
-    } catch (error) {
-      new f.Notice(error instanceof Error ? error.message : String(error));
-    }
-  }
-  handleImagePaste(event) {
-    const files = this.getImageFiles(event.clipboardData?.files);
-    if (files.length === 0) return;
-    event.preventDefault();
-    this.addImageFiles(files);
-  }
-  handleImageDrop(event) {
-    const files = [...(event.dataTransfer?.files || [])];
-    if (files.length === 0) return;
-    event.preventDefault();
-    this.addLocalFiles(files);
-  }
   renderComposerImages() {
     this.renderToolBadges();
   }
@@ -575,17 +435,22 @@ export class PiAgentView extends f.ItemView {
     const resolvedInput = await resolvePromptInput(this, annotationSourcePath, annotations);
     if (resolvedInput.failed) return;
     annotations = resolvedInput.annotations;
-    const restoreUnsentAnnotations = () => {
-      if (!queuedId && annotations.length > 0) this.plugin.restoreConsumedAnnotations(annotations);
-    };
+    // Gives consumed annotations back when the prompt never reached Pi.
+    const restoreUnsentAnnotations = () =>
+      !queuedId && annotations.length > 0 && this.plugin.restoreConsumedAnnotations(annotations);
     // A prompt for a thread that is already running is queued, not started. This
     // decision is re-checked after enrichment, because enrichment can await.
     if (this.isThreadRunning(t)) {
-      if (queuedId) {
-        requeuePendingPrompt(this, queuedId);
-      } else {
-        this.enqueuePrompt(e, t, images, attachments, annotations, annotationSourcePath);
-      }
+      enqueueOrRequeue(
+        this,
+        e,
+        t,
+        images,
+        attachments,
+        annotations,
+        queuedId,
+        annotationSourcePath
+      );
       return;
     }
     const delivery = await enrichPromptDelivery(this, {
@@ -597,141 +462,43 @@ export class PiAgentView extends f.ItemView {
       threadId: t
     });
     if (!delivery.ok) {
-      // A prompt that came from the queue goes back to pending so it is not
-      // lost; a directly-typed one gives its consumed annotations back. The
-      // empty-prompt case is only announced to a queued caller (unchanged).
-      if (queuedId) requeuePendingPrompt(this, queuedId);
-      else restoreUnsentAnnotations();
-      if (delivery.notice || queuedId) new f.Notice(delivery.failure);
+      reportDeliveryFailure(this, delivery, queuedId, restoreUnsentAnnotations);
       return;
     }
     e = delivery.prompt;
     images = delivery.images;
     attachments = delivery.attachments;
     if (this.isThreadRunning(t)) {
-      if (queuedId) {
-        requeuePendingPrompt(this, queuedId);
-      } else {
-        this.enqueuePrompt(e, t, images, attachments, annotations, annotationSourcePath);
-      }
+      enqueueOrRequeue(
+        this,
+        e,
+        t,
+        images,
+        attachments,
+        annotations,
+        queuedId,
+        annotationSourcePath
+      );
       return;
     }
-    let n = {
-      canceling: false,
-      runner: this.plugin.createPiRunner(t),
-      accepted: false,
-      notificationRunId: `${t}:${this.state.nextDesktopNotificationRunId++}`,
-      skillName: getSkillCommandName(e),
-      thinking: "",
-      thinkingExpanded: false,
-      thinkingUserSet: false,
-      toolErrors: [],
-      // Identifies this run for stale-callback checks.
-      runGeneration: ++this.state.runGenerationCounter
-    };
     let skipQueueDrain = false;
-    const addUserMessage = () => {
-      if (n.userMessageAdded) return;
-      n.userMessageAdded = true;
-      this.plugin.addMessageToThread(t, {
-        role: "user",
-        content: e || conciseAttachmentSummary(images, attachments),
-        createdAt: Date.now()
-      });
-      if (this.isCurrentThread(t)) {
-        this.renderThreadTitle();
-        this.renderMessages();
-      }
-    };
-    const acknowledgeQueuedDelivery = () => {
-      addUserMessage();
-      if (n.accepted) return;
-      n.accepted = true;
-      if (!queuedId) return;
-      this.state.promptQueue = this.state.promptQueue.filter((item) => item.id !== queuedId);
-      this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
-      this.renderPromptQueue();
-    };
-    this.state.activeRuns.set(t, n);
-    this.syncCurrentRunFlags();
-    this.runningThreadId = t;
-    this.state.running = this.isCurrentThread(t);
-    this.state.canceling = !1;
-    this.state.activityText = "Preparing context";
-    this.state.activityKind = "context";
-    this.state.activityDetail =
-      "Collecting current note, links, backlinks, and explicit attachments.";
-    this.state.activityStickyUntil = 0;
-    this.state.pendingActivity = void 0;
-    this.clearPendingActivityTimer();
-    this.state.activeToolCalls.clear();
-    this.state.currentRunContextUsage = void 0;
-    this.state.streamingAssistantContent = "";
-    this.state.streamingThinkingContent = "";
-    this.state.thinkingDisclosureExpanded = false;
-    this.state.thinkingDisclosureUserSet = false;
-    this.state.stickToBottom = !0;
-    // Heap samples for the run lifecycle (profiler-only).
-    performanceProfiler.markHeap("before");
-    this.plugin.beginAnnotationProcessing(t, annotations);
-    this.setRunningState(this.state.running);
-    if (!queuedId) addUserMessage();
-    this.renderThreadListIfVisible();
+    const { run: n, acknowledgeQueuedDelivery } = beginTrackedRun(this, {
+      prompt: e,
+      threadId: t,
+      images,
+      attachments,
+      annotations,
+      queuedId
+    });
+    const handlers = createRunEventHandlers(this, n, t, acknowledgeQueuedDelivery);
     try {
-      let a = await this.plugin.runPiPrompt(
+      const result = await this.plugin.runPiPrompt(
         e,
         {
           isCanceled: () => n.canceling,
-          onEvent: (o) => {
-            const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? now() : 0;
-            try {
-              const thinkingDelta = getThinkingDelta(o);
-              if (thinkingDelta) {
-                performanceProfiler.incrementCounter("streamDeltaCount");
-                n.thinking += thinkingDelta;
-                if (!n.thinkingUserSet) n.thinkingExpanded = true;
-              }
-              const toolError = formatToolError(o);
-              if (toolError && n.toolErrors[n.toolErrors.length - 1] !== toolError)
-                n.toolErrors.push(toolError);
-              this.handleSuccessfulToolMutation(o, t);
-              if (!this.isCurrentThread(t)) return;
-              if (this.state.activeRuns.get(t) !== n) {
-                this.noteStaleUiCallback();
-                return;
-              }
-              this.state.streamingThinkingContent = n.thinking;
-              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
-              this.state.thinkingDisclosureUserSet = n.thinkingUserSet;
-              this.handleRunEvent(o);
-              if (thinkingDelta) {
-                this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-                this.appendStreamingThinkingDelta(thinkingDelta);
-              }
-            } finally {
-              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
-            }
-          },
-          onTextDelta: (o) => {
-            const profiling = performanceProfiler.enabled;
-            const startedAt = profiling ? now() : 0;
-            try {
-              performanceProfiler.incrementCounter("streamDeltaCount");
-              if (!n.thinkingUserSet) n.thinkingExpanded = false;
-              if (!this.isCurrentThread(t)) return;
-              if (this.state.activeRuns.get(t) !== n) {
-                this.noteStaleUiCallback();
-                return;
-              }
-              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
-              this.liveThinkingSetExpanded?.(n.thinkingExpanded);
-              this.appendStreamingDelta(o);
-            } finally {
-              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
-            }
-          },
-          onPromptAccepted: acknowledgeQueuedDelivery
+          onEvent: handlers.onEvent,
+          onTextDelta: handlers.onTextDelta,
+          onPromptAccepted: handlers.onPromptAccepted
         },
         t,
         n.runner,
@@ -739,100 +506,21 @@ export class PiAgentView extends f.ItemView {
         delivery.promptContext
       );
       acknowledgeQueuedDelivery();
-      const createdAt = Date.now();
-      const thinkingKey = `${t}:${createdAt}`;
-      this.state.completedThinkingExpansion.set(
-        thinkingKey,
-        n.thinkingUserSet ? n.thinkingExpanded : false
-      );
-      const s = getCurrentRunMetadata(this.plugin.settings, a.runtimeState);
-      this.cancelStreamingFlush();
-      this.state.streamingAssistantContent = "";
-      this.state.streamingAnswerDirty = false;
-      this.state.streamingThinkingContent = "";
-      this.state.streamingThinkingDirty = false;
-      this.streamingItemEl = void 0;
-      this.streamingTextEl = void 0;
-      this.plugin.addMessageToThread(t, {
-        role: "assistant",
-        content: a.finalResponse,
-        createdAt,
-        contextUsage: a.contextUsage,
-        tokenUsage: a.tokenUsage,
-        runMetadata: s,
-        thinking: n.thinking || undefined,
-        toolErrors: n.toolErrors.length > 0 ? n.toolErrors : undefined
-      });
-      if (a.contextUsage && !a.contextCompacted) this.state.invalidatedContextThreadIds.delete(t);
-      if (a.contextCompacted) this.state.invalidatedContextThreadIds.add(t);
-      if (this.isCurrentThread(t)) {
-        this.renderThreadTitle();
-        this.renderMessages();
-        this.renderToolBadges();
-      }
-      this.notifyRunCompleted(n.notificationRunId, t);
-    } catch (a) {
-      let o = a instanceof Error ? a.message : String(a);
+      settleRunSuccess(this, n, t, result);
+    } catch (error) {
+      // A queued prompt that was never accepted goes back to pending and the
+      // queue must not drain; a directly-typed one gives its consumed
+      // annotations back. A cancel is neither: the queue drains as usual.
       if (queuedId && !n.accepted) {
         requeuePendingPrompt(this, queuedId);
         skipQueueDrain = true;
-      } else if (!n.accepted) restoreUnsentAnnotations();
-      if (o === "Pi run canceled.") {
-        new f.Notice("Agent run canceled.");
-        return;
+      } else if (!n.accepted) {
+        restoreUnsentAnnotations();
       }
-      const createdAt = Date.now();
-      this.state.completedThinkingExpansion.set(
-        `${t}:${createdAt}`,
-        n.thinkingUserSet ? n.thinkingExpanded : false
-      );
-      this.plugin.addMessageToThread(t, {
-        role: "assistant",
-        content: `Agent run failed: ${o}`,
-        createdAt,
-        thinking: n.thinking || undefined,
-        toolErrors: n.toolErrors.length > 0 ? n.toolErrors : undefined
-      });
-      if (this.isCurrentThread(t)) {
-        this.renderThreadTitle();
-        this.renderMessages();
-        this.renderToolBadges();
-      }
-      new f.Notice(o);
-      this.notifyRunCompleted(n.notificationRunId, t, "Agent run failed. Click to open the chat.");
+      if (settleRunFailure(this, n, t, error) === "canceled") return;
+      skipQueueDrain = true;
     } finally {
-      this.state.activeRuns.delete(t);
-      this.syncCurrentRunFlags();
-      this.state.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
-      this.state.canceling = this.getCurrentThreadRun()?.canceling === !0;
-      performanceProfiler.markHeap("after");
-      this.clearCoalescedActivity();
-      this.cancelStreamingFlush();
-      this.state.streamingAssistantContent = "";
-      this.state.streamingAnswerDirty = false;
-      this.state.streamingThinkingContent = "";
-      this.state.streamingThinkingDirty = false;
-      this.state.thinkingDisclosureExpanded = false;
-      this.state.thinkingDisclosureUserSet = false;
-      this.state.activityStickyUntil = 0;
-      this.state.pendingActivity = void 0;
-      this.clearPendingActivityTimer();
-      this.state.activeToolCalls.clear();
-      this.state.activityText = "";
-      this.state.activityDetail = "";
-      this.state.currentRunContextUsage = void 0;
-      if (this.isCurrentThread(t)) this.state.nativePiQueue = void 0;
-      this.renderPromptQueue();
-      this.runningThreadId = void 0;
-      this.setRunningState(this.state.running);
-      if (this.isCurrentThread(t)) {
-        this.renderMessages();
-        this.renderToolBadges();
-      }
-      this.renderThreadListIfVisible();
-      this.plugin.endAnnotationProcessingForThread(t);
-      this.plugin.rebuildServicesIfPending();
-      if (!skipQueueDrain) this.runNextQueuedPrompt();
+      settleRunCleanup(this, t, skipQueueDrain);
     }
   }
   notifyRunCompleted(runId, threadId, body = "Agent response completed. Click to open the chat.") {
@@ -868,38 +556,6 @@ export class PiAgentView extends f.ItemView {
   }
 }
 
-function mimeForName(name) {
-  const extension = String(name || "")
-    .toLowerCase()
-    .split(".")
-    .pop();
-  return (
-    {
-      png: "image/png",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      webp: "image/webp",
-      md: "text/markdown",
-      txt: "text/plain",
-      csv: "text/csv",
-      json: "application/json",
-      yaml: "application/yaml",
-      yml: "application/yaml",
-      xml: "application/xml",
-      html: "text/html",
-      css: "text/css",
-      js: "text/javascript",
-      mjs: "text/javascript",
-      ts: "text/typescript",
-      py: "text/x-python"
-    }[extension] || ""
-  );
-}
-function conciseAttachmentSummary(images, attachments) {
-  const count = images.length + attachments.length;
-  return `[${count} attached file${count === 1 ? "" : "s"}]`;
-}
-
 // Every member that paints or creates DOM lives in chat-dom.mjs; mixing it in
 // here keeps the class body free of element creation without changing a single
 // call site (`this.renderToolBadges()` still resolves through the prototype).
@@ -910,5 +566,6 @@ Object.assign(
   vaultLinkMethods,
   messageRendererMethods,
   runActivityMethods,
+  composerAttachmentMethods,
   chatDomMethods
 );

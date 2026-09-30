@@ -18,6 +18,7 @@ const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
 const viewSource = readSources([
   "ui/PiAgentView.mjs",
   "ui/view/run-prompt.mjs",
+  "ui/view/run-lifecycle.mjs",
   "ui/view/chat-dom.mjs"
 ]);
 const queueSource = fs.readFileSync("src/ui/prompt-queue.mjs", "utf8");
@@ -96,10 +97,11 @@ describe("annotation processing UX", () => {
   });
 
   it("starts processing with execution and clears it on mutation or run settlement", () => {
-    expect(viewSource).toContain("this.plugin.beginAnnotationProcessing(t, annotations)");
-    expect(viewSource).toContain("handleSuccessfulToolMutation(o, t)");
+    // The run record uses `threadId` now that the setup lives in run-lifecycle.
+    expect(viewSource).toContain("beginAnnotationProcessing(threadId, request.annotations)");
+    expect(viewSource).toContain("handleSuccessfulToolMutation(event, threadId)");
     expect(viewSource).toContain("completeAnnotationProcessingForPath(threadId, file.path)");
-    expect(viewSource).toContain("endAnnotationProcessingForThread(t)");
+    expect(viewSource).toContain("endAnnotationProcessingForThread(threadId)");
     expect(viewSource).toContain("restoreUnsentAnnotations");
     expect(queueSource).toContain("restoreConsumedAnnotations(item.annotations)");
   });
