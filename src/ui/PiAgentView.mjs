@@ -21,6 +21,12 @@ import { ComposerSuggestions } from "./suggestions.mjs";
 import { ThreadActions } from "./thread-actions.mjs";
 import { getCurrentRunMetadata } from "./view/run-metadata.mjs";
 import {
+  createChatShell,
+  createComposer,
+  createHeader,
+  createMessagesArea
+} from "./view/chat-dom.mjs";
+import {
   appendTextAttachmentContext,
   bytesToPromptImage,
   createPromptTextAttachment,
@@ -28,7 +34,6 @@ import {
   isSupportedTextFile,
   modelSupportsImages,
   SUPPORTED_IMAGE_MIME_TYPES,
-  SUPPORTED_TEXT_EXTENSIONS,
   textAttachmentBytes,
   MAX_TOTAL_TEXT_ATTACHMENT_BYTES
 } from "./prompt-payload.mjs";
@@ -114,11 +119,24 @@ export class PiAgentView extends f.ItemView {
     if (this.renderedThreadId !== currentThreadId) this.resetTransientRunUiState();
     this.renderedThreadId = currentThreadId;
     this.syncCurrentRunFlags();
-    // Fresh lifecycle, so there is nothing left to clean up here; observeComposerBar
-    // registers its replacement below.
-    let e = this.containerEl.children[1];
-    e.empty();
-    e.addClass("pi-agent-view");
+    // Collaborators are built before the DOM so the header's callbacks can call
+    // them directly, exactly as the inline listeners did before the extraction.
+    this.createViewCollaborators();
+    // The tree itself is built by src/ui/view/chat-dom.mjs; this method owns the
+    // order (shell, header, messages, composer) and everything that follows.
+    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.runSettings = new RunSettingsControls(this.plugin);
+    const { root } = createChatShell(this.containerEl.children[1]);
+    Object.assign(this, createHeader(root, this));
+    Object.assign(this, createMessagesArea(root, this));
+    Object.assign(this, createComposer(root, this));
+    // Assigned here rather than in createComposer so the builder never has to
+    // know which collaborator class the composer needs.
+    this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
+    this.renderMessages();
+    this.setRunningState(this.running);
+  }
+  createViewCollaborators() {
     this.noteActions = new NoteActions(this.plugin, {
       parseVaultLinkTarget: (c) => this.parseVaultLinkTarget(c),
       formatVaultLinkTarget: (c) => this.formatVaultLinkTarget(c),
@@ -168,159 +186,6 @@ export class PiAgentView extends f.ItemView {
         this.setRunningState(this.running);
       }
     });
-    let t = e.createDiv({ cls: "pi-agent-header" }),
-      n = t.createDiv({ cls: "pi-agent-brand" }),
-      s = n.createSpan({
-        cls: "pi-agent-brand-icon",
-        attr: { title: "Pi Agent" }
-      });
-    this.renderPiIcon(s);
-    this.threadTitleEl = n.createSpan({
-      cls: "pi-agent-thread-title",
-      attr: { role: "button", tabindex: "0", title: tr("view.renameChat") }
-    });
-    this.threadTitleEl.addEventListener("click", () => this.startThreadTitleRename());
-    this.threadTitleEl.addEventListener("keydown", (c) => {
-      if (c.key === "Enter" || c.key === " ") {
-        c.preventDefault();
-        this.startThreadTitleRename();
-      }
-    });
-    this.renderThreadTitle();
-    let a = t.createDiv({ cls: "pi-agent-header-actions" }),
-      favoriteButton = a.createEl("button", {
-        cls: "clickable-icon pi-agent-header-action pi-agent-header-favorite"
-      }),
-      o = a.createEl("button", {
-        cls: "clickable-icon pi-agent-header-action",
-        attr: { "aria-label": tr("view.newChat"), title: tr("view.newChat") }
-      });
-    this.threadFavoriteEl = favoriteButton;
-    (0, f.setIcon)(favoriteButton, "star");
-    this.renderThreadFavorite();
-    favoriteButton.addEventListener("click", () => this.toggleCurrentThreadFavorite());
-    (0, f.setIcon)(o, "plus");
-    o.addEventListener("click", (c) => {
-      var p;
-      c.preventDefault();
-      if ((p = this.threadMenu) != null) p.startNewChat();
-    });
-    let l = a.createEl("button", {
-      cls: "clickable-icon pi-agent-header-action",
-      attr: { "aria-label": tr("view.forkChat"), title: tr("view.forkChat") }
-    });
-    (0, f.setIcon)(l, "split");
-    l.addEventListener("click", (c) => {
-      var p;
-      c.preventDefault();
-      if (this.isThreadRunning(this.plugin.getCurrentThread().id)) {
-        new f.Notice(tr("view.forkBusy"));
-        return;
-      }
-      if ((p = this.threadMenu) != null) p.forkChat();
-      this.renderToolBadges();
-    });
-    let u = a.createEl("button", {
-      cls: "clickable-icon pi-agent-thread-menu",
-      attr: {
-        "aria-label": tr("view.manageThreads"),
-        title: tr("view.manageThreads")
-      }
-    });
-    (0, f.setIcon)(u, "list");
-    u.addEventListener("click", (c) => {
-      c.preventDefault();
-      this.showThreadList();
-    });
-    this.messagesEl = e.createDiv({ cls: "pi-agent-messages" });
-    this.messagesEl.addEventListener("scroll", () => {
-      if (!this.messagesEl || this.isRenderingMessages) return;
-      let c =
-        this.messagesEl.scrollHeight - this.messagesEl.scrollTop - this.messagesEl.clientHeight;
-      this.stickToBottom = c < 40;
-    });
-    this.messagesEl.addEventListener("click", (event) => this.handleMessageLinkClick(event), true);
-    let d = e.createDiv({ cls: "pi-agent-composer" });
-    this.toolBadgesEl = d.createDiv({ cls: "pi-agent-tool-badges" });
-    this.renderToolBadges();
-    this.promptQueue = this.plugin.getLocalPromptQueue();
-    this.promptQueueEl = d.createDiv({ cls: "pi-agent-prompt-queue" });
-    this.renderPromptQueue();
-    this.extensionWidgetsAboveEl = d.createDiv({ cls: "pi-agent-extension-widgets" });
-    this.renderComposerImages();
-    this.inputEl = d.createEl("textarea", {
-      placeholder: tr("composer.placeholder")
-    });
-    this.inputEl.addEventListener("keydown", (c) => {
-      var p;
-      if ((p = this.suggestions) != null && p.handleKeydown(c)) return;
-      if (c.key === "Enter" && !c.shiftKey && !c.isComposing) {
-        c.preventDefault();
-        this.submitInput();
-      }
-      if (c.key === "Escape") {
-        this.syncCurrentRunFlags();
-        if (this.running) {
-          c.preventDefault();
-          this.cancelCurrentRun();
-        }
-      }
-    });
-    this.inputEl.addEventListener("paste", (event) => this.handleImagePaste(event));
-    this.inputEl.addEventListener("dragover", (event) => {
-      if ((event.dataTransfer?.files?.length || 0) > 0) event.preventDefault();
-    });
-    this.inputEl.addEventListener("drop", (event) => this.handleImageDrop(event));
-    this.inputEl.addEventListener("input", () => {
-      var c;
-      this.syncCurrentRunFlags();
-      this.resizeInput();
-      if ((c = this.suggestions) != null) c.update();
-      this.setRunningState(this.running);
-    });
-    this.inputEl.addEventListener("click", () => {
-      this.suggestions?.update();
-    });
-    this.inputEl.addEventListener("blur", () => {
-      this.lifecycle.setTimer(() => {
-        this.suggestions?.close();
-      }, 120);
-    });
-    this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
-    this.extensionWidgetsBelowEl = d.createDiv({ cls: "pi-agent-extension-widgets" });
-    this.renderExtensionWidgets();
-    this.resizeInput();
-    this.imageInputEl = d.createEl("input", {
-      cls: "pi-agent-image-input",
-      attr: {
-        type: "file",
-        accept: [
-          ...SUPPORTED_IMAGE_MIME_TYPES,
-          ...SUPPORTED_TEXT_EXTENSIONS.map((ext) => `.${ext}`)
-        ].join(","),
-        multiple: ""
-      }
-    });
-    this.imageInputEl.addEventListener("change", () => {
-      this.addLocalFiles(this.imageInputEl?.files);
-      if (this.imageInputEl) this.imageInputEl.value = "";
-    });
-    let h = d.createDiv({ cls: "pi-agent-composer-bar" });
-    this.composerBarEl = h;
-    this.runSettings = new RunSettingsControls(this.plugin);
-    this.renderImagePicker(h);
-    this.runSettings.render(h);
-    let m = h.createEl("button", {
-      cls: "clickable-icon pi-agent-send-button",
-      attr: { "aria-label": tr("send.sendAria"), title: tr("send.sendAria") }
-    });
-    (0, f.setIcon)(m, "send");
-    m.createSpan({ cls: "pi-agent-control-label", text: tr("send.send") });
-    this.sendButtonEl = m;
-    m.addEventListener("click", () => this.handleSendButtonClick());
-    this.observeComposerBar(h);
-    this.renderMessages();
-    this.setRunningState(this.running);
   }
   async onClose() {
     this.messagesEl = void 0;

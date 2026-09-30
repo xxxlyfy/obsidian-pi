@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { readSources } from "./helpers/view-source.mjs";
 
 vi.mock("obsidian", () => ({
   setIcon(element, icon) {
@@ -57,6 +58,9 @@ const threadListSource = readFileSync(
   "utf8"
 );
 const viewSource = readFileSync(new URL("../src/ui/PiAgentView.mjs", import.meta.url), "utf8");
+// The chat DOM builders own the message-area listeners, so assertions about
+// which listener is registered on which element have to cover both files.
+const chatViewSources = readSources(["ui/PiAgentView.mjs", "ui/view/chat-dom.mjs"]);
 const messageRendererSource = readFileSync(
   new URL("../src/ui/message-renderer.mjs", import.meta.url),
   "utf8"
@@ -179,8 +183,8 @@ describe("native chat polish", () => {
       'container.setText(this.streamingThinkingContent || "")'
     );
     expect(messageRendererSource).not.toContain("this.streamingTextEl.appendText");
-    expect(viewSource).toMatch(
-      /addEventListener\("click", \(event\) => this\.handleMessageLinkClick\(event\), true\)/
+    expect(chatViewSources).toMatch(
+      /addEventListener\("click", \(event\) => view\.handleMessageLinkClick\(event\), true\)/
     );
     expect(styles).toMatch(
       /\.pi-agent-message-content a \{\s*cursor: pointer;\s*pointer-events: auto;/

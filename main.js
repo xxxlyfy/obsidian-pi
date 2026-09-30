@@ -9191,6 +9191,172 @@ function getDisplayedModel(settings, runtimeState) {
   return model?.displayName || settings.model || "Pi default";
 }
 
+// src/ui/view/chat-dom.mjs
+var import_obsidian19 = require("obsidian");
+function createChatShell(container) {
+  container.empty();
+  container.addClass("pi-agent-view");
+  return { root: container };
+}
+function createHeader(root, view) {
+  const header = root.createDiv({ cls: "pi-agent-header" });
+  const brand = header.createDiv({ cls: "pi-agent-brand" });
+  const brandIcon = brand.createSpan({
+    cls: "pi-agent-brand-icon",
+    attr: { title: "Pi Agent" }
+  });
+  view.renderPiIcon(brandIcon);
+  const threadTitleEl = brand.createSpan({
+    cls: "pi-agent-thread-title",
+    attr: { role: "button", tabindex: "0", title: t("view.renameChat") }
+  });
+  threadTitleEl.addEventListener("click", () => view.startThreadTitleRename());
+  threadTitleEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      view.startThreadTitleRename();
+    }
+  });
+  view.renderThreadTitle();
+  const actions = header.createDiv({ cls: "pi-agent-header-actions" });
+  const favoriteButton = actions.createEl("button", {
+    cls: "clickable-icon pi-agent-header-action pi-agent-header-favorite"
+  });
+  const newChatButton = actions.createEl("button", {
+    cls: "clickable-icon pi-agent-header-action",
+    attr: { "aria-label": t("view.newChat"), title: t("view.newChat") }
+  });
+  (0, import_obsidian19.setIcon)(favoriteButton, "star");
+  view.renderThreadFavorite();
+  favoriteButton.addEventListener("click", () => view.toggleCurrentThreadFavorite());
+  (0, import_obsidian19.setIcon)(newChatButton, "plus");
+  newChatButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    view.threadMenu?.startNewChat();
+  });
+  const forkButton = actions.createEl("button", {
+    cls: "clickable-icon pi-agent-header-action",
+    attr: { "aria-label": t("view.forkChat"), title: t("view.forkChat") }
+  });
+  (0, import_obsidian19.setIcon)(forkButton, "split");
+  forkButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (view.isThreadRunning(view.plugin.getCurrentThread().id)) {
+      new import_obsidian19.Notice(t("view.forkBusy"));
+      return;
+    }
+    view.threadMenu?.forkChat();
+    view.renderToolBadges();
+  });
+  const manageButton = actions.createEl("button", {
+    cls: "clickable-icon pi-agent-thread-menu",
+    attr: {
+      "aria-label": t("view.manageThreads"),
+      title: t("view.manageThreads")
+    }
+  });
+  (0, import_obsidian19.setIcon)(manageButton, "list");
+  manageButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    view.showThreadList();
+  });
+  return { threadTitleEl, threadFavoriteEl: favoriteButton };
+}
+function createMessagesArea(root, view) {
+  const messagesEl = root.createDiv({ cls: "pi-agent-messages" });
+  messagesEl.addEventListener("scroll", () => {
+    if (view.isRenderingMessages) return;
+    const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+    view.stickToBottom = distance < 40;
+  });
+  messagesEl.addEventListener("click", (event) => view.handleMessageLinkClick(event), true);
+  return { messagesEl };
+}
+function createComposer(root, view) {
+  const composer = root.createDiv({ cls: "pi-agent-composer" });
+  const toolBadgesEl = composer.createDiv({ cls: "pi-agent-tool-badges" });
+  view.renderToolBadges();
+  const promptQueueEl = composer.createDiv({ cls: "pi-agent-prompt-queue" });
+  view.renderPromptQueue();
+  const extensionWidgetsAboveEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
+  view.renderComposerImages();
+  const inputEl = composer.createEl("textarea", {
+    placeholder: t("composer.placeholder")
+  });
+  inputEl.addEventListener("keydown", (event) => {
+    if (view.suggestions?.handleKeydown(event)) return;
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      view.submitInput();
+    }
+    if (event.key === "Escape") {
+      view.syncCurrentRunFlags();
+      if (view.running) {
+        event.preventDefault();
+        view.cancelCurrentRun();
+      }
+    }
+  });
+  inputEl.addEventListener("paste", (event) => view.handleImagePaste(event));
+  inputEl.addEventListener("dragover", (event) => {
+    if ((event.dataTransfer?.files?.length || 0) > 0) event.preventDefault();
+  });
+  inputEl.addEventListener("drop", (event) => view.handleImageDrop(event));
+  inputEl.addEventListener("input", () => {
+    view.syncCurrentRunFlags();
+    view.resizeInput();
+    view.suggestions?.update();
+    view.setRunningState(view.running);
+  });
+  inputEl.addEventListener("click", () => {
+    view.suggestions?.update();
+  });
+  inputEl.addEventListener("blur", () => {
+    view.lifecycle.setTimer(() => {
+      view.suggestions?.close();
+    }, 120);
+  });
+  const extensionWidgetsBelowEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
+  view.renderExtensionWidgets();
+  view.resizeInput();
+  const imageInputEl = composer.createEl("input", {
+    cls: "pi-agent-image-input",
+    attr: {
+      type: "file",
+      accept: [
+        ...SUPPORTED_IMAGE_MIME_TYPES,
+        ...SUPPORTED_TEXT_EXTENSIONS.map((ext) => `.${ext}`)
+      ].join(","),
+      multiple: ""
+    }
+  });
+  imageInputEl.addEventListener("change", () => {
+    view.addLocalFiles(view.imageInputEl?.files);
+    if (view.imageInputEl) view.imageInputEl.value = "";
+  });
+  const composerBarEl = composer.createDiv({ cls: "pi-agent-composer-bar" });
+  view.renderImagePicker(composerBarEl);
+  view.runSettings.render(composerBarEl);
+  const sendButtonEl = composerBarEl.createEl("button", {
+    cls: "clickable-icon pi-agent-send-button",
+    attr: { "aria-label": t("send.sendAria"), title: t("send.sendAria") }
+  });
+  (0, import_obsidian19.setIcon)(sendButtonEl, "send");
+  sendButtonEl.createSpan({ cls: "pi-agent-control-label", text: t("send.send") });
+  sendButtonEl.addEventListener("click", () => view.handleSendButtonClick());
+  view.observeComposerBar(composerBarEl);
+  return {
+    toolBadgesEl,
+    promptQueueEl,
+    extensionWidgetsAboveEl,
+    extensionWidgetsBelowEl,
+    inputEl,
+    imageInputEl,
+    composerBarEl,
+    sendButtonEl
+  };
+}
+
 // src/ui/send-state.mjs
 function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
   if (canceling) {
@@ -9470,9 +9636,18 @@ var PiAgentView = class extends f4.ItemView {
     if (this.renderedThreadId !== currentThreadId) this.resetTransientRunUiState();
     this.renderedThreadId = currentThreadId;
     this.syncCurrentRunFlags();
-    let e = this.containerEl.children[1];
-    e.empty();
-    e.addClass("pi-agent-view");
+    this.createViewCollaborators();
+    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.runSettings = new RunSettingsControls(this.plugin);
+    const { root } = createChatShell(this.containerEl.children[1]);
+    Object.assign(this, createHeader(root, this));
+    Object.assign(this, createMessagesArea(root, this));
+    Object.assign(this, createComposer(root, this));
+    this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
+    this.renderMessages();
+    this.setRunningState(this.running);
+  }
+  createViewCollaborators() {
     this.noteActions = new NoteActions(this.plugin, {
       parseVaultLinkTarget: (c) => this.parseVaultLinkTarget(c),
       formatVaultLinkTarget: (c) => this.formatVaultLinkTarget(c),
@@ -9522,159 +9697,6 @@ var PiAgentView = class extends f4.ItemView {
         this.setRunningState(this.running);
       }
     });
-    let t2 = e.createDiv({ cls: "pi-agent-header" }),
-      n = t2.createDiv({ cls: "pi-agent-brand" }),
-      s = n.createSpan({
-        cls: "pi-agent-brand-icon",
-        attr: { title: "Pi Agent" }
-      });
-    this.renderPiIcon(s);
-    this.threadTitleEl = n.createSpan({
-      cls: "pi-agent-thread-title",
-      attr: { role: "button", tabindex: "0", title: t("view.renameChat") }
-    });
-    this.threadTitleEl.addEventListener("click", () => this.startThreadTitleRename());
-    this.threadTitleEl.addEventListener("keydown", (c) => {
-      if (c.key === "Enter" || c.key === " ") {
-        c.preventDefault();
-        this.startThreadTitleRename();
-      }
-    });
-    this.renderThreadTitle();
-    let a = t2.createDiv({ cls: "pi-agent-header-actions" }),
-      favoriteButton = a.createEl("button", {
-        cls: "clickable-icon pi-agent-header-action pi-agent-header-favorite"
-      }),
-      o = a.createEl("button", {
-        cls: "clickable-icon pi-agent-header-action",
-        attr: { "aria-label": t("view.newChat"), title: t("view.newChat") }
-      });
-    this.threadFavoriteEl = favoriteButton;
-    (0, f4.setIcon)(favoriteButton, "star");
-    this.renderThreadFavorite();
-    favoriteButton.addEventListener("click", () => this.toggleCurrentThreadFavorite());
-    (0, f4.setIcon)(o, "plus");
-    o.addEventListener("click", (c) => {
-      var p;
-      c.preventDefault();
-      if ((p = this.threadMenu) != null) p.startNewChat();
-    });
-    let l = a.createEl("button", {
-      cls: "clickable-icon pi-agent-header-action",
-      attr: { "aria-label": t("view.forkChat"), title: t("view.forkChat") }
-    });
-    (0, f4.setIcon)(l, "split");
-    l.addEventListener("click", (c) => {
-      var p;
-      c.preventDefault();
-      if (this.isThreadRunning(this.plugin.getCurrentThread().id)) {
-        new f4.Notice(t("view.forkBusy"));
-        return;
-      }
-      if ((p = this.threadMenu) != null) p.forkChat();
-      this.renderToolBadges();
-    });
-    let u = a.createEl("button", {
-      cls: "clickable-icon pi-agent-thread-menu",
-      attr: {
-        "aria-label": t("view.manageThreads"),
-        title: t("view.manageThreads")
-      }
-    });
-    (0, f4.setIcon)(u, "list");
-    u.addEventListener("click", (c) => {
-      c.preventDefault();
-      this.showThreadList();
-    });
-    this.messagesEl = e.createDiv({ cls: "pi-agent-messages" });
-    this.messagesEl.addEventListener("scroll", () => {
-      if (!this.messagesEl || this.isRenderingMessages) return;
-      let c =
-        this.messagesEl.scrollHeight - this.messagesEl.scrollTop - this.messagesEl.clientHeight;
-      this.stickToBottom = c < 40;
-    });
-    this.messagesEl.addEventListener("click", (event) => this.handleMessageLinkClick(event), true);
-    let d = e.createDiv({ cls: "pi-agent-composer" });
-    this.toolBadgesEl = d.createDiv({ cls: "pi-agent-tool-badges" });
-    this.renderToolBadges();
-    this.promptQueue = this.plugin.getLocalPromptQueue();
-    this.promptQueueEl = d.createDiv({ cls: "pi-agent-prompt-queue" });
-    this.renderPromptQueue();
-    this.extensionWidgetsAboveEl = d.createDiv({ cls: "pi-agent-extension-widgets" });
-    this.renderComposerImages();
-    this.inputEl = d.createEl("textarea", {
-      placeholder: t("composer.placeholder")
-    });
-    this.inputEl.addEventListener("keydown", (c) => {
-      var p;
-      if ((p = this.suggestions) != null && p.handleKeydown(c)) return;
-      if (c.key === "Enter" && !c.shiftKey && !c.isComposing) {
-        c.preventDefault();
-        this.submitInput();
-      }
-      if (c.key === "Escape") {
-        this.syncCurrentRunFlags();
-        if (this.running) {
-          c.preventDefault();
-          this.cancelCurrentRun();
-        }
-      }
-    });
-    this.inputEl.addEventListener("paste", (event) => this.handleImagePaste(event));
-    this.inputEl.addEventListener("dragover", (event) => {
-      if ((event.dataTransfer?.files?.length || 0) > 0) event.preventDefault();
-    });
-    this.inputEl.addEventListener("drop", (event) => this.handleImageDrop(event));
-    this.inputEl.addEventListener("input", () => {
-      var c;
-      this.syncCurrentRunFlags();
-      this.resizeInput();
-      if ((c = this.suggestions) != null) c.update();
-      this.setRunningState(this.running);
-    });
-    this.inputEl.addEventListener("click", () => {
-      this.suggestions?.update();
-    });
-    this.inputEl.addEventListener("blur", () => {
-      this.lifecycle.setTimer(() => {
-        this.suggestions?.close();
-      }, 120);
-    });
-    this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
-    this.extensionWidgetsBelowEl = d.createDiv({ cls: "pi-agent-extension-widgets" });
-    this.renderExtensionWidgets();
-    this.resizeInput();
-    this.imageInputEl = d.createEl("input", {
-      cls: "pi-agent-image-input",
-      attr: {
-        type: "file",
-        accept: [
-          ...SUPPORTED_IMAGE_MIME_TYPES,
-          ...SUPPORTED_TEXT_EXTENSIONS.map((ext) => `.${ext}`)
-        ].join(","),
-        multiple: ""
-      }
-    });
-    this.imageInputEl.addEventListener("change", () => {
-      this.addLocalFiles(this.imageInputEl?.files);
-      if (this.imageInputEl) this.imageInputEl.value = "";
-    });
-    let h = d.createDiv({ cls: "pi-agent-composer-bar" });
-    this.composerBarEl = h;
-    this.runSettings = new RunSettingsControls(this.plugin);
-    this.renderImagePicker(h);
-    this.runSettings.render(h);
-    let m = h.createEl("button", {
-      cls: "clickable-icon pi-agent-send-button",
-      attr: { "aria-label": t("send.sendAria"), title: t("send.sendAria") }
-    });
-    (0, f4.setIcon)(m, "send");
-    m.createSpan({ cls: "pi-agent-control-label", text: t("send.send") });
-    this.sendButtonEl = m;
-    m.addEventListener("click", () => this.handleSendButtonClick());
-    this.observeComposerBar(h);
-    this.renderMessages();
-    this.setRunningState(this.running);
   }
   async onClose() {
     this.messagesEl = void 0;
