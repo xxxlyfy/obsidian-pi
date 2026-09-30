@@ -9409,21 +9409,19 @@ function reportDeliveryFailure(view, delivery, queuedId, restoreUnsentAnnotation
   else restoreUnsentAnnotations();
   if (delivery.notice || queuedId) new import_obsidian20.Notice(delivery.failure);
 }
-function enqueueOrRequeue(
-  view,
-  prompt,
-  threadId,
-  images,
-  attachments,
-  annotations,
-  queuedId,
-  annotationSourcePath
-) {
-  if (queuedId) {
-    requeuePendingPrompt(view, queuedId);
+function enqueueOrRequeue(view, request) {
+  if (request.queuedId) {
+    requeuePendingPrompt(view, request.queuedId);
     return;
   }
-  view.enqueuePrompt(prompt, threadId, images, attachments, annotations, annotationSourcePath);
+  view.enqueuePrompt(
+    request.prompt,
+    request.threadId,
+    request.images,
+    request.attachments,
+    request.annotations,
+    request.annotationSourcePath
+  );
 }
 function requeuePendingPrompt(view, queuedId) {
   if (!queuedId) return;
@@ -10673,16 +10671,15 @@ var PiAgentView = class extends f4.ItemView {
     const restoreUnsentAnnotations = () =>
       !queuedId && annotations.length > 0 && this.plugin.restoreConsumedAnnotations(annotations);
     if (this.isThreadRunning(t2)) {
-      enqueueOrRequeue(
-        this,
-        e,
-        t2,
+      enqueueOrRequeue(this, {
+        prompt: e,
+        threadId: t2,
         images,
         attachments,
         annotations,
         queuedId,
         annotationSourcePath
-      );
+      });
       return;
     }
     const delivery = await enrichPromptDelivery(this, {
@@ -10701,16 +10698,15 @@ var PiAgentView = class extends f4.ItemView {
     images = delivery.images;
     attachments = delivery.attachments;
     if (this.isThreadRunning(t2)) {
-      enqueueOrRequeue(
-        this,
-        e,
-        t2,
+      enqueueOrRequeue(this, {
+        prompt: e,
+        threadId: t2,
         images,
         attachments,
         annotations,
         queuedId,
         annotationSourcePath
-      );
+      });
       return;
     }
     const tracked = beginTrackedRun(this, {

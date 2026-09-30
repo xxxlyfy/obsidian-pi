@@ -116,35 +116,28 @@ export function reportDeliveryFailure(view, delivery, queuedId, restoreUnsentAnn
  *
  * `runPrompt` takes this decision twice -- once for the prompt as typed and once
  * after enrichment, because enrichment can await long enough for another run to
- * start -- and both call sites had the same two branches. Positional arguments
- * keep the call on one line; there are seven of them, which is the point at
- * which a request object stops being easier to read.
+ * start -- and both call sites had the same two branches. Taking a request
+ * object keeps both call sites to one line.
  *
  * @param {any} view Chat view.
- * @param {any} prompt Prompt text.
- * @param {string} threadId Thread the prompt belongs to.
- * @param {any[]} images Attached images.
- * @param {any[]} attachments Attached text files.
- * @param {any} annotations Annotations the prompt carries.
- * @param {string | undefined} queuedId Set when this prompt came from the queue.
- * @param {string | undefined} annotationSourcePath Context file for the queued item.
+ * @param {{ prompt: any, threadId: string, images: any[], attachments: any[],
+ *   annotations: any, queuedId: string | undefined,
+ *   annotationSourcePath: string | undefined }} request
  * @returns {void}
  */
-export function enqueueOrRequeue(
-  view,
-  prompt,
-  threadId,
-  images,
-  attachments,
-  annotations,
-  queuedId,
-  annotationSourcePath
-) {
-  if (queuedId) {
-    requeuePendingPrompt(view, queuedId);
+export function enqueueOrRequeue(view, request) {
+  if (request.queuedId) {
+    requeuePendingPrompt(view, request.queuedId);
     return;
   }
-  view.enqueuePrompt(prompt, threadId, images, attachments, annotations, annotationSourcePath);
+  view.enqueuePrompt(
+    request.prompt,
+    request.threadId,
+    request.images,
+    request.attachments,
+    request.annotations,
+    request.annotationSourcePath
+  );
 }
 
 /**

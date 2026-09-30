@@ -439,16 +439,15 @@ export class PiAgentView extends f.ItemView {
     // A prompt for a thread that is already running is queued, not started. This
     // decision is re-checked after enrichment, because enrichment can await.
     if (this.isThreadRunning(t)) {
-      enqueueOrRequeue(
-        this,
-        e,
-        t,
+      enqueueOrRequeue(this, {
+        prompt: e,
+        threadId: t,
         images,
         attachments,
         annotations,
         queuedId,
         annotationSourcePath
-      );
+      });
       return;
     }
     const delivery = await enrichPromptDelivery(this, {
@@ -467,16 +466,15 @@ export class PiAgentView extends f.ItemView {
     images = delivery.images;
     attachments = delivery.attachments;
     if (this.isThreadRunning(t)) {
-      enqueueOrRequeue(
-        this,
-        e,
-        t,
+      enqueueOrRequeue(this, {
+        prompt: e,
+        threadId: t,
         images,
         attachments,
         annotations,
         queuedId,
         annotationSourcePath
-      );
+      });
       return;
     }
     const tracked = beginTrackedRun(this, {
