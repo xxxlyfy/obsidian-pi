@@ -3428,13 +3428,55 @@ var POSIX_PATH_CANDIDATES = [
 function findPiExecutable(configuredPath = "") {
   const configuredExecutable = normalizePiExecutablePath(configuredPath);
   if (configuredExecutable) return configuredExecutable;
-  if (process.platform === "win32") return WINDOWS_PI_CANDIDATES[0];
+  if (process.platform === "win32") return findWindowsPiExecutable();
   for (const candidate of POSIX_PI_CANDIDATES) {
     if (import_node_fs.default.existsSync(candidate)) return candidate;
   }
   const piNode = findPiNodeExecutable();
   if (piNode) return piNode;
   return "pi";
+}
+function findWindowsPiExecutable(options = {}) {
+  const pathDirectories = options.pathDirectories ?? getWindowsPathDirectories();
+  const fallbackDirectories = options.fallbackDirectories ?? getWindowsPiDirectories();
+  const directories = uniqueDirectoryList([...pathDirectories, ...fallbackDirectories]);
+  for (const directory of directories) {
+    for (const candidate of WINDOWS_PI_CANDIDATES) {
+      const executable = import_node_path2.default.join(directory, candidate);
+      if (import_node_fs.default.existsSync(executable)) return executable;
+    }
+  }
+  return WINDOWS_PI_CANDIDATES[0];
+}
+function getWindowsPiDirectories() {
+  const directories = [
+    import_node_path2.default.join(import_node_os.default.homedir(), ".pi", "agent", "bin")
+  ];
+  if (process.env.APPDATA)
+    directories.push(import_node_path2.default.join(process.env.APPDATA, "npm"));
+  return directories;
+}
+function getWindowsPathDirectories() {
+  return uniqueDirectoryList(
+    (process.env.PATH ?? "").split(import_node_path2.default.delimiter).map(unquotePathEntry)
+  );
+}
+function unquotePathEntry(entry) {
+  const trimmed = String(entry ?? "").trim();
+  if (trimmed.length < 2) return trimmed;
+  return /^".*"$/.test(trimmed) ? trimmed.slice(1, -1).trim() : trimmed;
+}
+function uniqueDirectoryList(directories) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const directory of directories) {
+    if (!directory) continue;
+    const key = directory.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(directory);
+  }
+  return result;
 }
 function normalizePiExecutablePath(executablePath) {
   const normalizedPath = typeof executablePath === "string" ? executablePath.trim() : "";

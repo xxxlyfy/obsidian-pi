@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.20
+
+- Fixed Pi failing to start on Windows with `Cannot find module '...\pi-launcher.js'` when no Pi executable path was configured: the launcher is now resolved to an absolute `pi.cmd` path through `PATH` (plus the pi.dev installer and npm global locations) before it is handed to `cmd.exe`, so Pi's own `node "%~dp0pi-launcher.js"` wrapper no longer resolves its script against the plugin's working directory.
+
 ## 0.0.19
 
 - Split the chat view into focused modules. `PiAgentView` was a single class of 1,269 lines whose DOM building, prompt stages, run teardown, and attachment handling all had to be read together to change any one of them. It is now 549 lines that orchestrate six modules, with no element creation left in it, all five plan targets met, and no behaviour change.

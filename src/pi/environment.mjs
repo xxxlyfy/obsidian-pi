@@ -17,7 +17,7 @@ const POSIX_PATH_CANDIDATES = [
 export function findPiExecutable(configuredPath = "") {
   const configuredExecutable = normalizePiExecutablePath(configuredPath);
   if (configuredExecutable) return configuredExecutable;
-  if (process.platform === "win32") return WINDOWS_PI_CANDIDATES[0];
+  if (process.platform === "win32") return findWindowsPiExecutable();
 
   for (const candidate of POSIX_PI_CANDIDATES) {
     if (fs.existsSync(candidate)) return candidate;
@@ -27,6 +27,84 @@ export function findPiExecutable(configuredPath = "") {
   if (piNode) return piNode;
 
   return "pi";
+}
+
+/**
+ * Resolve the Windows Pi launcher to an absolute path.
+ *
+ * Windows Pi entry points are batch files, and the launcher the pi.dev installer
+ * generates runs `node "%~dp0pi-launcher.js" %*`. cmd.exe expands `%~dp0` to the
+ * current directory instead of the launcher directory when a batch file is
+ * invoked quoted and without a directory, and every invocation from this module
+ * is quoted (see `quoteWindowsCommand`). Pi then resolves `pi-launcher.js`
+ * against the plugin's working directory and dies with MODULE_NOT_FOUND before
+ * the RPC handshake. Resolving the launcher through PATH keeps the executable
+ * absolute, so the wrapper no longer depends on the child's working directory.
+ *
+ * @param {{ pathDirectories?: string[]; fallbackDirectories?: string[] }} [options]
+ * @returns {string}
+ */
+export function findWindowsPiExecutable(options = {}) {
+  const pathDirectories = options.pathDirectories ?? getWindowsPathDirectories();
+  const fallbackDirectories = options.fallbackDirectories ?? getWindowsPiDirectories();
+  const directories = uniqueDirectoryList([...pathDirectories, ...fallbackDirectories]);
+
+  for (const directory of directories) {
+    for (const candidate of WINDOWS_PI_CANDIDATES) {
+      const executable = path.join(directory, candidate);
+      if (fs.existsSync(executable)) return executable;
+    }
+  }
+
+  return WINDOWS_PI_CANDIDATES[0];
+}
+
+/**
+ * Windows install locations that a GUI process often misses on PATH: the pi.dev
+ * installer uses `~/.pi/agent/bin`, `npm install -g` uses `%APPDATA%/npm`.
+ *
+ * @returns {string[]}
+ */
+function getWindowsPiDirectories() {
+  const directories = [path.join(os.homedir(), ".pi", "agent", "bin")];
+  if (process.env.APPDATA) directories.push(path.join(process.env.APPDATA, "npm"));
+  return directories;
+}
+
+/**
+ * @returns {string[]}
+ */
+function getWindowsPathDirectories() {
+  return uniqueDirectoryList((process.env.PATH ?? "").split(path.delimiter).map(unquotePathEntry));
+}
+
+/**
+ * PATH entries are routinely wrapped in double quotes on Windows.
+ *
+ * @param {unknown} entry
+ * @returns {string}
+ */
+function unquotePathEntry(entry) {
+  const trimmed = String(entry ?? "").trim();
+  if (trimmed.length < 2) return trimmed;
+  return /^".*"$/.test(trimmed) ? trimmed.slice(1, -1).trim() : trimmed;
+}
+
+/**
+ * @param {string[]} directories
+ * @returns {string[]}
+ */
+function uniqueDirectoryList(directories) {
+  const seen = new Set();
+  const result = [];
+  for (const directory of directories) {
+    if (!directory) continue;
+    const key = directory.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(directory);
+  }
+  return result;
 }
 
 export function normalizePiExecutablePath(executablePath) {

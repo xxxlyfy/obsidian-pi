@@ -7,10 +7,12 @@ import {
   buildPiProcessInvocation,
   buildPiProcessOptions,
   findPiExecutable,
+  findWindowsPiExecutable,
   materializeSystemPromptArguments
 } from "../src/pi/environment.mjs";
 
 const originalEnv = {
+  APPDATA: process.env.APPDATA,
   HOME: process.env.HOME,
   PATH: process.env.PATH,
   USER: process.env.USER
@@ -130,5 +132,88 @@ describe("Pi process environment", () => {
 
     const unrelated = materializeSystemPromptArguments(["--message", "line one\nline two"]);
     expect(unrelated[1]).toBe("line one\nline two");
+  });
+});
+
+describe("Windows Pi executable detection", () => {
+  function createLauncherDirectory(name, files) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `pi-${name}-`));
+    for (const file of files) fs.writeFileSync(path.join(directory, file), "");
+    return directory;
+  }
+
+  it("resolves the launcher to an absolute path so the batch wrapper keeps %~dp0", () => {
+    setPlatform("win32");
+    const directory = createLauncherDirectory("path", ["pi.cmd"]);
+    process.env.PATH = directory;
+
+    expect(findPiExecutable("")).toBe(path.join(directory, "pi.cmd"));
+  });
+
+  it("prefers pi.cmd, then pi.exe, then the extension-less candidate per directory", () => {
+    const directory = createLauncherDirectory("order", ["pi.exe", "pi"]);
+    const directories = { pathDirectories: [directory], fallbackDirectories: [] };
+
+    expect(findWindowsPiExecutable(directories)).toBe(path.join(directory, "pi.exe"));
+
+    fs.writeFileSync(path.join(directory, "pi.cmd"), "");
+
+    expect(findWindowsPiExecutable(directories)).toBe(path.join(directory, "pi.cmd"));
+  });
+
+  it("keeps PATH order between directories", () => {
+    const first = createLauncherDirectory("first", ["pi.cmd"]);
+    const second = createLauncherDirectory("second", ["pi.cmd"]);
+
+    expect(
+      findWindowsPiExecutable({ pathDirectories: [first, second], fallbackDirectories: [] })
+    ).toBe(path.join(first, "pi.cmd"));
+  });
+
+  it("ignores empty, duplicated, and quoted PATH entries", () => {
+    setPlatform("win32");
+    const directory = createLauncherDirectory("quoted", ["pi.cmd"]);
+    process.env.PATH = [`"${directory}"`, directory, "", "   "].join(path.delimiter);
+
+    expect(findPiExecutable("")).toBe(path.join(directory, "pi.cmd"));
+  });
+
+  it("searches the known install locations when PATH has no launcher", () => {
+    const empty = createLauncherDirectory("empty", []);
+    const managedInstall = createLauncherDirectory("managed", ["pi.cmd"]);
+
+    expect(
+      findWindowsPiExecutable({
+        pathDirectories: [empty],
+        fallbackDirectories: [managedInstall]
+      })
+    ).toBe(path.join(managedInstall, "pi.cmd"));
+  });
+
+  it("falls back to the bare launcher name when Pi is not installed anywhere", () => {
+    const empty = createLauncherDirectory("nothing", []);
+
+    expect(findWindowsPiExecutable({ pathDirectories: [empty], fallbackDirectories: [] })).toBe(
+      "pi.cmd"
+    );
+  });
+
+  it("still lets a configured Pi executable win on Windows", () => {
+    setPlatform("win32");
+    const configured = path.join(createLauncherDirectory("configured", []), "custom-pi.cmd");
+
+    expect(findPiExecutable(configured)).toBe(configured);
+  });
+
+  it("hands cmd.exe a launcher path that carries its directory", () => {
+    setPlatform("win32");
+    const directory = createLauncherDirectory("invocation", ["pi.cmd"]);
+    const resolved = findWindowsPiExecutable({
+      pathDirectories: [directory],
+      fallbackDirectories: []
+    });
+
+    expect(path.dirname(resolved)).toBe(directory);
+    expect(buildPiProcessInvocation(resolved, ["--version"]).args[3]).toContain(`"${resolved}"`);
   });
 });
