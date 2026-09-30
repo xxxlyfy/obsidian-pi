@@ -251,9 +251,13 @@ describe("native chat polish", () => {
   });
 
   it("preserves a user-set thinking disclosure state when a run completes or fails", () => {
-    expect(viewSource.match(/n\.thinkingUserSet \? n\.thinkingExpanded : false/g)).toHaveLength(2);
-    expect(viewSource).toContain("if (!n.thinkingUserSet) n.thinkingExpanded = false");
-    expect(viewSource).toContain("this.liveThinkingSetExpanded?.(n.thinkingExpanded)");
+    // The completed-run thinking key is written on both the success and failure
+    // paths of the prompt run, which now live partly in the prompt-run stages
+    // module, so read the view and that module together.
+    const runSources = readSources(["ui/PiAgentView.mjs", "ui/view/run-prompt.mjs"]);
+    expect(runSources.match(/n\.thinkingUserSet \? n\.thinkingExpanded : false/g)).toHaveLength(2);
+    expect(runSources).toContain("if (!n.thinkingUserSet) n.thinkingExpanded = false");
+    expect(runSources).toContain("this.liveThinkingSetExpanded?.(n.thinkingExpanded)");
   });
 
   it("keeps guarded bulk deletion directly visible and removes archive-all", () => {

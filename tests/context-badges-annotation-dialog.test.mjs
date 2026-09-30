@@ -2,9 +2,13 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readSources } from "./helpers/view-source.mjs";
 
-// The chat view's badge and prompt wiring spans the view class and the chat DOM
-// builders it delegates to, so read them as one source.
-const viewSource = readSources(["ui/PiAgentView.mjs", "ui/view/chat-dom.mjs"]);
+// The chat view's badge and prompt wiring spans the view class, the prompt-run
+// stages, and the chat DOM builders it delegates to, so read them as one source.
+const viewSource = readSources([
+  "ui/PiAgentView.mjs",
+  "ui/view/run-prompt.mjs",
+  "ui/view/chat-dom.mjs"
+]);
 const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
 const controllerSource = fs.readFileSync(
   "src/annotations/markdown-annotations-controller.mjs",
@@ -40,7 +44,7 @@ describe("pending context badges", () => {
     );
     expect(viewSource).toContain("(item) => item.id !== attachment.id");
     expect(viewSource).toContain("this.plugin.annotationStore.deletePath(contextFile.path)");
-    expect(viewSource).toContain("contextFilePath: annotationSourcePath");
+    expect(viewSource).toContain("contextFilePath: request.annotationSourcePath");
     expect(pluginSource).toContain("this.refreshAnnotationBadges()");
     expect(pluginSource).toContain("Follow every annotation's user-authored request");
   });

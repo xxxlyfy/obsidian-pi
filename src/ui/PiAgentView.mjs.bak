@@ -30,17 +30,13 @@ import { ComposerSuggestions } from "./suggestions.mjs";
 import { ThreadActions } from "./thread-actions.mjs";
 import { getCurrentRunMetadata } from "./view/run-metadata.mjs";
 import {
-  enrichPromptDelivery,
-  requeuePendingPrompt,
-  resolvePromptInput
-} from "./view/run-prompt.mjs";
-import {
   createChatShell,
   createComposer,
   createHeader,
   createMessagesArea
 } from "./view/chat-dom.mjs";
 import {
+  appendTextAttachmentContext,
   bytesToPromptImage,
   createPromptTextAttachment,
   fileToPromptImage,
@@ -755,7 +751,7 @@ export class PiAgentView extends f.ItemView {
     // decision is re-checked after enrichment, because enrichment can await.
     if (this.isThreadRunning(t)) {
       if (queuedId) {
-        requeuePendingPrompt(this, queuedId);
+        requeuePendingPrompt(this, queuedId, false);
       } else {
         this.enqueuePrompt(e, t, images, attachments, annotations, annotationSourcePath);
       }
@@ -771,11 +767,10 @@ export class PiAgentView extends f.ItemView {
     });
     if (!delivery.ok) {
       // A prompt that came from the queue goes back to pending so it is not
-      // lost; a directly-typed one gives its consumed annotations back. The
-      // empty-prompt case is only announced to a queued caller (unchanged).
-      if (queuedId) requeuePendingPrompt(this, queuedId);
+      // lost; a directly-typed one gives its consumed annotations back.
+      if (queuedId) requeuePendingPrompt(this, queuedId, false);
       else restoreUnsentAnnotations();
-      if (delivery.notice || queuedId) new f.Notice(delivery.failure);
+      new f.Notice(delivery.failure);
       return;
     }
     e = delivery.prompt;
@@ -783,7 +778,7 @@ export class PiAgentView extends f.ItemView {
     attachments = delivery.attachments;
     if (this.isThreadRunning(t)) {
       if (queuedId) {
-        requeuePendingPrompt(this, queuedId);
+        requeuePendingPrompt(this, queuedId, false);
       } else {
         this.enqueuePrompt(e, t, images, attachments, annotations, annotationSourcePath);
       }
@@ -947,7 +942,228 @@ export class PiAgentView extends f.ItemView {
     } catch (a) {
       let o = a instanceof Error ? a.message : String(a);
       if (queuedId && !n.accepted) {
-        requeuePendingPrompt(this, queuedId);
+        requeuePendingPrompt(this, queuedId, false);
+        skipQueueDrain = true;
+      } else if (!n.accepted) restoreUnsentAnnotations();
+      if (o === "Pi run canceled.") {
+        new f.Notice("Agent run canceled.");
+        return;
+      }
+      const createdAt = Date.now();
+      this.state.completedThinkingExpansion.set(
+        `${t}:${createdAt}`,
+        n.thinkingUserSet ? n.thinkingExpanded : false
+      );
+      this.plugin.addMessageToThread(t, {
+        role: "assistant",
+        content: `Agent run failed: ${o}`,
+        createdAt,
+        thinking: n.thinking || undefined,
+        toolErrors: n.toolErrors.length > 0 ? n.toolErrors : undefined
+      });
+      if (this.isCurrentThread(t)) {
+        this.renderThreadTitle();
+        this.renderMessages();
+        this.renderToolBadges();
+      }
+      new f.Notice(o);
+      this.notifyRunCompleted(n.notificationRunId, t, "Agent run failed. Click to open the chat.");
+    } finally {
+      this.state.activeRuns.delete(t);
+      this.syncCurrentRunFlags();
+      this.state.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
+      this.state.canceling = this.getCurrentThreadRun()?.canceling === !0;
+      performanceProfiler.markHeap("after");
+      this.clearCoalescedActivity();
+      this.cancelStreamingFlush();
+      this.state.streamingAssistantContent = "";
+      this.state.streamingAnswerDirty = false;
+      this.state.streamingThinkingContent = "";
+      this.state.streamingThinkingDirty = false;
+      this.state.thinkingDisclosureExpanded = false;
+      this.state.thinkingDisclosureUserSet = false;
+      this.state.activityStickyUntil = 0;
+      this.state.pendingActivity = void 0;
+      this.clearPendingActivityTimer();
+      this.state.activeToolCalls.clear();
+      this.state.activityText = "";
+      this.state.activityDetail = "";
+      this.state.currentRunContextUsage = void 0;
+      if (this.isCurrentThread(t)) this.state.nativePiQueue = void 0;
+      this.renderPromptQueue();
+      this.runningThreadId = void 0;
+      this.setRunningState(this.state.running);
+      if (this.isCurrentThread(t)) {
+        this.renderMessages();
+        this.renderToolBadges();
+      }
+      this.renderThreadListIfVisible();
+      this.plugin.endAnnotationProcessingForThread(t);
+      this.plugin.rebuildServicesIfPending();
+      if (!skipQueueDrain) this.runNextQueuedPrompt();
+    }
+  }
+      canceling: false,
+      runner: this.plugin.createPiRunner(t),
+      accepted: false,
+      notificationRunId: `${t}:${this.state.nextDesktopNotificationRunId++}`,
+      skillName: getSkillCommandName(e),
+      thinking: "",
+      thinkingExpanded: false,
+      thinkingUserSet: false,
+      toolErrors: [],
+      // Identifies this run for stale-callback checks.
+      runGeneration: ++this.state.runGenerationCounter
+    };
+    let skipQueueDrain = false;
+    const addUserMessage = () => {
+      if (n.userMessageAdded) return;
+      n.userMessageAdded = true;
+      this.plugin.addMessageToThread(t, {
+        role: "user",
+        content: e || conciseAttachmentSummary(images, attachments),
+        createdAt: Date.now()
+      });
+      if (this.isCurrentThread(t)) {
+        this.renderThreadTitle();
+        this.renderMessages();
+      }
+    };
+    const acknowledgeQueuedDelivery = () => {
+      addUserMessage();
+      if (n.accepted) return;
+      n.accepted = true;
+      if (!queuedId) return;
+      this.state.promptQueue = this.state.promptQueue.filter((item) => item.id !== queuedId);
+      this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
+      this.renderPromptQueue();
+    };
+    this.state.activeRuns.set(t, n);
+    this.syncCurrentRunFlags();
+    this.runningThreadId = t;
+    this.state.running = this.isCurrentThread(t);
+    this.state.canceling = !1;
+    this.state.activityText = "Preparing context";
+    this.state.activityKind = "context";
+    this.state.activityDetail =
+      "Collecting current note, links, backlinks, and explicit attachments.";
+    this.state.activityStickyUntil = 0;
+    this.state.pendingActivity = void 0;
+    this.clearPendingActivityTimer();
+    this.state.activeToolCalls.clear();
+    this.state.currentRunContextUsage = void 0;
+    this.state.streamingAssistantContent = "";
+    this.state.streamingThinkingContent = "";
+    this.state.thinkingDisclosureExpanded = false;
+    this.state.thinkingDisclosureUserSet = false;
+    this.state.stickToBottom = !0;
+    // Heap samples for the run lifecycle (profiler-only).
+    performanceProfiler.markHeap("before");
+    this.plugin.beginAnnotationProcessing(t, annotations);
+    this.setRunningState(this.state.running);
+    if (!queuedId) addUserMessage();
+    this.renderThreadListIfVisible();
+    try {
+      let a = await this.plugin.runPiPrompt(
+        e,
+        {
+          isCanceled: () => n.canceling,
+          onEvent: (o) => {
+            const profiling = performanceProfiler.enabled;
+            const startedAt = profiling ? now() : 0;
+            try {
+              const thinkingDelta = getThinkingDelta(o);
+              if (thinkingDelta) {
+                performanceProfiler.incrementCounter("streamDeltaCount");
+                n.thinking += thinkingDelta;
+                if (!n.thinkingUserSet) n.thinkingExpanded = true;
+              }
+              const toolError = formatToolError(o);
+              if (toolError && n.toolErrors[n.toolErrors.length - 1] !== toolError)
+                n.toolErrors.push(toolError);
+              this.handleSuccessfulToolMutation(o, t);
+              if (!this.isCurrentThread(t)) return;
+              if (this.state.activeRuns.get(t) !== n) {
+                this.noteStaleUiCallback();
+                return;
+              }
+              this.state.streamingThinkingContent = n.thinking;
+              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.state.thinkingDisclosureUserSet = n.thinkingUserSet;
+              this.handleRunEvent(o);
+              if (thinkingDelta) {
+                this.liveThinkingSetExpanded?.(n.thinkingExpanded);
+                this.appendStreamingThinkingDelta(thinkingDelta);
+              }
+            } finally {
+              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
+            }
+          },
+          onTextDelta: (o) => {
+            const profiling = performanceProfiler.enabled;
+            const startedAt = profiling ? now() : 0;
+            try {
+              performanceProfiler.incrementCounter("streamDeltaCount");
+              if (!n.thinkingUserSet) n.thinkingExpanded = false;
+              if (!this.isCurrentThread(t)) return;
+              if (this.state.activeRuns.get(t) !== n) {
+                this.noteStaleUiCallback();
+                return;
+              }
+              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.liveThinkingSetExpanded?.(n.thinkingExpanded);
+              this.appendStreamingDelta(o);
+            } finally {
+              if (profiling) performanceProfiler.recordDuration("uiCallback", now() - startedAt);
+            }
+          },
+          onPromptAccepted: acknowledgeQueuedDelivery
+        },
+        t,
+        n.runner,
+        images,
+        delivery.promptContext
+      );
+      acknowledgeQueuedDelivery();
+      const createdAt = Date.now();
+      const thinkingKey = `${t}:${createdAt}`;
+      this.state.completedThinkingExpansion.set(
+        thinkingKey,
+        n.thinkingUserSet ? n.thinkingExpanded : false
+      );
+      const s = getCurrentRunMetadata(this.plugin.settings, a.runtimeState);
+      this.cancelStreamingFlush();
+      this.state.streamingAssistantContent = "";
+      this.state.streamingAnswerDirty = false;
+      this.state.streamingThinkingContent = "";
+      this.state.streamingThinkingDirty = false;
+      this.streamingItemEl = void 0;
+      this.streamingTextEl = void 0;
+      this.plugin.addMessageToThread(t, {
+        role: "assistant",
+        content: a.finalResponse,
+        createdAt,
+        contextUsage: a.contextUsage,
+        tokenUsage: a.tokenUsage,
+        runMetadata: s,
+        thinking: n.thinking || undefined,
+        toolErrors: n.toolErrors.length > 0 ? n.toolErrors : undefined
+      });
+      if (a.contextUsage && !a.contextCompacted) this.state.invalidatedContextThreadIds.delete(t);
+      if (a.contextCompacted) this.state.invalidatedContextThreadIds.add(t);
+      if (this.isCurrentThread(t)) {
+        this.renderThreadTitle();
+        this.renderMessages();
+        this.renderToolBadges();
+      }
+      this.notifyRunCompleted(n.notificationRunId, t);
+    } catch (a) {
+      let o = a instanceof Error ? a.message : String(a);
+      if (queuedId && !n.accepted) {
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
+          item.id === queuedId ? { ...item, state: "pending" } : item
+        );
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         skipQueueDrain = true;
       } else if (!n.accepted) restoreUnsentAnnotations();
       if (o === "Pi run canceled.") {

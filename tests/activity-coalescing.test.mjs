@@ -241,6 +241,7 @@ describe("PATCH 4 activity coalescing", () => {
     const viewSources = readSources([
       "ui/PiAgentView.mjs",
       "ui/view/chat-dom.mjs",
+      "ui/view/run-prompt.mjs",
       "ui/message-actions.mjs",
       "ui/note-actions.mjs",
       "ui/thread-actions.mjs"

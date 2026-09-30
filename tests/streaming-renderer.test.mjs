@@ -271,10 +271,14 @@ describe("PATCH 3 streaming renderer", () => {
       "utf8"
     );
     // The four cancelStreamingFlush() call sites (onClose, thread switch,
-    // cancel, and run teardown) are frame cancellation owned by the view and the
-    // activity mixin, so count them across both files. A smaller number than
-    // four means a teardown path lost its cleanup.
-    const cancelFlushSources = readSources(["ui/PiAgentView.mjs", "ui/run-activity-state.mjs"]);
+    // cancel, and run teardown) are frame cancellation owned by the view, the
+    // activity mixin, and the prompt-run stages, so count them across all three.
+    // A smaller number than four means a teardown path lost its cleanup.
+    const cancelFlushSources = readSources([
+      "ui/PiAgentView.mjs",
+      "ui/run-activity-state.mjs",
+      "ui/view/run-prompt.mjs"
+    ]);
 
     expect(viewSource).toMatch(/onClose\(\) \{[\s\S]*?this\.cancelStreamingFlush\(\)/);
     expect(viewSource).toMatch(

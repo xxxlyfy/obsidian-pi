@@ -11,10 +11,15 @@ const controllerSource = fs.readFileSync(
   "utf8"
 );
 const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
-// The prompt run's annotation lifecycle spans the view class and the chat DOM
-// builders it delegates to, so read them as one source. Searching both also
-// makes the retired-subsystem assertions below cover the whole view surface.
-const viewSource = readSources(["ui/PiAgentView.mjs", "ui/view/chat-dom.mjs"]);
+// The prompt run's annotation lifecycle spans the view class, the prompt-run
+// stages, and the chat DOM builders it delegates to, so read them as one
+// source. Searching all three also makes the retired-subsystem assertions below
+// cover the whole view surface.
+const viewSource = readSources([
+  "ui/PiAgentView.mjs",
+  "ui/view/run-prompt.mjs",
+  "ui/view/chat-dom.mjs"
+]);
 const queueSource = fs.readFileSync("src/ui/prompt-queue.mjs", "utf8");
 const styles = fs.readFileSync("styles.css", "utf8");
 

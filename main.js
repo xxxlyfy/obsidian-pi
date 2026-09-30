@@ -9203,8 +9203,71 @@ function getDisplayedModel(settings, runtimeState) {
   return model?.displayName || settings.model || "Pi default";
 }
 
-// src/ui/view/chat-dom.mjs
+// src/ui/view/run-prompt.mjs
 var import_obsidian19 = require("obsidian");
+async function resolvePromptInput(view, annotationSourcePath, annotations) {
+  if (annotations !== void 0) return { annotations, failed: false };
+  try {
+    return {
+      annotations: await view.plugin.consumeAnnotationsForPrompt(annotationSourcePath),
+      failed: false
+    };
+  } catch (error) {
+    new import_obsidian19.Notice(error instanceof Error ? error.message : String(error));
+    return { annotations: void 0, failed: true };
+  }
+}
+async function enrichPromptDelivery(view, request) {
+  let delivery;
+  try {
+    delivery = await view.plugin.enrichPromptDelivery(
+      {
+        prompt: request.prompt,
+        images: request.images,
+        attachments: request.attachments,
+        annotations: request.annotations,
+        contextFilePath: request.annotationSourcePath
+      },
+      { mode: "prompt", threadId: request.threadId }
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      notice: true,
+      failure: error instanceof Error ? error.message : String(error)
+    };
+  }
+  const prompt = String(delivery.prompt || "").trim();
+  const images = delivery.images || [];
+  const attachments = delivery.attachments || [];
+  if (delivery.promptContext && attachments.length > 0)
+    delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
+  if (!prompt && images.length === 0 && attachments.length === 0)
+    return {
+      ok: false,
+      failure: "The queued message became empty and was not sent.",
+      notice: false
+    };
+  if (images.length > 0) await view.plugin.ensureModelCatalogLoaded();
+  if (images.length > 0 && !modelSupportsImages(view.plugin.getSelectedModelInfo()))
+    return {
+      ok: false,
+      notice: true,
+      failure: "The selected Pi model does not support image input."
+    };
+  return { ok: true, prompt, images, attachments, promptContext: delivery.promptContext };
+}
+function requeuePendingPrompt(view, queuedId) {
+  if (!queuedId) return;
+  view.state.promptQueue = view.state.promptQueue.map((item) =>
+    item.id === queuedId ? { ...item, state: "pending" } : item
+  );
+  view.plugin.replaceLocalPromptQueue(view.state.promptQueue);
+  view.renderPromptQueue();
+}
+
+// src/ui/view/chat-dom.mjs
+var import_obsidian20 = require("obsidian");
 function createChatShell(container) {
   container.empty();
   container.addClass("pi-agent-view");
@@ -9238,10 +9301,10 @@ function createHeader(root, view) {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": t("view.newChat"), title: t("view.newChat") }
   });
-  (0, import_obsidian19.setIcon)(favoriteButton, "star");
+  (0, import_obsidian20.setIcon)(favoriteButton, "star");
   view.renderThreadFavorite();
   favoriteButton.addEventListener("click", () => view.toggleCurrentThreadFavorite());
-  (0, import_obsidian19.setIcon)(newChatButton, "plus");
+  (0, import_obsidian20.setIcon)(newChatButton, "plus");
   newChatButton.addEventListener("click", (event) => {
     event.preventDefault();
     view.threadMenu?.startNewChat();
@@ -9250,11 +9313,11 @@ function createHeader(root, view) {
     cls: "clickable-icon pi-agent-header-action",
     attr: { "aria-label": t("view.forkChat"), title: t("view.forkChat") }
   });
-  (0, import_obsidian19.setIcon)(forkButton, "split");
+  (0, import_obsidian20.setIcon)(forkButton, "split");
   forkButton.addEventListener("click", (event) => {
     event.preventDefault();
     if (view.isThreadRunning(view.plugin.getCurrentThread().id)) {
-      new import_obsidian19.Notice(t("view.forkBusy"));
+      new import_obsidian20.Notice(t("view.forkBusy"));
       return;
     }
     view.threadMenu?.forkChat();
@@ -9267,7 +9330,7 @@ function createHeader(root, view) {
       title: t("view.manageThreads")
     }
   });
-  (0, import_obsidian19.setIcon)(manageButton, "list");
+  (0, import_obsidian20.setIcon)(manageButton, "list");
   manageButton.addEventListener("click", (event) => {
     event.preventDefault();
     view.showThreadList();
@@ -9353,7 +9416,7 @@ function createComposer(root, view) {
     cls: "clickable-icon pi-agent-send-button",
     attr: { "aria-label": t("send.sendAria"), title: t("send.sendAria") }
   });
-  (0, import_obsidian19.setIcon)(sendButtonEl, "send");
+  (0, import_obsidian20.setIcon)(sendButtonEl, "send");
   sendButtonEl.createSpan({ cls: "pi-agent-control-label", text: t("send.send") });
   sendButtonEl.addEventListener("click", () => view.handleSendButtonClick());
   view.observeComposerBar(composerBarEl);
@@ -10250,87 +10313,40 @@ var PiAgentView = class extends f4.ItemView {
     annotations,
     annotationSourcePath
   ) {
-    if (annotations === void 0) {
-      try {
-        annotations = await this.plugin.consumeAnnotationsForPrompt(annotationSourcePath);
-      } catch (error) {
-        new f4.Notice(error instanceof Error ? error.message : String(error));
-        return;
-      }
-    }
+    const resolvedInput = await resolvePromptInput(this, annotationSourcePath, annotations);
+    if (resolvedInput.failed) return;
+    annotations = resolvedInput.annotations;
     const restoreUnsentAnnotations = () => {
       if (!queuedId && annotations.length > 0) this.plugin.restoreConsumedAnnotations(annotations);
     };
     if (this.isThreadRunning(t2)) {
       if (queuedId) {
-        this.state.promptQueue = this.state.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
-        this.renderPromptQueue();
+        requeuePendingPrompt(this, queuedId);
       } else {
         this.enqueuePrompt(e, t2, images, attachments, annotations, annotationSourcePath);
       }
       return;
     }
-    let delivery;
-    try {
-      delivery = await this.plugin.enrichPromptDelivery(
-        {
-          prompt: e,
-          images,
-          attachments,
-          annotations,
-          contextFilePath: annotationSourcePath
-        },
-        { mode: "prompt", threadId: t2 }
-      );
-    } catch (error) {
-      if (queuedId) {
-        this.state.promptQueue = this.state.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
-        this.renderPromptQueue();
-      } else restoreUnsentAnnotations();
-      new f4.Notice(error instanceof Error ? error.message : String(error));
+    const delivery = await enrichPromptDelivery(this, {
+      prompt: e,
+      images,
+      attachments,
+      annotations,
+      annotationSourcePath,
+      threadId: t2
+    });
+    if (!delivery.ok) {
+      if (queuedId) requeuePendingPrompt(this, queuedId);
+      else restoreUnsentAnnotations();
+      if (delivery.notice || queuedId) new f4.Notice(delivery.failure);
       return;
     }
-    e = String(delivery.prompt || "").trim();
-    images = delivery.images || [];
-    attachments = delivery.attachments || [];
-    if (delivery.promptContext && attachments.length > 0)
-      delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
-    if (!e && images.length === 0 && attachments.length === 0) {
-      if (queuedId) {
-        this.state.promptQueue = this.state.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
-        this.renderPromptQueue();
-        new f4.Notice("The queued message became empty and was not sent.");
-      } else restoreUnsentAnnotations();
-      return;
-    }
-    if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
-    if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
-      if (queuedId) {
-        this.state.promptQueue = this.state.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
-        this.renderPromptQueue();
-      } else restoreUnsentAnnotations();
-      new f4.Notice("The selected Pi model does not support image input.");
-      return;
-    }
+    e = delivery.prompt;
+    images = delivery.images;
+    attachments = delivery.attachments;
     if (this.isThreadRunning(t2)) {
       if (queuedId) {
-        this.state.promptQueue = this.state.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
-        this.renderPromptQueue();
+        requeuePendingPrompt(this, queuedId);
       } else {
         this.enqueuePrompt(e, t2, images, attachments, annotations, annotationSourcePath);
       }
@@ -10493,10 +10509,7 @@ var PiAgentView = class extends f4.ItemView {
     } catch (a) {
       let o = a instanceof Error ? a.message : String(a);
       if (queuedId && !n.accepted) {
-        this.state.promptQueue = this.state.promptQueue.map((item) =>
-          item.id === queuedId ? { ...item, state: "pending" } : item
-        );
-        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
+        requeuePendingPrompt(this, queuedId);
         skipQueueDrain = true;
       } else if (!n.accepted) restoreUnsentAnnotations();
       if (o === "Pi run canceled.") {
