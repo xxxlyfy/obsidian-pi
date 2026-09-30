@@ -2,12 +2,20 @@
 
 ## Unreleased
 
-- Removed repository documentation files (README, PRIVACY, TESTING, RELEASE, AGENTS).
+## 0.0.19
+
+- Split the chat view into focused modules. `PiAgentView` was a single class of 1,269 lines whose DOM building, prompt stages, run teardown, and attachment handling all had to be read together to change any one of them. It is now 549 lines that orchestrate six modules, with no element creation left in it, all five plan targets met, and no behaviour change.
+- Moved the chat view's transient state onto one documented object, so a field has one definition and one type instead of being spread across the instance next to the methods that use it.
+- Gave the chat view one lifecycle for its timers, animation frames, and cleanups, so a rebuilt view can no longer leave an old timer to fire against the new DOM.
+- Removed the class fields that were shadowing the view's mixin methods with `undefined`, which had crashed the view with `this.clearCoalescedActivity is not a function`.
+- Enabled `checkJs` for `src/`, so a misspelled field or a wrong argument is a build failure instead of a runtime surprise inside a stream callback.
 - Removed the retired dry-run mode, including its always-false settings branch and the unreachable non-RPC run path it kept alive. The `/context` diagnostic output no longer reports `run.dryRun`.
 - Consolidated process termination into one shared helper, so a cancelled run always tears down the Pi process tree the same way.
-- Made reasoning labels come from the translation dictionaries only; the English fallback labels no longer live in a second hard-coded map.
 - Routed timers, animation frames, and performance timing through the active window, so a chat view in a popout window measures and schedules correctly.
-- Extended the translation key test to fail on unused keys and mismatched placeholders, not just missing keys.
+- Made reasoning labels come from the translation dictionaries only; the English fallback labels no longer live in a second hard-coded map.
+- Made the Obsidian stress test's cancel check cancel a run that is genuinely mid-stream. It required 1,500 ms of live run time, which a local model never reaches, so the check failed on every release; it now asserts the property it is named for and passes reliably, which is what brings the end-to-end suite to 20/20.
+- Extended the translation key test to fail on unused keys and mismatched placeholders, not just missing keys. The suite grew from 363 to 373 cases.
+- Removed repository documentation files (README, PRIVACY, TESTING, RELEASE, AGENTS).
 
 ## 0.0.18
 
