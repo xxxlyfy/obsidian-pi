@@ -282,7 +282,6 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
       let thinkingChars = 0;
       let everFlushFrame = false;
       let everTimer = false;
-      let liveForMs = 0;
       const waitStartedAt = Date.now();
       while (Date.now() - waitStartedAt < 60000) {
         await sleep(75);
@@ -292,11 +291,14 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
           everFlushFrame = true;
         if (view.state.pendingActivityTimer !== undefined || view.state.activityCoalesceTimer !== undefined)
           everTimer = true;
-        if (view.state.activeRuns.size > 0) liveForMs += 75;
-        // Cancel while the run is live, either once the model is producing text
-        // or after it has been running long enough that cancellation is a real
-        // mid-run cancel rather than a no-op.
-        if (view.state.activeRuns.size > 0 && (answerChars >= 80 || liveForMs >= 1500)) break;
+        // Cancel while the run is live and has started producing tokens: that is
+        // the in-flight state the teardown checks below are about. This used to
+        // also require 1500ms of live run time, which is not something a local
+        // model guarantees -- it can finish a 600-word answer in a few hundred
+        // milliseconds, so the wait timed out and the cancel never happened at
+        // all. The requirement is now the one the assertion is named for: a run
+        // was still registered in activeRuns, with streamed output to discard.
+        if (view.state.activeRuns.size > 0 && answerChars + thinkingChars > 0) break;
       }
       const wasRunningAtCancel = view.state.activeRuns.size > 0;
 
@@ -313,9 +315,9 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
       const midRun = {
         answerChars,
         thinkingChars,
+        streamedChars: answerChars + thinkingChars,
         everFlushFrame,
         everTimer,
-        liveForMs,
         wasRunningAtCancel,
         activeRuns: view.state.activeRuns.size,
         plantedTimer,
@@ -362,7 +364,9 @@ await withRenderer(async ({ evaluate, consoleErrors }) => {
       !cancelCheck.skipped &&
         mid.wasRunningAtCancel === true &&
         mid.activeRuns >= 1 &&
-        mid.liveForMs >= 1500,
+        // The run must have been mid-stream, not just registered: otherwise the
+        // streaming teardown this check protects is not exercised at all.
+        mid.streamedChars > 0,
       JSON.stringify(mid)
     );
     record(
