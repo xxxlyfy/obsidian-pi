@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readSources } from "./helpers/view-source.mjs";
 
 vi.mock("obsidian", () => ({
   FuzzySuggestModal: class {},
@@ -70,7 +71,9 @@ function createIconHost() {
   };
 }
 
-const viewSource = readFileSync(new URL("../src/ui/PiAgentView.mjs", import.meta.url), "utf8");
+// The composer bar is created by the chat DOM builders and configured by the
+// view, so the retired-expansion assertions below have to cover both.
+const viewSource = readSources(["ui/PiAgentView.mjs", "ui/view/chat-dom.mjs"]);
 const threadListSource = readFileSync(
   new URL("../src/ui/thread-list-view.mjs", import.meta.url),
   "utf8"

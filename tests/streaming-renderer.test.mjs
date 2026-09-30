@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createViewLifecycle } from "../src/ui/view/lifecycle.mjs";
+import { readSources } from "./helpers/view-source.mjs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const markdownRender = vi.fn().mockResolvedValue(undefined);
@@ -264,12 +265,19 @@ describe("PATCH 3 streaming renderer", () => {
       new URL("../src/ui/run-activity-state.mjs", import.meta.url),
       "utf8"
     );
+    // The four cancelStreamingFlush() call sites (onClose, thread switch,
+    // cancel, and run teardown) are frame cancellation owned by the view and the
+    // activity mixin, so count them across both files. A smaller number than
+    // four means a teardown path lost its cleanup.
+    const cancelFlushSources = readSources(["ui/PiAgentView.mjs", "ui/run-activity-state.mjs"]);
 
     expect(viewSource).toMatch(/onClose\(\) \{[\s\S]*?this\.cancelStreamingFlush\(\)/);
     expect(viewSource).toMatch(
       /resetTransientRunUiState\(\) \{[\s\S]*?this\.cancelStreamingFlush\(\)/
     );
-    expect(viewSource.match(/this\.cancelStreamingFlush\(\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(
+      cancelFlushSources.match(/this\.cancelStreamingFlush\(\)/g)?.length
+    ).toBeGreaterThanOrEqual(4);
     expect(activitySource).toContain("this.finalizeStreamingContent?.() === true");
   });
 

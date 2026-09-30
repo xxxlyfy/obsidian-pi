@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readSources } from "./helpers/view-source.mjs";
 
 const extensionSource = fs.readFileSync(
   "src/annotations/markdown-annotation-extension.mjs",
@@ -10,7 +11,10 @@ const controllerSource = fs.readFileSync(
   "utf8"
 );
 const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
-const viewSource = fs.readFileSync("src/ui/PiAgentView.mjs", "utf8");
+// The prompt run's annotation lifecycle spans the view class and the chat DOM
+// builders it delegates to, so read them as one source. Searching both also
+// makes the retired-subsystem assertions below cover the whole view surface.
+const viewSource = readSources(["ui/PiAgentView.mjs", "ui/view/chat-dom.mjs"]);
 const queueSource = fs.readFileSync("src/ui/prompt-queue.mjs", "utf8");
 const styles = fs.readFileSync("styles.css", "utf8");
 

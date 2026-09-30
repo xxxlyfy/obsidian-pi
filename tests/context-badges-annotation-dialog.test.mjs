@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readSources } from "./helpers/view-source.mjs";
 
-const viewSource = fs.readFileSync("src/ui/PiAgentView.mjs", "utf8");
+// The chat view's badge and prompt wiring spans the view class and the chat DOM
+// builders it delegates to, so read them as one source.
+const viewSource = readSources(["ui/PiAgentView.mjs", "ui/view/chat-dom.mjs"]);
 const pluginSource = fs.readFileSync("src/plugin/PiAgentPlugin.mjs", "utf8");
 const controllerSource = fs.readFileSync(
   "src/annotations/markdown-annotations-controller.mjs",

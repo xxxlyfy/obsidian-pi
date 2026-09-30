@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as activityMethods from "../src/ui/run-activity-state.mjs";
 import { createViewLifecycle } from "../src/ui/view/lifecycle.mjs";
 import { performanceProfiler } from "../src/shared/performance-profiler.mjs";
+import { readSources } from "./helpers/view-source.mjs";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -222,16 +222,26 @@ describe("PATCH 4 activity coalescing", () => {
   });
 
   it("owns its lifecycle cleanup in the view and guards delayed run callbacks", () => {
-    const viewSource = readFileSync(new URL("../src/ui/PiAgentView.mjs", import.meta.url), "utf8");
+    // These are the view's own teardown and stale-callback wiring. The view
+    // class, the collaborators it builds, and the chat DOM builders are read
+    // together because they share one prototype at runtime: a `this.<field>`
+    // access is the same object no matter which of them declares the method.
+    const viewSources = readSources([
+      "ui/PiAgentView.mjs",
+      "ui/view/chat-dom.mjs",
+      "ui/message-actions.mjs",
+      "ui/note-actions.mjs",
+      "ui/thread-actions.mjs"
+    ]);
 
-    expect(viewSource).toMatch(/onClose\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
-    expect(viewSource).toMatch(
+    expect(viewSources).toMatch(/onClose\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
+    expect(viewSources).toMatch(
       /resetTransientRunUiState\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/
     );
-    expect(viewSource).toMatch(/cancelCurrentRun\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
-    expect(viewSource).toContain("this.threadGeneration += 1");
-    expect(viewSource).toContain("runGeneration: ++this.runGenerationCounter");
-    expect(viewSource).toContain("if (this.activeRuns.get(t) !== n)");
-    expect(viewSource).toContain("isStaleUiCallback(guard)");
+    expect(viewSources).toMatch(/cancelCurrentRun\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
+    expect(viewSources).toContain("this.threadGeneration += 1");
+    expect(viewSources).toContain("runGeneration: ++this.runGenerationCounter");
+    expect(viewSources).toContain("if (this.activeRuns.get(t) !== n)");
+    expect(viewSources).toContain("isStaleUiCallback(guard)");
   });
 });
