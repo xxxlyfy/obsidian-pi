@@ -34,8 +34,9 @@ describe("pending context badges", () => {
     expect(viewSource).not.toContain("includeActiveNote");
     expect(pluginSource).not.toContain("includeActiveNote");
     expect(viewSource).toContain("if (!onRemove) return");
-    expect(viewSource).toContain(
-      "this.composerImages = this.composerImages.filter((item) => item.id !== image.id)"
+    // Prettier wraps this assignment, so match the shape rather than one line.
+    expect(viewSource).toMatch(
+      /this\.state\.composerImages = this\.state\.composerImages\.filter\(\s*\(item\) => item\.id !== image\.id/
     );
     expect(viewSource).toContain("(item) => item.id !== attachment.id");
     expect(viewSource).toContain("this.plugin.annotationStore.deletePath(contextFile.path)");

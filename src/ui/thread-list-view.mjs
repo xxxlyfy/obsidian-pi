@@ -127,7 +127,7 @@ export function renderThreadListRow(e, t, n) {
 
 export async function deleteChats() {
   const threads = this.plugin.listThreads({ includeArchived: true });
-  const plan = planBulkThreadDeletion(threads, [...this.activeRuns.keys()]);
+  const plan = planBulkThreadDeletion(threads, [...this.state.activeRuns.keys()]);
   if (plan.all.deleteCount === 0) {
     new f.Notice(
       tr(plan.all.skippedCount > 0 ? "threadList.deleteBlocked" : "threadList.deleteNothing")

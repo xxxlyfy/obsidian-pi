@@ -30,28 +30,32 @@ export function enqueuePrompt(
     threadId
   });
   if (!item) return;
-  this.promptQueue = this.plugin.getLocalPromptQueue();
+  this.state.promptQueue = this.plugin.getLocalPromptQueue();
   this.renderPromptQueue();
   this.syncCurrentRunFlags();
-  this.setRunningState(this.running);
+  this.setRunningState(this.state.running);
   new f.Notice(
-    this.promptQueue.length === 1
+    this.state.promptQueue.length === 1
       ? "Message queued. It will send after the current run finishes."
-      : `${this.promptQueue.length} messages queued.`
+      : `${this.state.promptQueue.length} messages queued.`
   );
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function runNextQueuedPrompt() {
-  if (this.canceling || this.plugin.isLocalPromptQueuePaused() || this.steeringPromptIds.size > 0)
+  if (
+    this.state.canceling ||
+    this.plugin.isLocalPromptQueuePaused() ||
+    this.state.steeringPromptIds.size > 0
+  )
     return;
-  const item = nextDeliverablePrompt(this.promptQueue, (threadId) =>
+  const item = nextDeliverablePrompt(this.state.promptQueue, (threadId) =>
     this.isThreadRunning(threadId)
   );
   if (!item) return;
-  const claimed = claimLocalPrompt(this.promptQueue, item.id, "delivering");
-  this.promptQueue = claimed.queue;
-  this.plugin.replaceLocalPromptQueue(this.promptQueue);
+  const claimed = claimLocalPrompt(this.state.promptQueue, item.id, "delivering");
+  this.state.promptQueue = claimed.queue;
+  this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
   this.renderPromptQueue();
   this.runPrompt(
     item.prompt,
@@ -66,22 +70,22 @@ export function runNextQueuedPrompt() {
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function removeQueuedPrompt(id) {
-  const item = this.promptQueue.find((candidate) => candidate.id === id);
+  const item = this.state.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending") return;
   this.plugin.restoreConsumedAnnotations(item.annotations);
-  this.promptQueue = removeLocalPrompt(this.promptQueue, id);
-  this.plugin.replaceLocalPromptQueue(this.promptQueue);
+  this.state.promptQueue = removeLocalPrompt(this.state.promptQueue, id);
+  this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
   this.renderPromptQueue();
-  this.setRunningState(this.running);
+  this.setRunningState(this.state.running);
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function retrieveQueuedPrompt(id) {
-  const item = this.promptQueue.find((candidate) => candidate.id === id);
+  const item = this.state.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending" || !this.isCurrentThread(item.threadId)) return;
   if (this.inputEl) this.inputEl.value = item.prompt;
-  this.composerImages = item.images.map((image) => ({ ...image }));
-  this.composerAttachments = item.attachments.map((attachment) => ({ ...attachment }));
+  this.state.composerImages = item.images.map((image) => ({ ...image }));
+  this.state.composerAttachments = item.attachments.map((attachment) => ({ ...attachment }));
   this.removeQueuedPrompt(id);
   this.renderComposerImages();
   this.resizeInput();
@@ -93,15 +97,15 @@ export function retrieveQueuedPrompt(id) {
  * @param {string} id
  */
 export async function steerQueuedPrompt(id) {
-  const taken = takeLocalPrompt(this.promptQueue, id);
+  const taken = takeLocalPrompt(this.state.promptQueue, id);
   if (!taken.item) return;
-  this.promptQueue = taken.queue;
-  this.steeringPromptIds.add(id);
+  this.state.promptQueue = taken.queue;
+  this.state.steeringPromptIds.add(id);
   this.plugin.beginLocalPromptSteering(taken.item);
-  this.plugin.replaceLocalPromptQueue(this.promptQueue);
+  this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
   this.renderPromptQueue();
   try {
-    const run = this.activeRuns.get(taken.item.threadId);
+    const run = this.state.activeRuns.get(taken.item.threadId);
     if (!run) throw new Error("This run already settled; the message will run normally.");
     const delivery = await this.plugin.enrichPromptDelivery(taken.item, {
       mode: "steer",
@@ -115,15 +119,15 @@ export async function steerQueuedPrompt(id) {
       : delivery.prompt;
     const steerPrompt = appendTextAttachmentContext(formattedPrompt, delivery.attachments);
     await run.runner.steer(steerPrompt, delivery.images);
-    if (this.activeRuns.get(taken.item.threadId) === run)
+    if (this.state.activeRuns.get(taken.item.threadId) === run)
       this.plugin.beginAnnotationProcessing(taken.item.threadId, taken.item.annotations);
     new f.Notice("Steering message sent to Pi.");
   } catch (error) {
-    this.promptQueue = restoreLocalPrompt(this.promptQueue, taken.item, taken.index);
-    this.plugin.replaceLocalPromptQueue(this.promptQueue);
+    this.state.promptQueue = restoreLocalPrompt(this.state.promptQueue, taken.item, taken.index);
+    this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
     new f.Notice(error instanceof Error ? error.message : String(error));
   } finally {
-    this.steeringPromptIds.delete(id);
+    this.state.steeringPromptIds.delete(id);
     this.plugin.finishLocalPromptSteering(id);
   }
   this.renderPromptQueue();
@@ -135,11 +139,11 @@ export function renderPromptQueue() {
   if (!this.promptQueueEl) return;
   const root = this.promptQueueEl;
   root.empty();
-  root.toggleClass("is-empty", this.promptQueue.length === 0 && !this.nativePiQueue);
-  if (this.promptQueue.length > 0) {
+  root.toggleClass("is-empty", this.state.promptQueue.length === 0 && !this.state.nativePiQueue);
+  if (this.state.promptQueue.length > 0) {
     const heading = root.createDiv({ cls: "pi-agent-prompt-queue-heading" });
     heading.createSpan({
-      text: `${this.promptQueue.length} local follow-up${this.promptQueue.length === 1 ? "" : "s"}`
+      text: `${this.state.promptQueue.length} local follow-up${this.state.promptQueue.length === 1 ? "" : "s"}`
     });
     heading.createSpan({
       cls: "pi-agent-prompt-queue-hint",
@@ -155,18 +159,18 @@ export function renderPromptQueue() {
         this.runNextQueuedPrompt();
       });
       addTextAction(controls, "Discard all saved follow-ups", "Discard", () => {
-        for (const item of this.promptQueue)
+        for (const item of this.state.promptQueue)
           this.plugin.restoreConsumedAnnotations(item.annotations);
-        this.promptQueue = [];
+        this.state.promptQueue = [];
         this.plugin.resumeLocalPromptQueue();
         this.plugin.replaceLocalPromptQueue([]);
         this.renderPromptQueue();
-        this.setRunningState(this.running);
+        this.setRunningState(this.state.running);
       });
     }
   }
 
-  for (const item of this.promptQueue) {
+  for (const item of this.state.promptQueue) {
     const row = root.createDiv({ cls: "pi-agent-prompt-queue-item" });
     row.setAttr("aria-label", `Queued follow-up: ${item.prompt || attachmentSummary(item)}`);
     const content = row.createDiv({ cls: "pi-agent-prompt-queue-content" });
@@ -200,12 +204,12 @@ export function renderPromptQueue() {
     );
   }
 
-  if (this.nativePiQueue?.steering?.length || this.nativePiQueue?.followUp?.length) {
+  if (this.state.nativePiQueue?.steering?.length || this.state.nativePiQueue?.followUp?.length) {
     const native = root.createDiv({ cls: "pi-agent-native-queue", attr: { role: "status" } });
     native.createDiv({ cls: "pi-agent-prompt-queue-heading", text: "Already handed to Pi" });
     const handedToPi = [
-      ...(this.nativePiQueue.steering || []),
-      ...(this.nativePiQueue.followUp || [])
+      ...(this.state.nativePiQueue.steering || []),
+      ...(this.state.nativePiQueue.followUp || [])
     ];
     for (const text of handedToPi)
       native.createDiv({ cls: "pi-agent-prompt-queue-text", text: String(text) });

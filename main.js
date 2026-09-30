@@ -7106,26 +7106,30 @@ function enqueuePrompt(
     threadId
   });
   if (!item) return;
-  this.promptQueue = this.plugin.getLocalPromptQueue();
+  this.state.promptQueue = this.plugin.getLocalPromptQueue();
   this.renderPromptQueue();
   this.syncCurrentRunFlags();
-  this.setRunningState(this.running);
+  this.setRunningState(this.state.running);
   new f.Notice(
-    this.promptQueue.length === 1
+    this.state.promptQueue.length === 1
       ? "Message queued. It will send after the current run finishes."
-      : `${this.promptQueue.length} messages queued.`
+      : `${this.state.promptQueue.length} messages queued.`
   );
 }
 function runNextQueuedPrompt() {
-  if (this.canceling || this.plugin.isLocalPromptQueuePaused() || this.steeringPromptIds.size > 0)
+  if (
+    this.state.canceling ||
+    this.plugin.isLocalPromptQueuePaused() ||
+    this.state.steeringPromptIds.size > 0
+  )
     return;
-  const item = nextDeliverablePrompt(this.promptQueue, (threadId) =>
+  const item = nextDeliverablePrompt(this.state.promptQueue, (threadId) =>
     this.isThreadRunning(threadId)
   );
   if (!item) return;
-  const claimed = claimLocalPrompt(this.promptQueue, item.id, "delivering");
-  this.promptQueue = claimed.queue;
-  this.plugin.replaceLocalPromptQueue(this.promptQueue);
+  const claimed = claimLocalPrompt(this.state.promptQueue, item.id, "delivering");
+  this.state.promptQueue = claimed.queue;
+  this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
   this.renderPromptQueue();
   this.runPrompt(
     item.prompt,
@@ -7138,35 +7142,35 @@ function runNextQueuedPrompt() {
   );
 }
 function removeQueuedPrompt(id) {
-  const item = this.promptQueue.find((candidate) => candidate.id === id);
+  const item = this.state.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending") return;
   this.plugin.restoreConsumedAnnotations(item.annotations);
-  this.promptQueue = removeLocalPrompt(this.promptQueue, id);
-  this.plugin.replaceLocalPromptQueue(this.promptQueue);
+  this.state.promptQueue = removeLocalPrompt(this.state.promptQueue, id);
+  this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
   this.renderPromptQueue();
-  this.setRunningState(this.running);
+  this.setRunningState(this.state.running);
 }
 function retrieveQueuedPrompt(id) {
-  const item = this.promptQueue.find((candidate) => candidate.id === id);
+  const item = this.state.promptQueue.find((candidate) => candidate.id === id);
   if (!item || item.state !== "pending" || !this.isCurrentThread(item.threadId)) return;
   if (this.inputEl) this.inputEl.value = item.prompt;
-  this.composerImages = item.images.map((image) => ({ ...image }));
-  this.composerAttachments = item.attachments.map((attachment) => ({ ...attachment }));
+  this.state.composerImages = item.images.map((image) => ({ ...image }));
+  this.state.composerAttachments = item.attachments.map((attachment) => ({ ...attachment }));
   this.removeQueuedPrompt(id);
   this.renderComposerImages();
   this.resizeInput();
   this.inputEl?.focus();
 }
 async function steerQueuedPrompt(id) {
-  const taken = takeLocalPrompt(this.promptQueue, id);
+  const taken = takeLocalPrompt(this.state.promptQueue, id);
   if (!taken.item) return;
-  this.promptQueue = taken.queue;
-  this.steeringPromptIds.add(id);
+  this.state.promptQueue = taken.queue;
+  this.state.steeringPromptIds.add(id);
   this.plugin.beginLocalPromptSteering(taken.item);
-  this.plugin.replaceLocalPromptQueue(this.promptQueue);
+  this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
   this.renderPromptQueue();
   try {
-    const run = this.activeRuns.get(taken.item.threadId);
+    const run = this.state.activeRuns.get(taken.item.threadId);
     if (!run) throw new Error("This run already settled; the message will run normally.");
     const delivery = await this.plugin.enrichPromptDelivery(taken.item, {
       mode: "steer",
@@ -7180,15 +7184,15 @@ async function steerQueuedPrompt(id) {
       : delivery.prompt;
     const steerPrompt = appendTextAttachmentContext(formattedPrompt, delivery.attachments);
     await run.runner.steer(steerPrompt, delivery.images);
-    if (this.activeRuns.get(taken.item.threadId) === run)
+    if (this.state.activeRuns.get(taken.item.threadId) === run)
       this.plugin.beginAnnotationProcessing(taken.item.threadId, taken.item.annotations);
     new f.Notice("Steering message sent to Pi.");
   } catch (error) {
-    this.promptQueue = restoreLocalPrompt(this.promptQueue, taken.item, taken.index);
-    this.plugin.replaceLocalPromptQueue(this.promptQueue);
+    this.state.promptQueue = restoreLocalPrompt(this.state.promptQueue, taken.item, taken.index);
+    this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
     new f.Notice(error instanceof Error ? error.message : String(error));
   } finally {
-    this.steeringPromptIds.delete(id);
+    this.state.steeringPromptIds.delete(id);
     this.plugin.finishLocalPromptSteering(id);
   }
   this.renderPromptQueue();
@@ -7198,11 +7202,11 @@ function renderPromptQueue() {
   if (!this.promptQueueEl) return;
   const root = this.promptQueueEl;
   root.empty();
-  root.toggleClass("is-empty", this.promptQueue.length === 0 && !this.nativePiQueue);
-  if (this.promptQueue.length > 0) {
+  root.toggleClass("is-empty", this.state.promptQueue.length === 0 && !this.state.nativePiQueue);
+  if (this.state.promptQueue.length > 0) {
     const heading = root.createDiv({ cls: "pi-agent-prompt-queue-heading" });
     heading.createSpan({
-      text: `${this.promptQueue.length} local follow-up${this.promptQueue.length === 1 ? "" : "s"}`
+      text: `${this.state.promptQueue.length} local follow-up${this.state.promptQueue.length === 1 ? "" : "s"}`
     });
     heading.createSpan({
       cls: "pi-agent-prompt-queue-hint",
@@ -7218,17 +7222,17 @@ function renderPromptQueue() {
         this.runNextQueuedPrompt();
       });
       addTextAction(controls, "Discard all saved follow-ups", "Discard", () => {
-        for (const item of this.promptQueue)
+        for (const item of this.state.promptQueue)
           this.plugin.restoreConsumedAnnotations(item.annotations);
-        this.promptQueue = [];
+        this.state.promptQueue = [];
         this.plugin.resumeLocalPromptQueue();
         this.plugin.replaceLocalPromptQueue([]);
         this.renderPromptQueue();
-        this.setRunningState(this.running);
+        this.setRunningState(this.state.running);
       });
     }
   }
-  for (const item of this.promptQueue) {
+  for (const item of this.state.promptQueue) {
     const row = root.createDiv({ cls: "pi-agent-prompt-queue-item" });
     row.setAttr("aria-label", `Queued follow-up: ${item.prompt || attachmentSummary(item)}`);
     const content = row.createDiv({ cls: "pi-agent-prompt-queue-content" });
@@ -7261,12 +7265,12 @@ function renderPromptQueue() {
       item.state !== "pending"
     );
   }
-  if (this.nativePiQueue?.steering?.length || this.nativePiQueue?.followUp?.length) {
+  if (this.state.nativePiQueue?.steering?.length || this.state.nativePiQueue?.followUp?.length) {
     const native = root.createDiv({ cls: "pi-agent-native-queue", attr: { role: "status" } });
     native.createDiv({ cls: "pi-agent-prompt-queue-heading", text: "Already handed to Pi" });
     const handedToPi = [
-      ...(this.nativePiQueue.steering || []),
-      ...(this.nativePiQueue.followUp || [])
+      ...(this.state.nativePiQueue.steering || []),
+      ...(this.state.nativePiQueue.followUp || [])
     ];
     for (const text of handedToPi)
       native.createDiv({ cls: "pi-agent-prompt-queue-text", text: String(text) });
@@ -7593,7 +7597,7 @@ function renderThreadListRow(e, t2, n) {
 }
 async function deleteChats() {
   const threads = this.plugin.listThreads({ includeArchived: true });
-  const plan = planBulkThreadDeletion(threads, [...this.activeRuns.keys()]);
+  const plan = planBulkThreadDeletion(threads, [...this.state.activeRuns.keys()]);
   if (plan.all.deleteCount === 0) {
     new f2.Notice(
       t(plan.all.skippedCount > 0 ? "threadList.deleteBlocked" : "threadList.deleteNothing")
@@ -7887,9 +7891,9 @@ function renderMessages() {
   this.syncCurrentRunFlags();
   if (!this.messagesEl) return;
   let e = this.messagesEl,
-    t2 = this.stickToBottom,
+    t2 = this.state.stickToBottom,
     n = e.scrollTop;
-  this.isRenderingMessages = true;
+  this.state.isRenderingMessages = true;
   this.activityItemEl = void 0;
   this.activityDetailsEl = void 0;
   this.activityLabelEl = void 0;
@@ -7902,14 +7906,15 @@ function renderMessages() {
   if (s.length === 0) {
     this.renderEmptyState();
     this.restoreMessagesScroll(e, t2, n);
-    this.isRenderingMessages = false;
+    this.state.isRenderingMessages = false;
     return;
   }
   for (let a = 0; a < s.length; a++) this.renderMessage(s[a], a);
-  if (this.running && this.streamingAssistantContent) this.renderStreamingAssistantMessage();
-  else if (this.running && this.activityText) this.renderActivityMessage();
+  if (this.state.running && this.state.streamingAssistantContent)
+    this.renderStreamingAssistantMessage();
+  else if (this.state.running && this.state.activityText) this.renderActivityMessage();
   this.restoreMessagesScroll(e, t2, n);
-  this.isRenderingMessages = false;
+  this.state.isRenderingMessages = false;
 }
 function restoreMessagesScroll(e, t2, n) {
   t2 ? (e.scrollTop = e.scrollHeight) : (e.scrollTop = Math.min(n, e.scrollHeight));
@@ -7935,8 +7940,8 @@ function renderMessage(e, t2) {
     this.renderThinkingDisclosure(
       response,
       e.thinking,
-      this.completedThinkingExpansion.get(key) === true,
-      (expanded) => this.completedThinkingExpansion.set(key, expanded),
+      this.state.completedThinkingExpansion.get(key) === true,
+      (expanded) => this.state.completedThinkingExpansion.set(key, expanded),
       false,
       "Thinking",
       (container, content) => this.renderPlainMessageContent(container, content)
@@ -8010,17 +8015,17 @@ function renderPlainMessageContent(container, content) {
   performanceProfiler.incrementCounter("markdownRenderCount");
   container.empty();
   container.addClass("markdown-rendered");
-  this.messageRenderComponentByElement ??= /* @__PURE__ */ new WeakMap();
-  const previousComponent = this.messageRenderComponentByElement.get(container);
+  this.state.messageRenderComponentByElement ??= /* @__PURE__ */ new WeakMap();
+  const previousComponent = this.state.messageRenderComponentByElement.get(container);
   if (previousComponent) {
     previousComponent.unload();
-    const previousIndex = this.messageRenderComponents.indexOf(previousComponent);
-    if (previousIndex !== -1) this.messageRenderComponents.splice(previousIndex, 1);
+    const previousIndex = this.state.messageRenderComponents.indexOf(previousComponent);
+    if (previousIndex !== -1) this.state.messageRenderComponents.splice(previousIndex, 1);
   }
   const component = new f3.Component();
   component.load();
-  this.messageRenderComponents.push(component);
-  this.messageRenderComponentByElement.set(container, component);
+  this.state.messageRenderComponents.push(component);
+  this.state.messageRenderComponentByElement.set(container, component);
   return f3.MarkdownRenderer.render(
     this.plugin.app,
     content || "",
@@ -8033,8 +8038,8 @@ function renderPlainMessageContent(container, content) {
   });
 }
 function unloadMessageRenderComponents() {
-  for (const component of this.messageRenderComponents.splice(0)) component.unload();
-  this.messageRenderComponentByElement = /* @__PURE__ */ new WeakMap();
+  for (const component of this.state.messageRenderComponents.splice(0)) component.unload();
+  this.state.messageRenderComponentByElement = /* @__PURE__ */ new WeakMap();
 }
 function renderStreamingAssistantMessage() {
   if (!this.messagesEl) return;
@@ -8049,11 +8054,11 @@ function renderStreamingAssistantMessage() {
   });
   const rendered = this.renderThinkingDisclosure(
     response,
-    this.streamingThinkingContent,
-    this.thinkingDisclosureExpanded,
+    this.state.streamingThinkingContent,
+    this.state.thinkingDisclosureExpanded,
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
-    this.activityText || "Responding",
+    this.state.activityText || "Responding",
     void 0,
     true
   );
@@ -8064,20 +8069,20 @@ function renderStreamingAssistantMessage() {
   this.liveThinkingSetExpanded = rendered.setExpanded;
   this.streamingTextEl = response.createDiv({ cls: "pi-agent-message-answer" });
   this.renderStreamingAnswer();
-  this.streamingAnswerDirty = false;
-  this.streamingThinkingDirty = false;
+  this.state.streamingAnswerDirty = false;
+  this.state.streamingThinkingDirty = false;
 }
 function renderStreamingAnswer() {
   const container = this.streamingTextEl;
   if (!container || container.isConnected === false) return false;
-  container.setText(this.streamingAssistantContent || "");
+  container.setText(this.state.streamingAssistantContent || "");
   container.createSpan({ cls: "pi-agent-typing-cursor", text: "\u258C" });
   return true;
 }
 function renderStreamingThinking() {
   const container = this.liveThinkingTextEl;
   if (!container || container.isConnected === false) return false;
-  container.setText(this.streamingThinkingContent || "");
+  container.setText(this.state.streamingThinkingContent || "");
   return true;
 }
 function renderActivityMessage() {
@@ -8090,11 +8095,11 @@ function renderActivityMessage() {
   const response = item.createDiv({ cls: "pi-agent-message-content" });
   const rendered = this.renderThinkingDisclosure(
     response,
-    this.streamingThinkingContent,
-    this.streamingThinkingContent ? this.thinkingDisclosureExpanded : false,
+    this.state.streamingThinkingContent,
+    this.state.streamingThinkingContent ? this.state.thinkingDisclosureExpanded : false,
     (expanded) => this.setLiveThinkingExpanded(expanded),
     true,
-    this.activityText || "Thinking",
+    this.state.activityText || "Thinking",
     void 0
   );
   this.activityDetailsEl = rendered.details;
@@ -8102,73 +8107,73 @@ function renderActivityMessage() {
   this.liveThinkingDetailsEl = rendered.details;
   this.liveThinkingTextEl = rendered.text;
   this.liveThinkingSetExpanded = rendered.setExpanded;
-  this.streamingAnswerDirty = false;
-  this.streamingThinkingDirty = false;
+  this.state.streamingAnswerDirty = false;
+  this.state.streamingThinkingDirty = false;
 }
 function appendStreamingDelta(delta) {
   if (!delta) return;
-  this.activityText = "Responding";
-  this.activityKind = "answer";
-  this.activityDetail = "";
-  this.activityStickyUntil = 0;
-  this.pendingActivity = void 0;
+  this.state.activityText = "Responding";
+  this.state.activityKind = "answer";
+  this.state.activityDetail = "";
+  this.state.activityStickyUntil = 0;
+  this.state.pendingActivity = void 0;
   this.clearPendingActivityTimer();
-  this.streamingAssistantContent += delta;
-  this.streamingAnswerDirty = true;
+  this.state.streamingAssistantContent += delta;
+  this.state.streamingAnswerDirty = true;
   this.updateActivityDom();
   this.scheduleStreamingFlush();
 }
 function appendStreamingThinkingDelta(delta) {
   if (!delta) return;
-  this.streamingThinkingDirty = true;
+  this.state.streamingThinkingDirty = true;
   this.scheduleStreamingFlush();
 }
 function scheduleStreamingFlush() {
-  if (this.streamingFlushRaf !== void 0) return;
-  this.streamingFlushGuard = this.captureUiCallbackGuard?.();
-  this.streamingFlushRaf = requestFrame(() => {
+  if (this.state.streamingFlushRaf !== void 0) return;
+  this.state.streamingFlushGuard = this.captureUiCallbackGuard?.();
+  this.state.streamingFlushRaf = requestFrame(() => {
     this.releaseStreamingFlushCleanup();
-    this.streamingFlushRaf = void 0;
-    const guard = this.streamingFlushGuard;
-    this.streamingFlushGuard = void 0;
+    this.state.streamingFlushRaf = void 0;
+    const guard = this.state.streamingFlushGuard;
+    this.state.streamingFlushGuard = void 0;
     if (guard && this.isStaleUiCallback?.(guard)) {
-      this.streamingAnswerDirty = false;
-      this.streamingThinkingDirty = false;
+      this.state.streamingAnswerDirty = false;
+      this.state.streamingThinkingDirty = false;
       this.noteStaleUiCallback?.();
       return;
     }
     this.flushStreaming();
   });
-  const frameHandle = this.streamingFlushRaf;
-  this.streamingFlushCleanup = this.lifecycle?.addCleanup(() => cancelFrame(frameHandle));
+  const frameHandle = this.state.streamingFlushRaf;
+  this.state.streamingFlushCleanup = this.lifecycle?.addCleanup(() => cancelFrame(frameHandle));
 }
 function cancelStreamingFlush() {
   this.releaseStreamingFlushCleanup();
-  this.streamingFlushRaf = void 0;
-  this.streamingFlushGuard = void 0;
+  this.state.streamingFlushRaf = void 0;
+  this.state.streamingFlushGuard = void 0;
 }
 function releaseStreamingFlushCleanup() {
-  const release = this.streamingFlushCleanup;
-  this.streamingFlushCleanup = void 0;
+  const release = this.state.streamingFlushCleanup;
+  this.state.streamingFlushCleanup = void 0;
   if (typeof release === "function") release();
 }
 function flushStreaming() {
-  if (!this.streamingAnswerDirty && !this.streamingThinkingDirty) return;
+  if (!this.state.streamingAnswerDirty && !this.state.streamingThinkingDirty) return;
   const profiler = performanceProfiler;
   const profiling = profiler.enabled;
   const startedAt = profiling ? now() : 0;
   try {
-    if (this.streamingAnswerDirty && !this.renderStreamingAnswer()) {
+    if (this.state.streamingAnswerDirty && !this.renderStreamingAnswer()) {
       this.renderMessages();
       return;
     }
-    if (this.streamingThinkingDirty && !this.renderStreamingThinking()) {
+    if (this.state.streamingThinkingDirty && !this.renderStreamingThinking()) {
       this.renderMessages();
       return;
     }
-    this.streamingAnswerDirty = false;
-    this.streamingThinkingDirty = false;
-    if (this.messagesEl && this.stickToBottom)
+    this.state.streamingAnswerDirty = false;
+    this.state.streamingThinkingDirty = false;
+    if (this.messagesEl && this.state.stickToBottom)
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   } finally {
     if (profiling) {
@@ -8178,8 +8183,8 @@ function flushStreaming() {
   }
 }
 function finalizeStreamingContent() {
-  const answer = this.streamingAssistantContent || "";
-  const thinking = this.streamingThinkingContent || "";
+  const answer = this.state.streamingAssistantContent || "";
+  const thinking = this.state.streamingThinkingContent || "";
   this.cancelStreamingFlush();
   if (!answer && !thinking) return false;
   const answerContainer = this.streamingTextEl;
@@ -8193,10 +8198,10 @@ function finalizeStreamingContent() {
   const previousScrollTop = messagesEl?.scrollTop;
   if (hasThinkingDom) this.renderPlainMessageContent(thinkingContainer, thinking);
   if (hasAnswerDom) this.renderPlainMessageContent(answerContainer, answer);
-  this.streamingAnswerDirty = false;
-  this.streamingThinkingDirty = false;
+  this.state.streamingAnswerDirty = false;
+  this.state.streamingThinkingDirty = false;
   if (messagesEl) {
-    if (this.stickToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (this.state.stickToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
     else if (previousScrollTop !== void 0)
       messagesEl.scrollTop = Math.min(previousScrollTop, messagesEl.scrollHeight);
   }
@@ -8417,7 +8422,7 @@ var ACTIVITY_COALESCE_MS = 150;
 function setActivity(e, t2, n = "") {
   let s = Date.now(),
     a = isStickyActivityKind(t2),
-    o = !a && !shouldBypassActivityStickiness(t2) && s < this.activityStickyUntil;
+    o = !a && !shouldBypassActivityStickiness(t2) && s < this.state.activityStickyUntil;
   if (o) {
     this.queuePendingActivity(e, t2, n);
     return;
@@ -8425,13 +8430,16 @@ function setActivity(e, t2, n = "") {
   this.applyActivity(e, t2, n, a ? s + ACTIVITY_STICKY_MS : 0);
 }
 function applyActivity(e, t2, n = "", s = 0) {
-  let a = this.activityText === e && this.activityKind === t2 && this.activityDetail === n;
-  this.activityText = e;
-  this.activityKind = t2;
-  this.activityDetail = n;
-  this.activityStickyUntil = s;
+  let a =
+    this.state.activityText === e &&
+    this.state.activityKind === t2 &&
+    this.state.activityDetail === n;
+  this.state.activityText = e;
+  this.state.activityKind = t2;
+  this.state.activityDetail = n;
+  this.state.activityStickyUntil = s;
   if (s) {
-    this.pendingActivity = void 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
   }
   if (a) return;
@@ -8445,69 +8453,73 @@ function applyActivity(e, t2, n = "", s = 0) {
   }
 }
 function queuePendingActivity(e, t2, n = "") {
-  this.pendingActivity = { text: e, kind: t2, detail: n };
+  this.state.pendingActivity = { text: e, kind: t2, detail: n };
   this.schedulePendingActivity();
 }
 function schedulePendingActivity() {
-  if (this.pendingActivityTimer) return;
-  this.pendingActivityGuard = this.captureUiCallbackGuard?.();
-  let e = Math.max(0, this.activityStickyUntil - Date.now());
-  this.pendingActivityTimer = this.lifecycle?.setTimer(() => {
-    this.pendingActivityTimer = void 0;
+  if (this.state.pendingActivityTimer) return;
+  this.state.pendingActivityGuard = this.captureUiCallbackGuard?.();
+  let e = Math.max(0, this.state.activityStickyUntil - Date.now());
+  this.state.pendingActivityTimer = this.lifecycle?.setTimer(() => {
+    this.state.pendingActivityTimer = void 0;
     this.flushPendingActivity();
   }, e);
 }
 function clearPendingActivityTimer() {
-  this.lifecycle?.clearTimer(this.pendingActivityTimer);
-  this.pendingActivityTimer = void 0;
-  this.pendingActivityGuard = void 0;
+  this.lifecycle?.clearTimer(this.state.pendingActivityTimer);
+  this.state.pendingActivityTimer = void 0;
+  this.state.pendingActivityGuard = void 0;
 }
 function flushPendingActivity() {
-  if (this.isStaleUiCallback?.(this.pendingActivityGuard)) {
-    this.pendingActivity = void 0;
-    this.pendingActivityGuard = void 0;
+  if (this.isStaleUiCallback?.(this.state.pendingActivityGuard)) {
+    this.state.pendingActivity = void 0;
+    this.state.pendingActivityGuard = void 0;
     this.noteStaleUiCallback?.();
     return;
   }
-  if (!this.pendingActivity || Date.now() < this.activityStickyUntil) {
-    this.pendingActivity && this.schedulePendingActivity();
+  if (!this.state.pendingActivity || Date.now() < this.state.activityStickyUntil) {
+    this.state.pendingActivity && this.schedulePendingActivity();
     return;
   }
-  if (!this.running || this.streamingAssistantContent || this.activeToolCalls.size > 0) {
-    this.pendingActivity = void 0;
-    this.pendingActivityGuard = void 0;
+  if (
+    !this.state.running ||
+    this.state.streamingAssistantContent ||
+    this.state.activeToolCalls.size > 0
+  ) {
+    this.state.pendingActivity = void 0;
+    this.state.pendingActivityGuard = void 0;
     return;
   }
-  let e = this.pendingActivity;
-  this.pendingActivity = void 0;
-  this.pendingActivityGuard = void 0;
+  let e = this.state.pendingActivity;
+  this.state.pendingActivity = void 0;
+  this.state.pendingActivityGuard = void 0;
   this.applyActivity(e.text, e.kind, e.detail);
 }
 function scheduleCoalescedActivity() {
   performanceProfiler.incrementCounter("activityCoalescedEvents");
-  this.activityCoalescePending = true;
-  if (this.activityCoalesceTimer) return;
-  this.activityCoalesceGuard = this.captureUiCallbackGuard?.();
-  this.activityCoalesceTimer = this.lifecycle?.setTimer(() => {
-    this.activityCoalesceTimer = void 0;
+  this.state.activityCoalescePending = true;
+  if (this.state.activityCoalesceTimer) return;
+  this.state.activityCoalesceGuard = this.captureUiCallbackGuard?.();
+  this.state.activityCoalesceTimer = this.lifecycle?.setTimer(() => {
+    this.state.activityCoalesceTimer = void 0;
     this.flushCoalescedActivity();
   }, ACTIVITY_COALESCE_MS);
 }
 function clearCoalescedActivity() {
-  this.lifecycle?.clearTimer(this.activityCoalesceTimer);
-  this.activityCoalesceTimer = void 0;
-  this.activityCoalescePending = false;
-  this.activityCoalesceGuard = void 0;
+  this.lifecycle?.clearTimer(this.state.activityCoalesceTimer);
+  this.state.activityCoalesceTimer = void 0;
+  this.state.activityCoalescePending = false;
+  this.state.activityCoalesceGuard = void 0;
 }
 function flushCoalescedActivity() {
-  if (this.activityCoalesceTimer) {
-    this.lifecycle?.clearTimer(this.activityCoalesceTimer);
-    this.activityCoalesceTimer = void 0;
+  if (this.state.activityCoalesceTimer) {
+    this.lifecycle?.clearTimer(this.state.activityCoalesceTimer);
+    this.state.activityCoalesceTimer = void 0;
   }
-  const pending = this.activityCoalescePending === true;
-  const guard = this.activityCoalesceGuard;
-  this.activityCoalescePending = false;
-  this.activityCoalesceGuard = void 0;
+  const pending = this.state.activityCoalescePending === true;
+  const guard = this.state.activityCoalesceGuard;
+  this.state.activityCoalescePending = false;
+  this.state.activityCoalesceGuard = void 0;
   if (!pending) return;
   if (this.isStaleUiCallback?.(guard)) {
     this.noteStaleUiCallback?.();
@@ -8519,8 +8531,8 @@ function flushCoalescedActivity() {
 }
 function updateActivityDom() {
   if (
-    !this.running ||
-    !this.activityText ||
+    !this.state.running ||
+    !this.state.activityText ||
     !this.activityItemEl ||
     !this.activityDetailsEl ||
     !this.activityLabelEl ||
@@ -8528,12 +8540,12 @@ function updateActivityDom() {
     !this.activityDetailsEl.isConnected
   )
     return false;
-  const label = this.activityText.toUpperCase();
-  const title = this.activityDetail || this.activityText;
+  const label = this.state.activityText.toUpperCase();
+  const title = this.state.activityDetail || this.state.activityText;
   if (this.activityDetailsEl.getAttribute("title") !== title)
     this.activityDetailsEl.setAttr("title", title);
-  if (this.activityLabelEl.getAttribute("aria-label") !== `${this.activityText} in progress`)
-    this.activityLabelEl.setAttr("aria-label", `${this.activityText} in progress`);
+  if (this.activityLabelEl.getAttribute("aria-label") !== `${this.state.activityText} in progress`)
+    this.activityLabelEl.setAttr("aria-label", `${this.state.activityText} in progress`);
   if (this.activityLabelEl.textContent !== label) this.activityLabelEl.setText(label);
   return true;
 }
@@ -8541,8 +8553,8 @@ function captureContextUsage(e) {
   let t2 = extractEventTokenUsage(e == null ? void 0 : e.raw),
     n = this.getContextUsageForTokens(t2);
   if (n) {
-    if (this.runningThreadId) this.invalidatedContextThreadIds.delete(this.runningThreadId);
-    this.currentRunContextUsage = { contextUsage: n, tokenUsage: t2 };
+    if (this.runningThreadId) this.state.invalidatedContextThreadIds.delete(this.runningThreadId);
+    this.state.currentRunContextUsage = { contextUsage: n, tokenUsage: t2 };
     this.updateActivityDom();
     this.renderToolBadges();
   }
@@ -8558,7 +8570,7 @@ function handleRunEvent(e) {
   let t2 = this.normalizeRunEventType(e.type);
   this.captureContextUsage(e);
   if (t2 === "queue_update") {
-    this.nativePiQueue = {
+    this.state.nativePiQueue = {
       steering: Array.isArray(e.raw?.steering) ? e.raw.steering : [],
       followUp: Array.isArray(e.raw?.followUp) ? e.raw.followUp : []
     };
@@ -8574,14 +8586,14 @@ function handleRunEvent(e) {
     return;
   }
   if (t2 === "compaction_start") {
-    let n = this.currentRunContextUsage?.contextUsage
+    let n = this.state.currentRunContextUsage?.contextUsage
       ? formatContextUsageTitle(
-          this.currentRunContextUsage.contextUsage,
-          this.currentRunContextUsage.tokenUsage
+          this.state.currentRunContextUsage.contextUsage,
+          this.state.currentRunContextUsage.tokenUsage
         )
       : "";
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
-    this.currentRunContextUsage = void 0;
+    if (this.runningThreadId) this.state.invalidatedContextThreadIds.add(this.runningThreadId);
+    this.state.currentRunContextUsage = void 0;
     this.renderToolBadges();
     this.setActivity("Compacting context", "context", n);
     return;
@@ -8597,8 +8609,8 @@ function handleRunEvent(e) {
       return;
     }
     let n = e.raw && e.raw.result ? e.raw.result.tokensBefore : void 0;
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
-    this.currentRunContextUsage = {
+    if (this.runningThreadId) this.state.invalidatedContextThreadIds.add(this.runningThreadId);
+    this.state.currentRunContextUsage = {
       compacted: true,
       contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow
     };
@@ -8632,7 +8644,7 @@ function handleRunEvent(e) {
     t2 === "thinking_delta" ||
     t2 === "thinking_end"
   ) {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.state.streamingAssistantContent || this.setActivity("Thinking", "thinking");
     return;
   }
   if (t2 === "toolcall_start" || t2 === "toolcall_delta" || t2 === "toolcall_end") {
@@ -8655,12 +8667,12 @@ function handleRunEvent(e) {
   if (t2 === "tool_end") {
     this.clearCoalescedActivity?.();
     this.untrackActiveTool(e);
-    if (this.activeToolCalls.size > 0) {
+    if (this.state.activeToolCalls.size > 0) {
       let n = this.formatActiveToolStatus();
       this.setActivity(n.label, n.kind, n.detail);
       return;
     }
-    this.streamingAssistantContent ||
+    this.state.streamingAssistantContent ||
       this.setActivity(
         e.isError ? "Tool failed" : "Reviewing results",
         e.isError ? "error" : "thinking"
@@ -8672,19 +8684,19 @@ function handleRunEvent(e) {
     return;
   }
   if (t2 === "message_end" || t2 === "turn_end") {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.state.streamingAssistantContent || this.setActivity("Thinking", "thinking");
     return;
   }
   if (t2 === "agent_end") {
     this.clearCoalescedActivity?.();
     const finalizedStreaming = this.finalizeStreamingContent?.() === true;
     performanceProfiler.markHeap("during");
-    this.activityText = "";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
+    this.state.activityText = "";
+    this.state.activityDetail = "";
+    this.state.activityStickyUntil = 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
+    this.state.activeToolCalls.clear();
     if (!finalizedStreaming) this.renderMessages();
   }
 }
@@ -8699,13 +8711,13 @@ function trackActiveTool(e) {
   let t2 = getToolEventKey(e),
     n = String(e.toolName || e.message || "tool"),
     s = e.toolArgs || {};
-  this.activeToolCalls.set(t2, { name: n, args: s });
+  this.state.activeToolCalls.set(t2, { name: n, args: s });
 }
 function untrackActiveTool(e) {
-  this.activeToolCalls.delete(getToolEventKey(e));
+  this.state.activeToolCalls.delete(getToolEventKey(e));
 }
 function formatActiveToolStatus() {
-  let e = [...this.activeToolCalls.values()];
+  let e = [...this.state.activeToolCalls.values()];
   if (e.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };
   if (e.length === 1) return formatToolStatus(e[0].name, e[0].args, "running");
   let t2 = e.map((n) => formatToolStatus(n.name, n.args, "running"));
@@ -9265,9 +9277,9 @@ function createHeader(root, view) {
 function createMessagesArea(root, view) {
   const messagesEl = root.createDiv({ cls: "pi-agent-messages" });
   messagesEl.addEventListener("scroll", () => {
-    if (view.isRenderingMessages) return;
+    if (view.state.isRenderingMessages) return;
     const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
-    view.stickToBottom = distance < 40;
+    view.state.stickToBottom = distance < 40;
   });
   messagesEl.addEventListener("click", (event) => view.handleMessageLinkClick(event), true);
   return { messagesEl };
@@ -9291,7 +9303,7 @@ function createComposer(root, view) {
     }
     if (event.key === "Escape") {
       view.syncCurrentRunFlags();
-      if (view.running) {
+      if (view.state.running) {
         event.preventDefault();
         view.cancelCurrentRun();
       }
@@ -9306,7 +9318,7 @@ function createComposer(root, view) {
     view.syncCurrentRunFlags();
     view.resizeInput();
     view.suggestions?.update();
-    view.setRunningState(view.running);
+    view.setRunningState(view.state.running);
   });
   inputEl.addEventListener("click", () => {
     view.suggestions?.update();
@@ -9591,14 +9603,15 @@ var PiAgentView = class extends f4.ItemView {
     super(e);
     this.plugin = t2;
     this.lifecycle = createViewLifecycle();
-    Object.assign(this, createViewState(t2));
+    this.state = createViewState(t2);
   }
-  // The mixin modules above add their methods, and some of their state, to this
-  // instance at runtime via Object.assign at the end of this file. There is no
-  // way to declare that composition in plain JavaScript without creating real
-  // instance fields, which would shadow those methods with `undefined`. This
-  // file therefore opts out of `checkJs`; see `tsconfig.src.json` for the
-  // checked surface and `src/ui/view/view-surface.mjs` for the shared shape.
+  // The mixin modules above add their methods to this class's prototype at
+  // runtime via Object.assign at the end of this file; their state is created
+  // above and reached through `this.state`. There is no way to declare that
+  // composition in plain JavaScript without creating real instance fields,
+  // which would shadow those methods with `undefined`. This file therefore opts
+  // out of `checkJs`; see `tsconfig.src.json` for the checked surface and
+  // `src/ui/view/view-surface.mjs` for the shape those mixins share.
   getViewType() {
     return PI_AGENT_VIEW_TYPE;
   }
@@ -9611,7 +9624,7 @@ var PiAgentView = class extends f4.ItemView {
   async onOpen() {
     this.registerDomEvent(document, "keydown", (e) => {
       this.syncCurrentRunFlags();
-      if (e.key === "Escape" && this.running) {
+      if (e.key === "Escape" && this.state.running) {
         e.preventDefault();
         this.cancelCurrentRun();
       }
@@ -9637,7 +9650,7 @@ var PiAgentView = class extends f4.ItemView {
     this.renderedThreadId = currentThreadId;
     this.syncCurrentRunFlags();
     this.createViewCollaborators();
-    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.state.promptQueue = this.plugin.getLocalPromptQueue();
     this.runSettings = new RunSettingsControls(this.plugin);
     const { root } = createChatShell(this.containerEl.children[1]);
     Object.assign(this, createHeader(root, this));
@@ -9645,7 +9658,7 @@ var PiAgentView = class extends f4.ItemView {
     Object.assign(this, createComposer(root, this));
     this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
     this.renderMessages();
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
   }
   createViewCollaborators() {
     this.noteActions = new NoteActions(this.plugin, {
@@ -9694,7 +9707,7 @@ var PiAgentView = class extends f4.ItemView {
         this.resetTransientRunUiState();
         this.syncCurrentRunFlags();
         this.renderPromptQueue();
-        this.setRunningState(this.running);
+        this.setRunningState(this.state.running);
       }
     });
   }
@@ -9704,8 +9717,8 @@ var PiAgentView = class extends f4.ItemView {
     this.promptQueueEl = void 0;
     this.extensionWidgetsAboveEl = void 0;
     this.extensionWidgetsBelowEl = void 0;
-    this.composerImages = [];
-    this.composerAttachments = [];
+    this.state.composerImages = [];
+    this.state.composerAttachments = [];
     this.imageInputEl = void 0;
     this.sendButtonEl = void 0;
     this.composerBarEl = void 0;
@@ -9763,19 +9776,21 @@ var PiAgentView = class extends f4.ItemView {
           this.renderToolBadges();
         }
       });
-    for (const image of this.composerImages)
+    for (const image of this.state.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
         removeLabel: `Remove ${image.fileName || "image"}`,
         onRemove: () => {
-          this.composerImages = this.composerImages.filter((item) => item.id !== image.id);
+          this.state.composerImages = this.state.composerImages.filter(
+            (item) => item.id !== image.id
+          );
           this.renderComposerImages();
         }
       });
-    for (const attachment of this.composerAttachments)
+    for (const attachment of this.state.composerAttachments)
       this.renderPendingBadge(badges, attachment.fileName, {
         removeLabel: `Remove ${attachment.fileName}`,
         onRemove: () => {
-          this.composerAttachments = this.composerAttachments.filter(
+          this.state.composerAttachments = this.state.composerAttachments.filter(
             (item) => item.id !== attachment.id
           );
           this.renderComposerImages();
@@ -9833,9 +9848,9 @@ var PiAgentView = class extends f4.ItemView {
   }
   getDisplayedContextUsage() {
     var n;
-    if (this.currentRunContextUsage) return this.currentRunContextUsage;
+    if (this.state.currentRunContextUsage) return this.state.currentRunContextUsage;
     let e = this.plugin.getCurrentThread();
-    if (this.invalidatedContextThreadIds.has(e.id))
+    if (this.state.invalidatedContextThreadIds.has(e.id))
       return { compacted: true, contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow };
     let t2 = (n = e.messages) != null ? n : [];
     for (let s = t2.length - 1; s >= 0; s--) {
@@ -9913,8 +9928,8 @@ var PiAgentView = class extends f4.ItemView {
   async submitInput() {
     var t2, n;
     let e = (t2 = this.inputEl) == null ? void 0 : t2.value.trim();
-    let images = this.composerImages.map((image) => ({ ...image }));
-    let attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
+    let images = this.state.composerImages.map((image) => ({ ...image }));
+    let attachments = this.state.composerAttachments.map((attachment) => ({ ...attachment }));
     const contextFilePath = this.plugin.getCurrentContextFile()?.path;
     if (!e && images.length === 0 && attachments.length === 0) return;
     if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
@@ -9923,23 +9938,23 @@ var PiAgentView = class extends f4.ItemView {
       return;
     }
     if (this.inputEl) this.inputEl.value = "";
-    this.composerImages = [];
-    this.composerAttachments = [];
+    this.state.composerImages = [];
+    this.state.composerAttachments = [];
     this.renderComposerImages();
     if ((n = this.suggestions) != null) n.close();
     this.resizeInput();
     this.syncCurrentRunFlags();
     this.runPrompt(e, void 0, images, void 0, attachments, void 0, contextFilePath);
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
   }
   handleSendButtonClick() {
     var t2;
     this.syncCurrentRunFlags();
     if (
-      this.running &&
+      this.state.running &&
       !((t2 = this.inputEl) != null && t2.value.trim()) &&
-      this.composerImages.length === 0 &&
-      this.composerAttachments.length === 0
+      this.state.composerImages.length === 0 &&
+      this.state.composerAttachments.length === 0
     ) {
       this.cancelCurrentRun();
       return;
@@ -9951,7 +9966,7 @@ var PiAgentView = class extends f4.ItemView {
     let e = this.getCurrentThreadRun();
     if (e && !e.canceling) {
       e.canceling = true;
-      this.canceling = true;
+      this.state.canceling = true;
       this.clearCoalescedActivity();
       this.setActivity("Canceling", "finishing");
       this.plugin.cancelPiRun(e.runner);
@@ -10059,7 +10074,7 @@ var PiAgentView = class extends f4.ItemView {
         if (SUPPORTED_IMAGE_MIME_TYPES.includes(file.type)) await this.addImageFiles([file]);
         else {
           const remaining =
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.composerAttachments);
+            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments);
           const bytes = new Uint8Array(
             await file.slice(0, Math.min(file.size, remaining + 4)).arrayBuffer()
           );
@@ -10074,14 +10089,14 @@ var PiAgentView = class extends f4.ItemView {
             },
             remaining
           );
-          this.composerAttachments.push(attachment);
+          this.state.composerAttachments.push(attachment);
         }
       } catch (error) {
         new f4.Notice(error instanceof Error ? error.message : String(error));
       }
     }
     this.renderComposerImages();
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
   }
   async addVaultFile(file) {
     try {
@@ -10091,7 +10106,7 @@ var PiAgentView = class extends f4.ItemView {
         await this.plugin.ensureModelCatalogLoaded();
         if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
           throw new Error("The selected Pi model does not support image input.");
-        this.composerImages.push(
+        this.state.composerImages.push(
           bytesToPromptImage({
             bytes,
             fileName: file.name,
@@ -10101,7 +10116,7 @@ var PiAgentView = class extends f4.ItemView {
           })
         );
       } else {
-        this.composerAttachments.push(
+        this.state.composerAttachments.push(
           createPromptTextAttachment(
             /** @type {any} */
             {
@@ -10111,12 +10126,12 @@ var PiAgentView = class extends f4.ItemView {
               source: "vault",
               path: file.path
             },
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.composerAttachments)
+            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments)
           )
         );
       }
       this.renderComposerImages();
-      this.setRunningState(this.running);
+      this.setRunningState(this.state.running);
     } catch (error) {
       new f4.Notice(error instanceof Error ? error.message : String(error));
     }
@@ -10131,9 +10146,9 @@ var PiAgentView = class extends f4.ItemView {
     }
     try {
       const images = await Promise.all(imageFiles.map(fileToPromptImage));
-      this.composerImages.push(...images);
+      this.state.composerImages.push(...images);
       this.renderComposerImages();
-      this.setRunningState(this.running);
+      this.setRunningState(this.state.running);
     } catch (error) {
       new f4.Notice(error instanceof Error ? error.message : String(error));
     }
@@ -10166,29 +10181,29 @@ var PiAgentView = class extends f4.ItemView {
     return this.getCurrentThreadId() === e;
   }
   isThreadRunning(e) {
-    return this.activeRuns.has(e);
+    return this.state.activeRuns.has(e);
   }
   getCurrentThreadRun() {
     let e = this.getCurrentThreadId();
-    return e ? this.activeRuns.get(e) : void 0;
+    return e ? this.state.activeRuns.get(e) : void 0;
   }
   syncCurrentRunFlags() {
     let e = this.getCurrentThreadRun();
-    this.running = !!e;
-    this.canceling = e?.canceling === true;
+    this.state.running = !!e;
+    this.state.canceling = e?.canceling === true;
   }
   // Unified stale-view / stale-run guard for delayed UI
   // callbacks (activity timers, streaming rAF, pending sticky state).
   captureUiCallbackGuard() {
     return {
       runGeneration: this.getCurrentThreadRun()?.runGeneration,
-      threadGeneration: this.threadGeneration,
+      threadGeneration: this.state.threadGeneration,
       threadId: this.getCurrentThreadId()
     };
   }
   isStaleUiCallback(guard) {
     if (!guard) return false;
-    if (guard.threadGeneration !== this.threadGeneration) return true;
+    if (guard.threadGeneration !== this.state.threadGeneration) return true;
     if (guard.threadId !== this.getCurrentThreadId()) return true;
     if (guard.runGeneration !== void 0) {
       const run = this.getCurrentThreadRun();
@@ -10200,23 +10215,23 @@ var PiAgentView = class extends f4.ItemView {
     performanceProfiler.incrementCounter("staleCallbackPrevented");
   }
   resetTransientRunUiState() {
-    this.threadGeneration += 1;
+    this.state.threadGeneration += 1;
     this.clearCoalescedActivity();
-    this.activityText = "";
-    this.activityKind = "thinking";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
+    this.state.activityText = "";
+    this.state.activityKind = "thinking";
+    this.state.activityDetail = "";
+    this.state.activityStickyUntil = 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
+    this.state.activeToolCalls.clear();
+    this.state.currentRunContextUsage = void 0;
     this.cancelStreamingFlush();
-    this.streamingAssistantContent = "";
-    this.streamingAnswerDirty = false;
-    this.streamingThinkingContent = "";
-    this.streamingThinkingDirty = false;
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
+    this.state.streamingAssistantContent = "";
+    this.state.streamingAnswerDirty = false;
+    this.state.streamingThinkingContent = "";
+    this.state.streamingThinkingDirty = false;
+    this.state.thinkingDisclosureExpanded = false;
+    this.state.thinkingDisclosureUserSet = false;
     this.streamingItemEl = void 0;
     this.streamingTextEl = void 0;
   }
@@ -10248,10 +10263,10 @@ var PiAgentView = class extends f4.ItemView {
     };
     if (this.isThreadRunning(t2)) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else {
         this.enqueuePrompt(e, t2, images, attachments, annotations, annotationSourcePath);
@@ -10272,10 +10287,10 @@ var PiAgentView = class extends f4.ItemView {
       );
     } catch (error) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else restoreUnsentAnnotations();
       new f4.Notice(error instanceof Error ? error.message : String(error));
@@ -10288,10 +10303,10 @@ var PiAgentView = class extends f4.ItemView {
       delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
     if (!e && images.length === 0 && attachments.length === 0) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
         new f4.Notice("The queued message became empty and was not sent.");
       } else restoreUnsentAnnotations();
@@ -10300,10 +10315,10 @@ var PiAgentView = class extends f4.ItemView {
     if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
     if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else restoreUnsentAnnotations();
       new f4.Notice("The selected Pi model does not support image input.");
@@ -10311,10 +10326,10 @@ var PiAgentView = class extends f4.ItemView {
     }
     if (this.isThreadRunning(t2)) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else {
         this.enqueuePrompt(e, t2, images, attachments, annotations, annotationSourcePath);
@@ -10325,14 +10340,14 @@ var PiAgentView = class extends f4.ItemView {
       canceling: false,
       runner: this.plugin.createPiRunner(t2),
       accepted: false,
-      notificationRunId: `${t2}:${this.nextDesktopNotificationRunId++}`,
+      notificationRunId: `${t2}:${this.state.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(e),
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
       toolErrors: [],
       // Identifies this run for stale-callback checks.
-      runGeneration: ++this.runGenerationCounter
+      runGeneration: ++this.state.runGenerationCounter
     };
     let skipQueueDrain = false;
     const addUserMessage = () => {
@@ -10353,31 +10368,32 @@ var PiAgentView = class extends f4.ItemView {
       if (n.accepted) return;
       n.accepted = true;
       if (!queuedId) return;
-      this.promptQueue = this.promptQueue.filter((item) => item.id !== queuedId);
-      this.plugin.replaceLocalPromptQueue(this.promptQueue);
+      this.state.promptQueue = this.state.promptQueue.filter((item) => item.id !== queuedId);
+      this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
       this.renderPromptQueue();
     };
-    this.activeRuns.set(t2, n);
+    this.state.activeRuns.set(t2, n);
     this.syncCurrentRunFlags();
     this.runningThreadId = t2;
-    this.running = this.isCurrentThread(t2);
-    this.canceling = false;
-    this.activityText = "Preparing context";
-    this.activityKind = "context";
-    this.activityDetail = "Collecting current note, links, backlinks, and explicit attachments.";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
+    this.state.running = this.isCurrentThread(t2);
+    this.state.canceling = false;
+    this.state.activityText = "Preparing context";
+    this.state.activityKind = "context";
+    this.state.activityDetail =
+      "Collecting current note, links, backlinks, and explicit attachments.";
+    this.state.activityStickyUntil = 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
-    this.streamingAssistantContent = "";
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.stickToBottom = true;
+    this.state.activeToolCalls.clear();
+    this.state.currentRunContextUsage = void 0;
+    this.state.streamingAssistantContent = "";
+    this.state.streamingThinkingContent = "";
+    this.state.thinkingDisclosureExpanded = false;
+    this.state.thinkingDisclosureUserSet = false;
+    this.state.stickToBottom = true;
     performanceProfiler.markHeap("before");
     this.plugin.beginAnnotationProcessing(t2, annotations);
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
     if (!queuedId) addUserMessage();
     this.renderThreadListIfVisible();
     try {
@@ -10400,13 +10416,13 @@ var PiAgentView = class extends f4.ItemView {
                 n.toolErrors.push(toolError);
               this.handleSuccessfulToolMutation(o, t2);
               if (!this.isCurrentThread(t2)) return;
-              if (this.activeRuns.get(t2) !== n) {
+              if (this.state.activeRuns.get(t2) !== n) {
                 this.noteStaleUiCallback();
                 return;
               }
-              this.streamingThinkingContent = n.thinking;
-              this.thinkingDisclosureExpanded = n.thinkingExpanded;
-              this.thinkingDisclosureUserSet = n.thinkingUserSet;
+              this.state.streamingThinkingContent = n.thinking;
+              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.state.thinkingDisclosureUserSet = n.thinkingUserSet;
               this.handleRunEvent(o);
               if (thinkingDelta) {
                 this.liveThinkingSetExpanded?.(n.thinkingExpanded);
@@ -10423,11 +10439,11 @@ var PiAgentView = class extends f4.ItemView {
               performanceProfiler.incrementCounter("streamDeltaCount");
               if (!n.thinkingUserSet) n.thinkingExpanded = false;
               if (!this.isCurrentThread(t2)) return;
-              if (this.activeRuns.get(t2) !== n) {
+              if (this.state.activeRuns.get(t2) !== n) {
                 this.noteStaleUiCallback();
                 return;
               }
-              this.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
               this.liveThinkingSetExpanded?.(n.thinkingExpanded);
               this.appendStreamingDelta(o);
             } finally {
@@ -10444,16 +10460,16 @@ var PiAgentView = class extends f4.ItemView {
       acknowledgeQueuedDelivery();
       const createdAt = Date.now();
       const thinkingKey = `${t2}:${createdAt}`;
-      this.completedThinkingExpansion.set(
+      this.state.completedThinkingExpansion.set(
         thinkingKey,
         n.thinkingUserSet ? n.thinkingExpanded : false
       );
       const s = getCurrentRunMetadata(this.plugin.settings, a.runtimeState);
       this.cancelStreamingFlush();
-      this.streamingAssistantContent = "";
-      this.streamingAnswerDirty = false;
-      this.streamingThinkingContent = "";
-      this.streamingThinkingDirty = false;
+      this.state.streamingAssistantContent = "";
+      this.state.streamingAnswerDirty = false;
+      this.state.streamingThinkingContent = "";
+      this.state.streamingThinkingDirty = false;
       this.streamingItemEl = void 0;
       this.streamingTextEl = void 0;
       this.plugin.addMessageToThread(t2, {
@@ -10466,8 +10482,8 @@ var PiAgentView = class extends f4.ItemView {
         thinking: n.thinking || void 0,
         toolErrors: n.toolErrors.length > 0 ? n.toolErrors : void 0
       });
-      if (a.contextUsage && !a.contextCompacted) this.invalidatedContextThreadIds.delete(t2);
-      if (a.contextCompacted) this.invalidatedContextThreadIds.add(t2);
+      if (a.contextUsage && !a.contextCompacted) this.state.invalidatedContextThreadIds.delete(t2);
+      if (a.contextCompacted) this.state.invalidatedContextThreadIds.add(t2);
       if (this.isCurrentThread(t2)) {
         this.renderThreadTitle();
         this.renderMessages();
@@ -10477,10 +10493,10 @@ var PiAgentView = class extends f4.ItemView {
     } catch (a) {
       let o = a instanceof Error ? a.message : String(a);
       if (queuedId && !n.accepted) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         skipQueueDrain = true;
       } else if (!n.accepted) restoreUnsentAnnotations();
       if (o === "Pi run canceled.") {
@@ -10488,7 +10504,7 @@ var PiAgentView = class extends f4.ItemView {
         return;
       }
       const createdAt = Date.now();
-      this.completedThinkingExpansion.set(
+      this.state.completedThinkingExpansion.set(
         `${t2}:${createdAt}`,
         n.thinkingUserSet ? n.thinkingExpanded : false
       );
@@ -10507,30 +10523,30 @@ var PiAgentView = class extends f4.ItemView {
       new f4.Notice(o);
       this.notifyRunCompleted(n.notificationRunId, t2, "Agent run failed. Click to open the chat.");
     } finally {
-      this.activeRuns.delete(t2);
+      this.state.activeRuns.delete(t2);
       this.syncCurrentRunFlags();
-      this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
-      this.canceling = this.getCurrentThreadRun()?.canceling === true;
+      this.state.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
+      this.state.canceling = this.getCurrentThreadRun()?.canceling === true;
       performanceProfiler.markHeap("after");
       this.clearCoalescedActivity();
       this.cancelStreamingFlush();
-      this.streamingAssistantContent = "";
-      this.streamingAnswerDirty = false;
-      this.streamingThinkingContent = "";
-      this.streamingThinkingDirty = false;
-      this.thinkingDisclosureExpanded = false;
-      this.thinkingDisclosureUserSet = false;
-      this.activityStickyUntil = 0;
-      this.pendingActivity = void 0;
+      this.state.streamingAssistantContent = "";
+      this.state.streamingAnswerDirty = false;
+      this.state.streamingThinkingContent = "";
+      this.state.streamingThinkingDirty = false;
+      this.state.thinkingDisclosureExpanded = false;
+      this.state.thinkingDisclosureUserSet = false;
+      this.state.activityStickyUntil = 0;
+      this.state.pendingActivity = void 0;
       this.clearPendingActivityTimer();
-      this.activeToolCalls.clear();
-      this.activityText = "";
-      this.activityDetail = "";
-      this.currentRunContextUsage = void 0;
-      if (this.isCurrentThread(t2)) this.nativePiQueue = void 0;
+      this.state.activeToolCalls.clear();
+      this.state.activityText = "";
+      this.state.activityDetail = "";
+      this.state.currentRunContextUsage = void 0;
+      if (this.isCurrentThread(t2)) this.state.nativePiQueue = void 0;
       this.renderPromptQueue();
       this.runningThreadId = void 0;
-      this.setRunningState(this.running);
+      this.setRunningState(this.state.running);
       if (this.isCurrentThread(t2)) {
         this.renderMessages();
         this.renderToolBadges();
@@ -10545,7 +10561,7 @@ var PiAgentView = class extends f4.ItemView {
     if (!this.plugin.settings.desktopNotifications) return false;
     return showDesktopRunNotification({
       runId,
-      sentRunIds: this.desktopNotificationRunIds,
+      sentRunIds: this.state.desktopNotificationRunIds,
       body,
       onClick: () => openNotificationThread(this.plugin, threadId, PI_AGENT_VIEW_TYPE)
     });
@@ -10562,8 +10578,8 @@ var PiAgentView = class extends f4.ItemView {
   }
   setLiveThinkingExpanded(expanded) {
     const run = this.getCurrentThreadRun();
-    this.thinkingDisclosureExpanded = expanded;
-    this.thinkingDisclosureUserSet = true;
+    this.state.thinkingDisclosureExpanded = expanded;
+    this.state.thinkingDisclosureUserSet = true;
     if (run) {
       run.thinkingExpanded = expanded;
       run.thinkingUserSet = true;
@@ -10572,13 +10588,13 @@ var PiAgentView = class extends f4.ItemView {
   setRunningState(e) {
     const hasInput =
       !!this.inputEl?.value.trim() ||
-      this.composerImages.length > 0 ||
-      this.composerAttachments.length > 0;
+      this.state.composerImages.length > 0 ||
+      this.state.composerAttachments.length > 0;
     const action = getSendActionState({
       running: e,
-      canceling: this.canceling,
+      canceling: this.state.canceling,
       hasInput,
-      queuedCount: this.promptQueue.length
+      queuedCount: this.state.promptQueue.length
     });
     if (!this.sendButtonEl) return;
     this.sendButtonEl.empty();

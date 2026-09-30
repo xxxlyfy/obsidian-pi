@@ -84,17 +84,8 @@ function createStreamingView() {
   const view = Object.assign({}, streamingMethods, {
     lifecycle: createViewLifecycle(),
     messagesEl: new FakeElement("div"),
-    stickToBottom: true,
-    streamingAssistantContent: "",
-    streamingThinkingContent: "",
-    streamingAnswerDirty: false,
-    streamingThinkingDirty: false,
-    streamingFlushRaf: undefined,
     streamingTextEl: new FakeElement("div"),
     liveThinkingTextEl: new FakeElement("div"),
-    activityText: "",
-    messageRenderComponents: [],
-    messageRenderComponentByElement: new WeakMap(),
     plugin: { app: {} },
     getLinkSourcePath: () => "",
     updateActivityDom: vi.fn(),
@@ -103,6 +94,18 @@ function createStreamingView() {
     renderRoleLabel: vi.fn(),
     setLiveThinkingExpanded: vi.fn()
   });
+  // Transient fields live on `view.state` (see src/ui/view/view-state.mjs).
+  view.state = {
+    stickToBottom: true,
+    streamingAssistantContent: "",
+    streamingThinkingContent: "",
+    streamingAnswerDirty: false,
+    streamingThinkingDirty: false,
+    streamingFlushRaf: undefined,
+    activityText: "",
+    messageRenderComponents: [],
+    messageRenderComponentByElement: new WeakMap()
+  };
   return view;
 }
 
@@ -187,7 +190,7 @@ describe("PATCH 5 synthetic tests", () => {
 
       expect(finalized).toBe(true);
       expect(cancelAnimationFrame).toHaveBeenCalledWith(pendingFrame);
-      expect(view.streamingFlushRaf).toBeUndefined();
+      expect(view.state.streamingFlushRaf).toBeUndefined();
       const finalMetrics = performanceProfiler.snapshot().metrics;
       expect(finalMetrics.markdownRenderCount).toBe(1);
       expect(markdownRender).toHaveBeenCalledTimes(1);

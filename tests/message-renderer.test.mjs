@@ -49,7 +49,7 @@ describe("native message Markdown rendering", () => {
     const view = {
       plugin: { app },
       getLinkSourcePath: () => "Projects/Current Note.md",
-      messageRenderComponents: []
+      state: { messageRenderComponents: [] }
     };
 
     renderPlainMessageContent.call(view, container, "[[../Linked Note#Heading|Alias]]");
@@ -73,7 +73,7 @@ describe("native message Markdown rendering", () => {
     const view = {
       plugin: { app },
       getLinkSourcePath: () => "Projects/Current Note.md",
-      messageRenderComponents: []
+      state: { messageRenderComponents: [] }
     };
     markdownRender.mockImplementationOnce((_app, _content, target, sourcePath) => {
       target.addEventListener("click", (event) =>
@@ -123,11 +123,11 @@ describe("native message Markdown rendering", () => {
 
   it("unloads the Obsidian components that own native rendered-link handlers", () => {
     const component = { unload: vi.fn() };
-    const view = { messageRenderComponents: [component] };
+    const view = { state: { messageRenderComponents: [component] } };
 
     unloadMessageRenderComponents.call(view);
 
     expect(component.unload).toHaveBeenCalledOnce();
-    expect(view.messageRenderComponents).toEqual([]);
+    expect(view.state.messageRenderComponents).toEqual([]);
   });
 });

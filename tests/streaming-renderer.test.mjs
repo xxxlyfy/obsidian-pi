@@ -100,35 +100,38 @@ function stubAnimationFrame() {
   return { callbacks, cancelAnimationFrame };
 }
 
+// The transient fields live on `view.state` (see src/ui/view/view-state.mjs),
+// so these tests spell that out instead of hanging them off the fake view.
 function createView(overrides = {}) {
-  const view = Object.assign({}, streamingMethods);
-  return Object.assign(
-    view,
-    {
-      lifecycle: createViewLifecycle(),
-      messagesEl: new FakeElement("div"),
-      running: true,
-      stickToBottom: true,
-      streamingAssistantContent: "",
-      streamingThinkingContent: "",
-      streamingAnswerDirty: false,
-      streamingThinkingDirty: false,
-      streamingFlushRaf: undefined,
-      streamingTextEl: new FakeElement("div"),
-      liveThinkingTextEl: new FakeElement("div"),
-      activityText: "Responding",
-      messageRenderComponents: [],
-      messageRenderComponentByElement: new WeakMap(),
-      plugin: { app: {} },
-      getLinkSourcePath: () => "",
-      updateActivityDom: vi.fn(),
-      clearPendingActivityTimer: vi.fn(),
-      renderMessages: vi.fn(),
-      renderRoleLabel: vi.fn(),
-      setLiveThinkingExpanded: vi.fn()
-    },
-    overrides
-  );
+  const { state: stateOverrides, ...viewOverrides } = overrides;
+  const view = Object.assign({}, streamingMethods, {
+    lifecycle: createViewLifecycle(),
+    messagesEl: new FakeElement("div"),
+    streamingTextEl: new FakeElement("div"),
+    liveThinkingTextEl: new FakeElement("div"),
+    plugin: { app: {} },
+    getLinkSourcePath: () => "",
+    updateActivityDom: vi.fn(),
+    clearPendingActivityTimer: vi.fn(),
+    renderMessages: vi.fn(),
+    renderRoleLabel: vi.fn(),
+    setLiveThinkingExpanded: vi.fn()
+  });
+  view.state = {
+    running: true,
+    stickToBottom: true,
+    streamingAssistantContent: "",
+    streamingThinkingContent: "",
+    streamingAnswerDirty: false,
+    streamingThinkingDirty: false,
+    streamingFlushRaf: undefined,
+    activityText: "Responding",
+    messageRenderComponents: [],
+    messageRenderComponentByElement: new WeakMap(),
+    activeToolCalls: new Map(),
+    ...stateOverrides
+  };
+  return Object.assign(view, viewOverrides);
 }
 
 describe("PATCH 3 streaming renderer", () => {
@@ -150,8 +153,8 @@ describe("PATCH 3 streaming renderer", () => {
       "pi-agent-typing-cursor"
     ]);
     expect(markdownRender).not.toHaveBeenCalled();
-    expect(view.streamingFlushRaf).toBeUndefined();
-    expect(view.streamingAnswerDirty).toBe(false);
+    expect(view.state.streamingFlushRaf).toBeUndefined();
+    expect(view.state.streamingAnswerDirty).toBe(false);
   });
 
   it("flushes assistant and thinking content in the same single frame", () => {
@@ -159,7 +162,7 @@ describe("PATCH 3 streaming renderer", () => {
     const view = createView();
 
     view.appendStreamingDelta("answer");
-    view.streamingThinkingContent = "reasoning";
+    view.state.streamingThinkingContent = "reasoning";
     view.appendStreamingThinkingDelta("reasoning");
 
     expect(callbacks.size).toBe(1);
@@ -186,7 +189,7 @@ describe("PATCH 3 streaming renderer", () => {
     const view = createView();
 
     view.appendStreamingDelta("**Final** answer");
-    view.streamingThinkingContent = "deep thought";
+    view.state.streamingThinkingContent = "deep thought";
     view.appendStreamingThinkingDelta("deep thought");
     const pendingFrame = callbacks.keys().next().value;
 
@@ -194,7 +197,7 @@ describe("PATCH 3 streaming renderer", () => {
 
     expect(handled).toBe(true);
     expect(cancelAnimationFrame).toHaveBeenCalledWith(pendingFrame);
-    expect(view.streamingFlushRaf).toBeUndefined();
+    expect(view.state.streamingFlushRaf).toBeUndefined();
     expect(markdownRender).toHaveBeenCalledTimes(2);
     expect(markdownRender.mock.calls[0][1]).toBe("deep thought");
     expect(markdownRender.mock.calls[0][2]).toBe(view.liveThinkingTextEl);
@@ -212,11 +215,13 @@ describe("PATCH 3 streaming renderer", () => {
   it("runs the final Markdown render from the agent_end handler without a full re-render", () => {
     stubAnimationFrame();
     const view = createView({
-      streamingAssistantContent: "final text",
-      streamingAnswerDirty: true,
+      state: {
+        streamingAssistantContent: "final text",
+        streamingAnswerDirty: true,
+        activeToolCalls: new Map()
+      },
       normalizeRunEventType: (type) => type,
-      captureContextUsage: vi.fn(),
-      activeToolCalls: new Map()
+      captureContextUsage: vi.fn()
     });
 
     handleRunEvent.call(view, { type: "agent_end" });
@@ -236,7 +241,7 @@ describe("PATCH 3 streaming renderer", () => {
     callbacks.get(1)();
     expect(messagesEl.scrollTop).toBe(500);
 
-    const scrolled = createView({ messagesEl, stickToBottom: false });
+    const scrolled = createView({ messagesEl, state: { stickToBottom: false } });
     messagesEl.scrollTop = 120;
     scrolled.appendStreamingDelta("def");
     scrolled.finalizeStreamingContent();
@@ -248,12 +253,12 @@ describe("PATCH 3 streaming renderer", () => {
     const view = createView();
 
     view.scheduleStreamingFlush();
-    const handle = view.streamingFlushRaf;
+    const handle = view.state.streamingFlushRaf;
     view.cancelStreamingFlush();
 
     expect(cancelAnimationFrame).toHaveBeenCalledOnce();
     expect(cancelAnimationFrame).toHaveBeenCalledWith(handle);
-    expect(view.streamingFlushRaf).toBeUndefined();
+    expect(view.state.streamingFlushRaf).toBeUndefined();
 
     view.cancelStreamingFlush();
     expect(cancelAnimationFrame).toHaveBeenCalledOnce();
@@ -301,9 +306,9 @@ describe("PATCH 3 streaming renderer", () => {
 
     expect(noteStaleUiCallback).toHaveBeenCalledOnce();
     expect(view.streamingTextEl.text).toBe("");
-    expect(view.streamingAnswerDirty).toBe(false);
-    expect(view.streamingFlushRaf).toBeUndefined();
-    expect(view.streamingFlushGuard).toBeUndefined();
+    expect(view.state.streamingAnswerDirty).toBe(false);
+    expect(view.state.streamingFlushRaf).toBeUndefined();
+    expect(view.state.streamingFlushGuard).toBeUndefined();
   });
 
   it("records flush and Markdown-render counts in the profiler", async () => {

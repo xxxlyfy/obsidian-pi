@@ -1,6 +1,15 @@
-// @ts-nocheck -- this class composes its mixins at runtime (see the comment at
-// the end of the constructor); declaring those members for checkJs would create
-// real fields that shadow the mixin methods with `undefined`.
+// @ts-nocheck -- deliberate, and measured: removing it reports 105 errors, all
+// of them "this file cannot see the members its runtime mixins add" (the
+// prompt-queue, thread-list, vault-link, message-renderer, and
+// run-activity-state modules assigned onto the prototype at the end of the
+// file). Declaring those members is not an option: Obsidian loads this class
+// without a transform, so a bare `foo;` field declaration creates a real
+// instance property that shadows the mixin method with `undefined` (this
+// already caused a live `this.clearCoalescedActivity is not a function`
+// crash). The correct fix is to stop composing at runtime, which is the next
+// step of this work, not a type annotation. Everything else in `src/` is type
+// checked, and the surface these mixins share is described in
+// `./view/view-surface.mjs`; see `tsconfig.src.json` for the checked surface.
 import * as f from "obsidian";
 import { formatContextUsageBadge, formatTokenCount } from "../pi/token-usage.mjs";
 import {
@@ -66,19 +75,21 @@ export class PiAgentView extends f.ItemView {
     this.plugin = t;
     /** @type {import("./view/lifecycle.mjs").ViewLifecycle} Timers and cleanup handles owned by this view. */
     this.lifecycle = createViewLifecycle();
-    // Transient view state lives in one documented place (see view-state.mjs).
-    // Object.assign keeps the fields on this instance, because the mixins read
-    // and write them through `this`; it just stops this constructor from being
-    // the only description of what state a view has.
-    Object.assign(this, createViewState(t));
+    // Transient view state lives in one documented place and under one name
+    // (see view-state.mjs). The mixins reach it through `this.state`, so a field
+    // belongs to exactly one object instead of being spread across the instance
+    // next to the methods that use it.
+    /** @type {import("./view/view-state.mjs").ViewState} */
+    this.state = createViewState(t);
   }
 
-  // The mixin modules above add their methods, and some of their state, to this
-  // instance at runtime via Object.assign at the end of this file. There is no
-  // way to declare that composition in plain JavaScript without creating real
-  // instance fields, which would shadow those methods with `undefined`. This
-  // file therefore opts out of `checkJs`; see `tsconfig.src.json` for the
-  // checked surface and `src/ui/view/view-surface.mjs` for the shared shape.
+  // The mixin modules above add their methods to this class's prototype at
+  // runtime via Object.assign at the end of this file; their state is created
+  // above and reached through `this.state`. There is no way to declare that
+  // composition in plain JavaScript without creating real instance fields,
+  // which would shadow those methods with `undefined`. This file therefore opts
+  // out of `checkJs`; see `tsconfig.src.json` for the checked surface and
+  // `src/ui/view/view-surface.mjs` for the shape those mixins share.
 
   getViewType() {
     return T;
@@ -92,7 +103,7 @@ export class PiAgentView extends f.ItemView {
   async onOpen() {
     this.registerDomEvent(document, "keydown", (e) => {
       this.syncCurrentRunFlags();
-      if (e.key === "Escape" && this.running) {
+      if (e.key === "Escape" && this.state.running) {
         e.preventDefault();
         this.cancelCurrentRun();
       }
@@ -124,7 +135,7 @@ export class PiAgentView extends f.ItemView {
     this.createViewCollaborators();
     // The tree itself is built by src/ui/view/chat-dom.mjs; this method owns the
     // order (shell, header, messages, composer) and everything that follows.
-    this.promptQueue = this.plugin.getLocalPromptQueue();
+    this.state.promptQueue = this.plugin.getLocalPromptQueue();
     this.runSettings = new RunSettingsControls(this.plugin);
     const { root } = createChatShell(this.containerEl.children[1]);
     Object.assign(this, createHeader(root, this));
@@ -134,7 +145,7 @@ export class PiAgentView extends f.ItemView {
     // know which collaborator class the composer needs.
     this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
     this.renderMessages();
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
   }
   createViewCollaborators() {
     this.noteActions = new NoteActions(this.plugin, {
@@ -183,7 +194,7 @@ export class PiAgentView extends f.ItemView {
         this.resetTransientRunUiState();
         this.syncCurrentRunFlags();
         this.renderPromptQueue();
-        this.setRunningState(this.running);
+        this.setRunningState(this.state.running);
       }
     });
   }
@@ -193,8 +204,8 @@ export class PiAgentView extends f.ItemView {
     this.promptQueueEl = void 0;
     this.extensionWidgetsAboveEl = void 0;
     this.extensionWidgetsBelowEl = void 0;
-    this.composerImages = [];
-    this.composerAttachments = [];
+    this.state.composerImages = [];
+    this.state.composerAttachments = [];
     this.imageInputEl = void 0;
     this.sendButtonEl = void 0;
     this.composerBarEl = void 0;
@@ -255,19 +266,21 @@ export class PiAgentView extends f.ItemView {
           this.renderToolBadges();
         }
       });
-    for (const image of this.composerImages)
+    for (const image of this.state.composerImages)
       this.renderPendingBadge(badges, image.fileName || "image", {
         removeLabel: `Remove ${image.fileName || "image"}`,
         onRemove: () => {
-          this.composerImages = this.composerImages.filter((item) => item.id !== image.id);
+          this.state.composerImages = this.state.composerImages.filter(
+            (item) => item.id !== image.id
+          );
           this.renderComposerImages();
         }
       });
-    for (const attachment of this.composerAttachments)
+    for (const attachment of this.state.composerAttachments)
       this.renderPendingBadge(badges, attachment.fileName, {
         removeLabel: `Remove ${attachment.fileName}`,
         onRemove: () => {
-          this.composerAttachments = this.composerAttachments.filter(
+          this.state.composerAttachments = this.state.composerAttachments.filter(
             (item) => item.id !== attachment.id
           );
           this.renderComposerImages();
@@ -325,9 +338,9 @@ export class PiAgentView extends f.ItemView {
   }
   getDisplayedContextUsage() {
     var n;
-    if (this.currentRunContextUsage) return this.currentRunContextUsage;
+    if (this.state.currentRunContextUsage) return this.state.currentRunContextUsage;
     let e = this.plugin.getCurrentThread();
-    if (this.invalidatedContextThreadIds.has(e.id))
+    if (this.state.invalidatedContextThreadIds.has(e.id))
       return { compacted: true, contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow };
     let t = (n = e.messages) != null ? n : [];
     for (let s = t.length - 1; s >= 0; s--) {
@@ -405,8 +418,8 @@ export class PiAgentView extends f.ItemView {
   async submitInput() {
     var t, n;
     let e = (t = this.inputEl) == null ? void 0 : t.value.trim();
-    let images = this.composerImages.map((image) => ({ ...image }));
-    let attachments = this.composerAttachments.map((attachment) => ({ ...attachment }));
+    let images = this.state.composerImages.map((image) => ({ ...image }));
+    let attachments = this.state.composerAttachments.map((attachment) => ({ ...attachment }));
     const contextFilePath = this.plugin.getCurrentContextFile()?.path;
     if (!e && images.length === 0 && attachments.length === 0) return;
     if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
@@ -415,23 +428,23 @@ export class PiAgentView extends f.ItemView {
       return;
     }
     if (this.inputEl) this.inputEl.value = "";
-    this.composerImages = [];
-    this.composerAttachments = [];
+    this.state.composerImages = [];
+    this.state.composerAttachments = [];
     this.renderComposerImages();
     if ((n = this.suggestions) != null) n.close();
     this.resizeInput();
     this.syncCurrentRunFlags();
     this.runPrompt(e, undefined, images, undefined, attachments, undefined, contextFilePath);
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
   }
   handleSendButtonClick() {
     var t;
     this.syncCurrentRunFlags();
     if (
-      this.running &&
+      this.state.running &&
       !((t = this.inputEl) != null && t.value.trim()) &&
-      this.composerImages.length === 0 &&
-      this.composerAttachments.length === 0
+      this.state.composerImages.length === 0 &&
+      this.state.composerAttachments.length === 0
     ) {
       this.cancelCurrentRun();
       return;
@@ -443,7 +456,7 @@ export class PiAgentView extends f.ItemView {
     let e = this.getCurrentThreadRun();
     if (e && !e.canceling) {
       e.canceling = !0;
-      this.canceling = !0;
+      this.state.canceling = !0;
       this.clearCoalescedActivity();
       this.setActivity("Canceling", "finishing");
       this.plugin.cancelPiRun(e.runner);
@@ -552,7 +565,7 @@ export class PiAgentView extends f.ItemView {
         if (SUPPORTED_IMAGE_MIME_TYPES.includes(file.type)) await this.addImageFiles([file]);
         else {
           const remaining =
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.composerAttachments);
+            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments);
           const bytes = new Uint8Array(
             await file.slice(0, Math.min(file.size, remaining + 4)).arrayBuffer()
           );
@@ -566,14 +579,14 @@ export class PiAgentView extends f.ItemView {
             }),
             remaining
           );
-          this.composerAttachments.push(attachment);
+          this.state.composerAttachments.push(attachment);
         }
       } catch (error) {
         new f.Notice(error instanceof Error ? error.message : String(error));
       }
     }
     this.renderComposerImages();
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
   }
   async addVaultFile(file) {
     try {
@@ -583,7 +596,7 @@ export class PiAgentView extends f.ItemView {
         await this.plugin.ensureModelCatalogLoaded();
         if (!modelSupportsImages(this.plugin.getSelectedModelInfo()))
           throw new Error("The selected Pi model does not support image input.");
-        this.composerImages.push(
+        this.state.composerImages.push(
           bytesToPromptImage({
             bytes,
             fileName: file.name,
@@ -593,7 +606,7 @@ export class PiAgentView extends f.ItemView {
           })
         );
       } else {
-        this.composerAttachments.push(
+        this.state.composerAttachments.push(
           createPromptTextAttachment(
             /** @type {any} */ ({
               bytes,
@@ -602,12 +615,12 @@ export class PiAgentView extends f.ItemView {
               source: "vault",
               path: file.path
             }),
-            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.composerAttachments)
+            MAX_TOTAL_TEXT_ATTACHMENT_BYTES - textAttachmentBytes(this.state.composerAttachments)
           )
         );
       }
       this.renderComposerImages();
-      this.setRunningState(this.running);
+      this.setRunningState(this.state.running);
     } catch (error) {
       new f.Notice(error instanceof Error ? error.message : String(error));
     }
@@ -622,9 +635,9 @@ export class PiAgentView extends f.ItemView {
     }
     try {
       const images = await Promise.all(imageFiles.map(fileToPromptImage));
-      this.composerImages.push(...images);
+      this.state.composerImages.push(...images);
       this.renderComposerImages();
-      this.setRunningState(this.running);
+      this.setRunningState(this.state.running);
     } catch (error) {
       new f.Notice(error instanceof Error ? error.message : String(error));
     }
@@ -657,29 +670,29 @@ export class PiAgentView extends f.ItemView {
     return this.getCurrentThreadId() === e;
   }
   isThreadRunning(e) {
-    return this.activeRuns.has(e);
+    return this.state.activeRuns.has(e);
   }
   getCurrentThreadRun() {
     let e = this.getCurrentThreadId();
-    return e ? this.activeRuns.get(e) : void 0;
+    return e ? this.state.activeRuns.get(e) : void 0;
   }
   syncCurrentRunFlags() {
     let e = this.getCurrentThreadRun();
-    this.running = !!e;
-    this.canceling = e?.canceling === !0;
+    this.state.running = !!e;
+    this.state.canceling = e?.canceling === !0;
   }
   // Unified stale-view / stale-run guard for delayed UI
   // callbacks (activity timers, streaming rAF, pending sticky state).
   captureUiCallbackGuard() {
     return {
       runGeneration: this.getCurrentThreadRun()?.runGeneration,
-      threadGeneration: this.threadGeneration,
+      threadGeneration: this.state.threadGeneration,
       threadId: this.getCurrentThreadId()
     };
   }
   isStaleUiCallback(guard) {
     if (!guard) return false;
-    if (guard.threadGeneration !== this.threadGeneration) return true;
+    if (guard.threadGeneration !== this.state.threadGeneration) return true;
     if (guard.threadId !== this.getCurrentThreadId()) return true;
     if (guard.runGeneration !== undefined) {
       const run = this.getCurrentThreadRun();
@@ -693,23 +706,23 @@ export class PiAgentView extends f.ItemView {
   resetTransientRunUiState() {
     // A rendered-thread reset invalidates every callback bound to the old
     // thread generation.
-    this.threadGeneration += 1;
+    this.state.threadGeneration += 1;
     this.clearCoalescedActivity();
-    this.activityText = "";
-    this.activityKind = "thinking";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
+    this.state.activityText = "";
+    this.state.activityKind = "thinking";
+    this.state.activityDetail = "";
+    this.state.activityStickyUntil = 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
+    this.state.activeToolCalls.clear();
+    this.state.currentRunContextUsage = void 0;
     this.cancelStreamingFlush();
-    this.streamingAssistantContent = "";
-    this.streamingAnswerDirty = false;
-    this.streamingThinkingContent = "";
-    this.streamingThinkingDirty = false;
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
+    this.state.streamingAssistantContent = "";
+    this.state.streamingAnswerDirty = false;
+    this.state.streamingThinkingContent = "";
+    this.state.streamingThinkingDirty = false;
+    this.state.thinkingDisclosureExpanded = false;
+    this.state.thinkingDisclosureUserSet = false;
     this.streamingItemEl = void 0;
     this.streamingTextEl = void 0;
   }
@@ -741,10 +754,10 @@ export class PiAgentView extends f.ItemView {
     };
     if (this.isThreadRunning(t)) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else {
         this.enqueuePrompt(e, t, images, attachments, annotations, annotationSourcePath);
@@ -765,10 +778,10 @@ export class PiAgentView extends f.ItemView {
       );
     } catch (error) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else restoreUnsentAnnotations();
       new f.Notice(error instanceof Error ? error.message : String(error));
@@ -781,10 +794,10 @@ export class PiAgentView extends f.ItemView {
       delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
     if (!e && images.length === 0 && attachments.length === 0) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
         new f.Notice("The queued message became empty and was not sent.");
       } else restoreUnsentAnnotations();
@@ -793,10 +806,10 @@ export class PiAgentView extends f.ItemView {
     if (images.length > 0) await this.plugin.ensureModelCatalogLoaded();
     if (images.length > 0 && !modelSupportsImages(this.plugin.getSelectedModelInfo())) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else restoreUnsentAnnotations();
       new f.Notice("The selected Pi model does not support image input.");
@@ -804,10 +817,10 @@ export class PiAgentView extends f.ItemView {
     }
     if (this.isThreadRunning(t)) {
       if (queuedId) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         this.renderPromptQueue();
       } else {
         this.enqueuePrompt(e, t, images, attachments, annotations, annotationSourcePath);
@@ -818,14 +831,14 @@ export class PiAgentView extends f.ItemView {
       canceling: false,
       runner: this.plugin.createPiRunner(t),
       accepted: false,
-      notificationRunId: `${t}:${this.nextDesktopNotificationRunId++}`,
+      notificationRunId: `${t}:${this.state.nextDesktopNotificationRunId++}`,
       skillName: getSkillCommandName(e),
       thinking: "",
       thinkingExpanded: false,
       thinkingUserSet: false,
       toolErrors: [],
       // Identifies this run for stale-callback checks.
-      runGeneration: ++this.runGenerationCounter
+      runGeneration: ++this.state.runGenerationCounter
     };
     let skipQueueDrain = false;
     const addUserMessage = () => {
@@ -846,32 +859,33 @@ export class PiAgentView extends f.ItemView {
       if (n.accepted) return;
       n.accepted = true;
       if (!queuedId) return;
-      this.promptQueue = this.promptQueue.filter((item) => item.id !== queuedId);
-      this.plugin.replaceLocalPromptQueue(this.promptQueue);
+      this.state.promptQueue = this.state.promptQueue.filter((item) => item.id !== queuedId);
+      this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
       this.renderPromptQueue();
     };
-    this.activeRuns.set(t, n);
+    this.state.activeRuns.set(t, n);
     this.syncCurrentRunFlags();
     this.runningThreadId = t;
-    this.running = this.isCurrentThread(t);
-    this.canceling = !1;
-    this.activityText = "Preparing context";
-    this.activityKind = "context";
-    this.activityDetail = "Collecting current note, links, backlinks, and explicit attachments.";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
+    this.state.running = this.isCurrentThread(t);
+    this.state.canceling = !1;
+    this.state.activityText = "Preparing context";
+    this.state.activityKind = "context";
+    this.state.activityDetail =
+      "Collecting current note, links, backlinks, and explicit attachments.";
+    this.state.activityStickyUntil = 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
-    this.currentRunContextUsage = void 0;
-    this.streamingAssistantContent = "";
-    this.streamingThinkingContent = "";
-    this.thinkingDisclosureExpanded = false;
-    this.thinkingDisclosureUserSet = false;
-    this.stickToBottom = !0;
+    this.state.activeToolCalls.clear();
+    this.state.currentRunContextUsage = void 0;
+    this.state.streamingAssistantContent = "";
+    this.state.streamingThinkingContent = "";
+    this.state.thinkingDisclosureExpanded = false;
+    this.state.thinkingDisclosureUserSet = false;
+    this.state.stickToBottom = !0;
     // Heap samples for the run lifecycle (profiler-only).
     performanceProfiler.markHeap("before");
     this.plugin.beginAnnotationProcessing(t, annotations);
-    this.setRunningState(this.running);
+    this.setRunningState(this.state.running);
     if (!queuedId) addUserMessage();
     this.renderThreadListIfVisible();
     try {
@@ -894,13 +908,13 @@ export class PiAgentView extends f.ItemView {
                 n.toolErrors.push(toolError);
               this.handleSuccessfulToolMutation(o, t);
               if (!this.isCurrentThread(t)) return;
-              if (this.activeRuns.get(t) !== n) {
+              if (this.state.activeRuns.get(t) !== n) {
                 this.noteStaleUiCallback();
                 return;
               }
-              this.streamingThinkingContent = n.thinking;
-              this.thinkingDisclosureExpanded = n.thinkingExpanded;
-              this.thinkingDisclosureUserSet = n.thinkingUserSet;
+              this.state.streamingThinkingContent = n.thinking;
+              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.state.thinkingDisclosureUserSet = n.thinkingUserSet;
               this.handleRunEvent(o);
               if (thinkingDelta) {
                 this.liveThinkingSetExpanded?.(n.thinkingExpanded);
@@ -917,11 +931,11 @@ export class PiAgentView extends f.ItemView {
               performanceProfiler.incrementCounter("streamDeltaCount");
               if (!n.thinkingUserSet) n.thinkingExpanded = false;
               if (!this.isCurrentThread(t)) return;
-              if (this.activeRuns.get(t) !== n) {
+              if (this.state.activeRuns.get(t) !== n) {
                 this.noteStaleUiCallback();
                 return;
               }
-              this.thinkingDisclosureExpanded = n.thinkingExpanded;
+              this.state.thinkingDisclosureExpanded = n.thinkingExpanded;
               this.liveThinkingSetExpanded?.(n.thinkingExpanded);
               this.appendStreamingDelta(o);
             } finally {
@@ -938,16 +952,16 @@ export class PiAgentView extends f.ItemView {
       acknowledgeQueuedDelivery();
       const createdAt = Date.now();
       const thinkingKey = `${t}:${createdAt}`;
-      this.completedThinkingExpansion.set(
+      this.state.completedThinkingExpansion.set(
         thinkingKey,
         n.thinkingUserSet ? n.thinkingExpanded : false
       );
       const s = getCurrentRunMetadata(this.plugin.settings, a.runtimeState);
       this.cancelStreamingFlush();
-      this.streamingAssistantContent = "";
-      this.streamingAnswerDirty = false;
-      this.streamingThinkingContent = "";
-      this.streamingThinkingDirty = false;
+      this.state.streamingAssistantContent = "";
+      this.state.streamingAnswerDirty = false;
+      this.state.streamingThinkingContent = "";
+      this.state.streamingThinkingDirty = false;
       this.streamingItemEl = void 0;
       this.streamingTextEl = void 0;
       this.plugin.addMessageToThread(t, {
@@ -960,8 +974,8 @@ export class PiAgentView extends f.ItemView {
         thinking: n.thinking || undefined,
         toolErrors: n.toolErrors.length > 0 ? n.toolErrors : undefined
       });
-      if (a.contextUsage && !a.contextCompacted) this.invalidatedContextThreadIds.delete(t);
-      if (a.contextCompacted) this.invalidatedContextThreadIds.add(t);
+      if (a.contextUsage && !a.contextCompacted) this.state.invalidatedContextThreadIds.delete(t);
+      if (a.contextCompacted) this.state.invalidatedContextThreadIds.add(t);
       if (this.isCurrentThread(t)) {
         this.renderThreadTitle();
         this.renderMessages();
@@ -971,10 +985,10 @@ export class PiAgentView extends f.ItemView {
     } catch (a) {
       let o = a instanceof Error ? a.message : String(a);
       if (queuedId && !n.accepted) {
-        this.promptQueue = this.promptQueue.map((item) =>
+        this.state.promptQueue = this.state.promptQueue.map((item) =>
           item.id === queuedId ? { ...item, state: "pending" } : item
         );
-        this.plugin.replaceLocalPromptQueue(this.promptQueue);
+        this.plugin.replaceLocalPromptQueue(this.state.promptQueue);
         skipQueueDrain = true;
       } else if (!n.accepted) restoreUnsentAnnotations();
       if (o === "Pi run canceled.") {
@@ -982,7 +996,7 @@ export class PiAgentView extends f.ItemView {
         return;
       }
       const createdAt = Date.now();
-      this.completedThinkingExpansion.set(
+      this.state.completedThinkingExpansion.set(
         `${t}:${createdAt}`,
         n.thinkingUserSet ? n.thinkingExpanded : false
       );
@@ -1001,30 +1015,30 @@ export class PiAgentView extends f.ItemView {
       new f.Notice(o);
       this.notifyRunCompleted(n.notificationRunId, t, "Agent run failed. Click to open the chat.");
     } finally {
-      this.activeRuns.delete(t);
+      this.state.activeRuns.delete(t);
       this.syncCurrentRunFlags();
-      this.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
-      this.canceling = this.getCurrentThreadRun()?.canceling === !0;
+      this.state.running = this.isThreadRunning(this.plugin.getCurrentThread().id);
+      this.state.canceling = this.getCurrentThreadRun()?.canceling === !0;
       performanceProfiler.markHeap("after");
       this.clearCoalescedActivity();
       this.cancelStreamingFlush();
-      this.streamingAssistantContent = "";
-      this.streamingAnswerDirty = false;
-      this.streamingThinkingContent = "";
-      this.streamingThinkingDirty = false;
-      this.thinkingDisclosureExpanded = false;
-      this.thinkingDisclosureUserSet = false;
-      this.activityStickyUntil = 0;
-      this.pendingActivity = void 0;
+      this.state.streamingAssistantContent = "";
+      this.state.streamingAnswerDirty = false;
+      this.state.streamingThinkingContent = "";
+      this.state.streamingThinkingDirty = false;
+      this.state.thinkingDisclosureExpanded = false;
+      this.state.thinkingDisclosureUserSet = false;
+      this.state.activityStickyUntil = 0;
+      this.state.pendingActivity = void 0;
       this.clearPendingActivityTimer();
-      this.activeToolCalls.clear();
-      this.activityText = "";
-      this.activityDetail = "";
-      this.currentRunContextUsage = void 0;
-      if (this.isCurrentThread(t)) this.nativePiQueue = void 0;
+      this.state.activeToolCalls.clear();
+      this.state.activityText = "";
+      this.state.activityDetail = "";
+      this.state.currentRunContextUsage = void 0;
+      if (this.isCurrentThread(t)) this.state.nativePiQueue = void 0;
       this.renderPromptQueue();
       this.runningThreadId = void 0;
-      this.setRunningState(this.running);
+      this.setRunningState(this.state.running);
       if (this.isCurrentThread(t)) {
         this.renderMessages();
         this.renderToolBadges();
@@ -1039,7 +1053,7 @@ export class PiAgentView extends f.ItemView {
     if (!this.plugin.settings.desktopNotifications) return false;
     return showDesktopRunNotification({
       runId,
-      sentRunIds: this.desktopNotificationRunIds,
+      sentRunIds: this.state.desktopNotificationRunIds,
       body,
       onClick: () => openNotificationThread(this.plugin, threadId, T)
     });
@@ -1056,8 +1070,8 @@ export class PiAgentView extends f.ItemView {
   }
   setLiveThinkingExpanded(expanded) {
     const run = this.getCurrentThreadRun();
-    this.thinkingDisclosureExpanded = expanded;
-    this.thinkingDisclosureUserSet = true;
+    this.state.thinkingDisclosureExpanded = expanded;
+    this.state.thinkingDisclosureUserSet = true;
     if (run) {
       run.thinkingExpanded = expanded;
       run.thinkingUserSet = true;
@@ -1066,13 +1080,13 @@ export class PiAgentView extends f.ItemView {
   setRunningState(e) {
     const hasInput =
       !!this.inputEl?.value.trim() ||
-      this.composerImages.length > 0 ||
-      this.composerAttachments.length > 0;
+      this.state.composerImages.length > 0 ||
+      this.state.composerAttachments.length > 0;
     const action = getSendActionState({
       running: e,
-      canceling: this.canceling,
+      canceling: this.state.canceling,
       hasInput,
-      queuedCount: this.promptQueue.length
+      queuedCount: this.state.promptQueue.length
     });
     if (!this.sendButtonEl) return;
     this.sendButtonEl.empty();

@@ -8,8 +8,11 @@
  *
  * The index signature is deliberate: this is a transitional description of an
  * existing prototype, not a design. It keeps new fields type-checked for their
- * arguments and return values without forcing every field to be declared before
- * the view state is extracted into its own object.
+ * arguments and return values without forcing every method to be declared
+ * before the composition is untangled.
+ *
+ * Transient state is no longer part of this surface: it lives on `this.state`
+ * and is described once by `ViewState` in `./view-state.mjs`.
  *
  * @typedef {object} PiAgentViewSurface
  *
@@ -42,46 +45,13 @@
  * @property {any} app Obsidian app instance.
  * @property {any} renderedThreadId Thread id currently rendered.
  * @property {any} runningThreadId Thread id of the run in progress.
- * State fields are derived from `ViewState` in `./view-state.mjs` rather than
- * repeated here, so there is one definition of each field and its type.
  *
- * @property {import("./view-state.mjs").ViewState["currentRunContextUsage"]} currentRunContextUsage
- * @property {import("./view-state.mjs").ViewState["pendingActivity"]} pendingActivity
- * @property {import("./view-state.mjs").ViewState["pendingActivityTimer"]} pendingActivityTimer
- * @property {import("./view-state.mjs").ViewState["pendingActivityGuard"]} pendingActivityGuard
- * @property {import("./view-state.mjs").ViewState["activityCoalesceTimer"]} activityCoalesceTimer
- * @property {import("./view-state.mjs").ViewState["activityCoalesceGuard"]} activityCoalesceGuard
- * @property {import("./view-state.mjs").ViewState["activityCoalescePending"]} activityCoalescePending
- * @property {import("./view-state.mjs").ViewState["streamingFlushRaf"]} streamingFlushRaf
- * @property {import("./view-state.mjs").ViewState["streamingFlushGuard"]} streamingFlushGuard
- * @property {import("./view-state.mjs").ViewState["streamingFlushCleanup"]} streamingFlushCleanup
- * @property {import("./view-state.mjs").ViewState["running"]} running
- * @property {import("./view-state.mjs").ViewState["canceling"]} canceling
- * @property {import("./view-state.mjs").ViewState["stickToBottom"]} stickToBottom
- * @property {import("./view-state.mjs").ViewState["isRenderingMessages"]} isRenderingMessages
- * @property {import("./view-state.mjs").ViewState["streamingAnswerDirty"]} streamingAnswerDirty
- * @property {import("./view-state.mjs").ViewState["streamingThinkingDirty"]} streamingThinkingDirty
- * @property {import("./view-state.mjs").ViewState["thinkingDisclosureExpanded"]} thinkingDisclosureExpanded
- * @property {import("./view-state.mjs").ViewState["thinkingDisclosureUserSet"]} thinkingDisclosureUserSet
- * @property {import("./view-state.mjs").ViewState["activityText"]} activityText
- * @property {import("./view-state.mjs").ViewState["activityKind"]} activityKind
- * @property {import("./view-state.mjs").ViewState["activityDetail"]} activityDetail
- * @property {import("./view-state.mjs").ViewState["activityStickyUntil"]} activityStickyUntil
- * @property {import("./view-state.mjs").ViewState["threadGeneration"]} threadGeneration
- * @property {import("./view-state.mjs").ViewState["runGenerationCounter"]} runGenerationCounter
- * @property {import("./view-state.mjs").ViewState["streamingAssistantContent"]} streamingAssistantContent
- * @property {import("./view-state.mjs").ViewState["streamingThinkingContent"]} streamingThinkingContent
- * @property {import("./view-state.mjs").ViewState["invalidatedContextThreadIds"]} invalidatedContextThreadIds
- * @property {import("./view-state.mjs").ViewState["steeringPromptIds"]} steeringPromptIds
- * @property {import("./view-state.mjs").ViewState["desktopNotificationRunIds"]} desktopNotificationRunIds
- * @property {import("./view-state.mjs").ViewState["activeToolCalls"]} activeToolCalls
- * @property {import("./view-state.mjs").ViewState["activeRuns"]} activeRuns
- * @property {import("./view-state.mjs").ViewState["completedThinkingExpansion"]} completedThinkingExpansion
- * @property {import("./view-state.mjs").ViewState["promptQueue"]} promptQueue
- * @property {import("./view-state.mjs").ViewState["composerImages"]} composerImages
- * @property {import("./view-state.mjs").ViewState["composerAttachments"]} composerAttachments
- * @property {import("./view-state.mjs").ViewState["messageRenderComponents"]} messageRenderComponents
- * @property {import("./view-state.mjs").ViewState["messageRenderComponentByElement"]} messageRenderComponentByElement
+ * Transient state is one object, described once in `./view-state.mjs`; the
+ * mixins reach it through `this.state.<field>` rather than through fields spread
+ * across the instance, so there is a single definition of each field and its
+ * type.
+ *
+ * @property {import("./view-state.mjs").ViewState} state Transient view state.
  *
  * @property {import("./lifecycle.mjs").ViewLifecycle} lifecycle Timers and cleanup handles owned by this view.
  * @property {any} composerBarCleanup Release handle for the composer-bar observer.
@@ -171,13 +141,7 @@
  * @property {(...args: any[]) => any} addAction
  * @property {(...args: any[]) => any} attachmentSummary
  * @property {(...args: any[]) => any} renderQueueAttachments
- * @property {boolean} activityCoalescePending Whether a coalesced activity update is pending.
  *
- * @property {Set<any>} steeringPromptIds
- * @property {Map<any, any>} activeRuns
- * @property {any} currentRunContextUsage
- * @property {any} pendingActivity
- * @property {any} pendingActivityTimer
  * @property {any} streamingItemEl
  * @property {any} streamingTextEl
  * @property {any} liveThinkingSetExpanded

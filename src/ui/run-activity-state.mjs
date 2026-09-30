@@ -25,7 +25,7 @@ const ACTIVITY_COALESCE_MS = 150;
 export function setActivity(e, t, n = "") {
   let s = Date.now(),
     a = isStickyActivityKind(t),
-    o = !a && !shouldBypassActivityStickiness(t) && s < this.activityStickyUntil;
+    o = !a && !shouldBypassActivityStickiness(t) && s < this.state.activityStickyUntil;
   if (o) {
     this.queuePendingActivity(e, t, n);
     return;
@@ -35,13 +35,16 @@ export function setActivity(e, t, n = "") {
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function applyActivity(e, t, n = "", s = 0) {
-  let a = this.activityText === e && this.activityKind === t && this.activityDetail === n;
-  this.activityText = e;
-  this.activityKind = t;
-  this.activityDetail = n;
-  this.activityStickyUntil = s;
+  let a =
+    this.state.activityText === e &&
+    this.state.activityKind === t &&
+    this.state.activityDetail === n;
+  this.state.activityText = e;
+  this.state.activityKind = t;
+  this.state.activityDetail = n;
+  this.state.activityStickyUntil = s;
   if (s) {
-    this.pendingActivity = void 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
   }
   if (a) return;
@@ -58,52 +61,56 @@ export function applyActivity(e, t, n = "", s = 0) {
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function queuePendingActivity(e, t, n = "") {
-  this.pendingActivity = { text: e, kind: t, detail: n };
+  this.state.pendingActivity = { text: e, kind: t, detail: n };
   this.schedulePendingActivity();
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function schedulePendingActivity() {
-  if (this.pendingActivityTimer) return;
+  if (this.state.pendingActivityTimer) return;
   // The sticky-window flush is a delayed callback; capture the
   // run/thread generation so a settled run or switched thread cannot apply it.
-  this.pendingActivityGuard = this.captureUiCallbackGuard?.();
-  let e = Math.max(0, this.activityStickyUntil - Date.now());
+  this.state.pendingActivityGuard = this.captureUiCallbackGuard?.();
+  let e = Math.max(0, this.state.activityStickyUntil - Date.now());
   // Registered with the view lifecycle: if the view closes before this fires,
   // the callback is dropped instead of touching torn-down DOM.
-  this.pendingActivityTimer = this.lifecycle?.setTimer(() => {
-    this.pendingActivityTimer = void 0;
+  this.state.pendingActivityTimer = this.lifecycle?.setTimer(() => {
+    this.state.pendingActivityTimer = void 0;
     this.flushPendingActivity();
   }, e);
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function clearPendingActivityTimer() {
-  this.lifecycle?.clearTimer(this.pendingActivityTimer);
-  this.pendingActivityTimer = void 0;
-  this.pendingActivityGuard = void 0;
+  this.lifecycle?.clearTimer(this.state.pendingActivityTimer);
+  this.state.pendingActivityTimer = void 0;
+  this.state.pendingActivityGuard = void 0;
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function flushPendingActivity() {
-  if (this.isStaleUiCallback?.(this.pendingActivityGuard)) {
-    this.pendingActivity = void 0;
-    this.pendingActivityGuard = void 0;
+  if (this.isStaleUiCallback?.(this.state.pendingActivityGuard)) {
+    this.state.pendingActivity = void 0;
+    this.state.pendingActivityGuard = void 0;
     this.noteStaleUiCallback?.();
     return;
   }
-  if (!this.pendingActivity || Date.now() < this.activityStickyUntil) {
-    this.pendingActivity && this.schedulePendingActivity();
+  if (!this.state.pendingActivity || Date.now() < this.state.activityStickyUntil) {
+    this.state.pendingActivity && this.schedulePendingActivity();
     return;
   }
-  if (!this.running || this.streamingAssistantContent || this.activeToolCalls.size > 0) {
-    this.pendingActivity = void 0;
-    this.pendingActivityGuard = void 0;
+  if (
+    !this.state.running ||
+    this.state.streamingAssistantContent ||
+    this.state.activeToolCalls.size > 0
+  ) {
+    this.state.pendingActivity = void 0;
+    this.state.pendingActivityGuard = void 0;
     return;
   }
-  let e = this.pendingActivity;
-  this.pendingActivity = void 0;
-  this.pendingActivityGuard = void 0;
+  let e = this.state.pendingActivity;
+  this.state.pendingActivity = void 0;
+  this.state.pendingActivityGuard = void 0;
   this.applyActivity(e.text, e.kind, e.detail);
 }
 
@@ -113,34 +120,34 @@ export function flushPendingActivity() {
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function scheduleCoalescedActivity() {
   performanceProfiler.incrementCounter("activityCoalescedEvents");
-  this.activityCoalescePending = true;
-  if (this.activityCoalesceTimer) return;
-  this.activityCoalesceGuard = this.captureUiCallbackGuard?.();
+  this.state.activityCoalescePending = true;
+  if (this.state.activityCoalesceTimer) return;
+  this.state.activityCoalesceGuard = this.captureUiCallbackGuard?.();
   // Registered with the view lifecycle so a teardown drops the callback.
-  this.activityCoalesceTimer = this.lifecycle?.setTimer(() => {
-    this.activityCoalesceTimer = void 0;
+  this.state.activityCoalesceTimer = this.lifecycle?.setTimer(() => {
+    this.state.activityCoalesceTimer = void 0;
     this.flushCoalescedActivity();
   }, ACTIVITY_COALESCE_MS);
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function clearCoalescedActivity() {
-  this.lifecycle?.clearTimer(this.activityCoalesceTimer);
-  this.activityCoalesceTimer = void 0;
-  this.activityCoalescePending = false;
-  this.activityCoalesceGuard = void 0;
+  this.lifecycle?.clearTimer(this.state.activityCoalesceTimer);
+  this.state.activityCoalesceTimer = void 0;
+  this.state.activityCoalescePending = false;
+  this.state.activityCoalesceGuard = void 0;
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function flushCoalescedActivity() {
-  if (this.activityCoalesceTimer) {
-    this.lifecycle?.clearTimer(this.activityCoalesceTimer);
-    this.activityCoalesceTimer = void 0;
+  if (this.state.activityCoalesceTimer) {
+    this.lifecycle?.clearTimer(this.state.activityCoalesceTimer);
+    this.state.activityCoalesceTimer = void 0;
   }
-  const pending = this.activityCoalescePending === true;
-  const guard = this.activityCoalesceGuard;
-  this.activityCoalescePending = false;
-  this.activityCoalesceGuard = void 0;
+  const pending = this.state.activityCoalescePending === true;
+  const guard = this.state.activityCoalesceGuard;
+  this.state.activityCoalescePending = false;
+  this.state.activityCoalesceGuard = void 0;
   if (!pending) return;
   if (this.isStaleUiCallback?.(guard)) {
     this.noteStaleUiCallback?.();
@@ -154,8 +161,8 @@ export function flushCoalescedActivity() {
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function updateActivityDom() {
   if (
-    !this.running ||
-    !this.activityText ||
+    !this.state.running ||
+    !this.state.activityText ||
     !this.activityItemEl ||
     !this.activityDetailsEl ||
     !this.activityLabelEl ||
@@ -163,12 +170,12 @@ export function updateActivityDom() {
     !this.activityDetailsEl.isConnected
   )
     return !1;
-  const label = this.activityText.toUpperCase();
-  const title = this.activityDetail || this.activityText;
+  const label = this.state.activityText.toUpperCase();
+  const title = this.state.activityDetail || this.state.activityText;
   if (this.activityDetailsEl.getAttribute("title") !== title)
     this.activityDetailsEl.setAttr("title", title);
-  if (this.activityLabelEl.getAttribute("aria-label") !== `${this.activityText} in progress`)
-    this.activityLabelEl.setAttr("aria-label", `${this.activityText} in progress`);
+  if (this.activityLabelEl.getAttribute("aria-label") !== `${this.state.activityText} in progress`)
+    this.activityLabelEl.setAttr("aria-label", `${this.state.activityText} in progress`);
   if (this.activityLabelEl.textContent !== label) this.activityLabelEl.setText(label);
   return !0;
 }
@@ -178,8 +185,8 @@ export function captureContextUsage(e) {
   let t = extractEventTokenUsage(e == null ? void 0 : e.raw),
     n = this.getContextUsageForTokens(t);
   if (n) {
-    if (this.runningThreadId) this.invalidatedContextThreadIds.delete(this.runningThreadId);
-    this.currentRunContextUsage = { contextUsage: n, tokenUsage: t };
+    if (this.runningThreadId) this.state.invalidatedContextThreadIds.delete(this.runningThreadId);
+    this.state.currentRunContextUsage = { contextUsage: n, tokenUsage: t };
     this.updateActivityDom();
     this.renderToolBadges();
   }
@@ -199,7 +206,7 @@ export function handleRunEvent(e) {
   let t = this.normalizeRunEventType(e.type);
   this.captureContextUsage(e);
   if (t === "queue_update") {
-    this.nativePiQueue = {
+    this.state.nativePiQueue = {
       steering: Array.isArray(e.raw?.steering) ? e.raw.steering : [],
       followUp: Array.isArray(e.raw?.followUp) ? e.raw.followUp : []
     };
@@ -215,14 +222,14 @@ export function handleRunEvent(e) {
     return;
   }
   if (t === "compaction_start") {
-    let n = this.currentRunContextUsage?.contextUsage
+    let n = this.state.currentRunContextUsage?.contextUsage
       ? formatContextUsageTitle(
-          this.currentRunContextUsage.contextUsage,
-          this.currentRunContextUsage.tokenUsage
+          this.state.currentRunContextUsage.contextUsage,
+          this.state.currentRunContextUsage.tokenUsage
         )
       : "";
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
-    this.currentRunContextUsage = void 0;
+    if (this.runningThreadId) this.state.invalidatedContextThreadIds.add(this.runningThreadId);
+    this.state.currentRunContextUsage = void 0;
     this.renderToolBadges();
     this.setActivity("Compacting context", "context", n);
     return;
@@ -238,8 +245,8 @@ export function handleRunEvent(e) {
       return;
     }
     let n = e.raw && e.raw.result ? e.raw.result.tokensBefore : void 0;
-    if (this.runningThreadId) this.invalidatedContextThreadIds.add(this.runningThreadId);
-    this.currentRunContextUsage = {
+    if (this.runningThreadId) this.state.invalidatedContextThreadIds.add(this.runningThreadId);
+    this.state.currentRunContextUsage = {
       compacted: true,
       contextWindow: this.plugin.getSelectedModelInfo()?.contextWindow
     };
@@ -273,7 +280,7 @@ export function handleRunEvent(e) {
     t === "thinking_delta" ||
     t === "thinking_end"
   ) {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.state.streamingAssistantContent || this.setActivity("Thinking", "thinking");
     return;
   }
   if (t === "toolcall_start" || t === "toolcall_delta" || t === "toolcall_end") {
@@ -298,12 +305,12 @@ export function handleRunEvent(e) {
   if (t === "tool_end") {
     this.clearCoalescedActivity?.();
     this.untrackActiveTool(e);
-    if (this.activeToolCalls.size > 0) {
+    if (this.state.activeToolCalls.size > 0) {
       let n = this.formatActiveToolStatus();
       this.setActivity(n.label, n.kind, n.detail);
       return;
     }
-    this.streamingAssistantContent ||
+    this.state.streamingAssistantContent ||
       this.setActivity(
         e.isError ? "Tool failed" : "Reviewing results",
         e.isError ? "error" : "thinking"
@@ -315,7 +322,7 @@ export function handleRunEvent(e) {
     return;
   }
   if (t === "message_end" || t === "turn_end") {
-    this.streamingAssistantContent || this.setActivity("Thinking", "thinking");
+    this.state.streamingAssistantContent || this.setActivity("Thinking", "thinking");
     return;
   }
   if (t === "agent_end") {
@@ -327,12 +334,12 @@ export function handleRunEvent(e) {
     const finalizedStreaming = this.finalizeStreamingContent?.() === true;
     // Sample the heap while the run's UI state is still retained.
     performanceProfiler.markHeap("during");
-    this.activityText = "";
-    this.activityDetail = "";
-    this.activityStickyUntil = 0;
-    this.pendingActivity = void 0;
+    this.state.activityText = "";
+    this.state.activityDetail = "";
+    this.state.activityStickyUntil = 0;
+    this.state.pendingActivity = void 0;
     this.clearPendingActivityTimer();
-    this.activeToolCalls.clear();
+    this.state.activeToolCalls.clear();
     if (!finalizedStreaming) this.renderMessages();
   }
 }
@@ -351,17 +358,17 @@ export function trackActiveTool(e) {
   let t = getToolEventKey(e),
     n = String(e.toolName || e.message || "tool"),
     s = e.toolArgs || {};
-  this.activeToolCalls.set(t, { name: n, args: s });
+  this.state.activeToolCalls.set(t, { name: n, args: s });
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function untrackActiveTool(e) {
-  this.activeToolCalls.delete(getToolEventKey(e));
+  this.state.activeToolCalls.delete(getToolEventKey(e));
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
 export function formatActiveToolStatus() {
-  let e = [...this.activeToolCalls.values()];
+  let e = [...this.state.activeToolCalls.values()];
   if (e.length === 0) return { label: "Thinking", kind: "thinking", detail: "" };
   if (e.length === 1) return formatToolStatus(e[0].name, e[0].args, "running");
   let t = e.map((n) => formatToolStatus(n.name, n.args, "running"));

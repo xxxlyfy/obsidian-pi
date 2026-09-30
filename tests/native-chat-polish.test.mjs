@@ -127,9 +127,11 @@ describe("native chat polish", () => {
     const messagesEl = new FakeElement("div");
     const view = {
       messagesEl,
-      activityText: "Editing note.md",
-      streamingThinkingContent: "**Updating** the note",
-      thinkingDisclosureExpanded: true,
+      state: {
+        activityText: "Editing note.md",
+        streamingThinkingContent: "**Updating** the note",
+        thinkingDisclosureExpanded: true
+      },
       renderRoleLabel: vi.fn(),
       renderThinkingDisclosure,
       renderPlainMessageContent: vi.fn(),
@@ -156,10 +158,12 @@ describe("native chat polish", () => {
     const renderStreamingAnswer = vi.fn();
     const view = {
       messagesEl,
-      streamingAssistantContent: "[Open note](Example.md)",
-      streamingThinkingContent: "",
-      thinkingDisclosureExpanded: false,
-      activityText: "Responding",
+      state: {
+        streamingAssistantContent: "[Open note](Example.md)",
+        streamingThinkingContent: "",
+        thinkingDisclosureExpanded: false,
+        activityText: "Responding"
+      },
       renderRoleLabel: vi.fn(),
       renderThinkingDisclosure,
       renderPlainMessageContent: vi.fn(),
@@ -177,10 +181,10 @@ describe("native chat polish", () => {
     expect(renderStreamingAnswer).toHaveBeenCalledOnce();
     expect(view.renderPlainMessageContent).not.toHaveBeenCalled();
     expect(messageRendererSource).toContain(
-      'container.setText(this.streamingAssistantContent || "")'
+      'container.setText(this.state.streamingAssistantContent || "")'
     );
     expect(messageRendererSource).toContain(
-      'container.setText(this.streamingThinkingContent || "")'
+      'container.setText(this.state.streamingThinkingContent || "")'
     );
     expect(messageRendererSource).not.toContain("this.streamingTextEl.appendText");
     expect(chatViewSources).toMatch(
@@ -196,7 +200,7 @@ describe("native chat polish", () => {
     const renderPlainMessageContent = vi.fn();
     const view = {
       messagesEl,
-      completedThinkingExpansion: new Map(),
+      state: { completedThinkingExpansion: new Map() },
       getCurrentThreadId: () => "thread",
       renderRoleLabel: vi.fn(),
       renderToolErrors: vi.fn(),
@@ -277,8 +281,8 @@ describe("native chat polish", () => {
     expect(styles).not.toContain(".pi-agent-inline-activity");
     expect(messageRendererSource).not.toContain("pi-agent-inline-activity-spinner");
     expect(messageRendererSource).not.toContain("pi-agent-thinking-spinner");
-    expect(messageRendererSource).toContain('this.activityText || "Thinking"');
-    expect(messageRendererSource).toContain('this.activityText || "Responding"');
+    expect(messageRendererSource).toContain('this.state.activityText || "Thinking"');
+    expect(messageRendererSource).toContain('this.state.activityText || "Responding"');
     expect(messageRendererSource).toContain(".toUpperCase()");
     expect(styles).toMatch(
       /\.pi-agent-thinking-label \{[\s\S]*?font-weight: var\(--font-bold\);[\s\S]*?letter-spacing: 0\.04em;/

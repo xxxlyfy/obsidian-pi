@@ -14,39 +14,51 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// The transient fields live on `view.state` (see src/ui/view/view-state.mjs),
+// so these tests spell that out instead of hanging them off the fake view.
 function createView(overrides = {}) {
-  return Object.assign({}, activityMethods, {
-    lifecycle: createViewLifecycle(),
-    running: true,
-    activityText: "",
-    activityKind: "thinking",
-    activityDetail: "",
-    activityStickyUntil: 0,
-    pendingActivity: undefined,
-    pendingActivityTimer: undefined,
-    pendingActivityGuard: undefined,
-    activityCoalesceTimer: undefined,
-    activityCoalescePending: false,
-    activityCoalesceGuard: undefined,
-    activeToolCalls: new Map(),
-    streamingAssistantContent: "",
-    updateActivityDom: vi.fn(() => true),
-    renderMessages: vi.fn(),
-    renderPromptQueue: vi.fn(),
-    renderToolBadges: vi.fn(),
-    captureContextUsage: vi.fn(),
-    normalizeRunEventType: (type) => type,
-    getCurrentThreadRun: vi.fn(() => undefined),
-    getCurrentThreadId: vi.fn(() => "thread-1"),
-    captureUiCallbackGuard: vi.fn(() => ({
-      threadId: "thread-1",
-      threadGeneration: 1,
-      runGeneration: 7
-    })),
-    isStaleUiCallback: vi.fn(() => false),
-    noteStaleUiCallback: vi.fn(),
-    ...overrides
-  });
+  const { state: stateOverrides, ...viewOverrides } = overrides;
+  return Object.assign(
+    {},
+    activityMethods,
+    {
+      lifecycle: createViewLifecycle(),
+      updateActivityDom: vi.fn(() => true),
+      renderMessages: vi.fn(),
+      renderPromptQueue: vi.fn(),
+      renderToolBadges: vi.fn(),
+      captureContextUsage: vi.fn(),
+      normalizeRunEventType: (type) => type,
+      getCurrentThreadRun: vi.fn(() => undefined),
+      getCurrentThreadId: vi.fn(() => "thread-1"),
+      captureUiCallbackGuard: vi.fn(() => ({
+        threadId: "thread-1",
+        threadGeneration: 1,
+        runGeneration: 7
+      })),
+      isStaleUiCallback: vi.fn(() => false),
+      noteStaleUiCallback: vi.fn()
+    },
+    {
+      state: {
+        running: true,
+        activityText: "",
+        activityKind: "thinking",
+        activityDetail: "",
+        activityStickyUntil: 0,
+        pendingActivity: undefined,
+        pendingActivityTimer: undefined,
+        pendingActivityGuard: undefined,
+        activityCoalesceTimer: undefined,
+        activityCoalescePending: false,
+        activityCoalesceGuard: undefined,
+        activeToolCalls: new Map(),
+        streamingAssistantContent: "",
+        ...stateOverrides
+      }
+    },
+    viewOverrides
+  );
 }
 
 describe("PATCH 4 activity coalescing", () => {
@@ -60,7 +72,7 @@ describe("PATCH 4 activity coalescing", () => {
       toolArgs: { path: "a.md" }
     });
     expect(view.updateActivityDom).toHaveBeenCalledTimes(1);
-    expect(view.activityText).toBe("Reading a.md");
+    expect(view.state.activityText).toBe("Reading a.md");
 
     for (let index = 0; index < 8; index++) {
       view.handleRunEvent({
@@ -79,9 +91,9 @@ describe("PATCH 4 activity coalescing", () => {
 
     vi.advanceTimersByTime(1);
     expect(view.updateActivityDom).toHaveBeenCalledTimes(2);
-    expect(view.activityText).toBe("Reading draft-7.md");
-    expect(view.activityCoalescePending).toBe(false);
-    expect(view.activityCoalesceTimer).toBeUndefined();
+    expect(view.state.activityText).toBe("Reading draft-7.md");
+    expect(view.state.activityCoalescePending).toBe(false);
+    expect(view.state.activityCoalesceTimer).toBeUndefined();
   });
 
   it("keeps tool_start, tool_end, error, agent_end, and cancel immediate", () => {
@@ -104,10 +116,10 @@ describe("PATCH 4 activity coalescing", () => {
     // tool_end is immediate and drops the pending coalesced status. The
     // "Reviewing results" label then waits out the sticky window (existing UX).
     view.handleRunEvent({ type: "tool_end", toolName: "read", toolKey: "r1", isError: false });
-    expect(view.activityCoalescePending).toBe(false);
-    expect(view.activityCoalesceTimer).toBeUndefined();
+    expect(view.state.activityCoalescePending).toBe(false);
+    expect(view.state.activityCoalesceTimer).toBeUndefined();
     vi.advanceTimersByTime(1200);
-    expect(view.activityText).toBe("Reviewing results");
+    expect(view.state.activityText).toBe("Reviewing results");
 
     view.handleRunEvent({
       type: "tool_start",
@@ -122,17 +134,17 @@ describe("PATCH 4 activity coalescing", () => {
       toolArgs: { command: "npm test --watch" }
     });
     view.handleRunEvent({ type: "agent_end", raw: {} });
-    expect(view.activityCoalescePending).toBe(false);
-    expect(view.activityCoalesceTimer).toBeUndefined();
-    expect(view.pendingActivity).toBeUndefined();
+    expect(view.state.activityCoalescePending).toBe(false);
+    expect(view.state.activityCoalesceTimer).toBeUndefined();
+    expect(view.state.pendingActivity).toBeUndefined();
     expect(vi.getTimerCount()).toBe(0);
 
     const errorView = createView();
     errorView.scheduleCoalescedActivity();
     errorView.handleRunEvent({ type: "extension_error", raw: { error: "boom" } });
-    expect(errorView.activityCoalescePending).toBe(false);
-    expect(errorView.activityCoalesceTimer).toBeUndefined();
-    expect(errorView.activityText).toBe("Extension failed");
+    expect(errorView.state.activityCoalescePending).toBe(false);
+    expect(errorView.state.activityCoalesceTimer).toBeUndefined();
+    expect(errorView.state.activityText).toBe("Extension failed");
   });
 
   it("drops a stale coalesced flush and counts it", () => {
@@ -149,20 +161,20 @@ describe("PATCH 4 activity coalescing", () => {
     expect(view.isStaleUiCallback).toHaveBeenCalledOnce();
     expect(view.noteStaleUiCallback).toHaveBeenCalledOnce();
     expect(view.updateActivityDom).not.toHaveBeenCalled();
-    expect(view.activityText).toBe("");
+    expect(view.state.activityText).toBe("");
   });
 
   it("drops a stale pending-activity sticky flush and counts it", () => {
     const view = createView({ isStaleUiCallback: vi.fn(() => true) });
-    view.pendingActivity = { text: "Thinking", kind: "thinking", detail: "" };
+    view.state.pendingActivity = { text: "Thinking", kind: "thinking", detail: "" };
 
     view.schedulePendingActivity();
     vi.advanceTimersByTime(1);
 
     expect(view.isStaleUiCallback).toHaveBeenCalledOnce();
     expect(view.noteStaleUiCallback).toHaveBeenCalledOnce();
-    expect(view.pendingActivity).toBeUndefined();
-    expect(view.activityText).toBe("");
+    expect(view.state.pendingActivity).toBeUndefined();
+    expect(view.state.activityText).toBe("");
   });
 
   it("clearCoalescedActivity cancels the timer and pending state", () => {
@@ -173,9 +185,9 @@ describe("PATCH 4 activity coalescing", () => {
     view.clearCoalescedActivity();
 
     expect(vi.getTimerCount()).toBe(0);
-    expect(view.activityCoalescePending).toBe(false);
-    expect(view.activityCoalesceTimer).toBeUndefined();
-    expect(view.activityCoalesceGuard).toBeUndefined();
+    expect(view.state.activityCoalescePending).toBe(false);
+    expect(view.state.activityCoalesceTimer).toBeUndefined();
+    expect(view.state.activityCoalesceGuard).toBeUndefined();
   });
 
   it("records activity flush, coalescing, update, and stale-callback metrics", () => {
@@ -239,9 +251,9 @@ describe("PATCH 4 activity coalescing", () => {
       /resetTransientRunUiState\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/
     );
     expect(viewSources).toMatch(/cancelCurrentRun\(\) \{[\s\S]*?this\.clearCoalescedActivity\(\)/);
-    expect(viewSources).toContain("this.threadGeneration += 1");
-    expect(viewSources).toContain("runGeneration: ++this.runGenerationCounter");
-    expect(viewSources).toContain("if (this.activeRuns.get(t) !== n)");
+    expect(viewSources).toContain("this.state.threadGeneration += 1");
+    expect(viewSources).toContain("runGeneration: ++this.state.runGenerationCounter");
+    expect(viewSources).toContain("if (this.state.activeRuns.get(t) !== n)");
     expect(viewSources).toContain("isStaleUiCallback(guard)");
   });
 });

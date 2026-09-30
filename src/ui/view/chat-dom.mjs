@@ -31,8 +31,7 @@ import { SUPPORTED_IMAGE_MIME_TYPES, SUPPORTED_TEXT_EXTENSIONS } from "../prompt
  * @property {() => void} showThreadList
  * @property {(threadId: string) => boolean} isThreadRunning
  * @property {(event: MouseEvent) => void} handleMessageLinkClick
- * @property {boolean} isRenderingMessages
- * @property {boolean} stickToBottom
+ * @property {import("./view-state.mjs").ViewState} state Transient view state.
  * @property {() => void} renderToolBadges
  * @property {() => void} renderPromptQueue
  * @property {() => void} renderComposerImages
@@ -155,9 +154,9 @@ export function createHeader(root, view) {
 export function createMessagesArea(root, view) {
   const messagesEl = root.createDiv({ cls: "pi-agent-messages" });
   messagesEl.addEventListener("scroll", () => {
-    if (view.isRenderingMessages) return;
+    if (view.state.isRenderingMessages) return;
     const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
-    view.stickToBottom = distance < 40;
+    view.state.stickToBottom = distance < 40;
   });
   messagesEl.addEventListener("click", (event) => view.handleMessageLinkClick(event), true);
   return { messagesEl };
@@ -204,7 +203,7 @@ export function createComposer(root, view) {
     }
     if (event.key === "Escape") {
       view.syncCurrentRunFlags();
-      if (view.running) {
+      if (view.state.running) {
         event.preventDefault();
         view.cancelCurrentRun();
       }
@@ -219,7 +218,7 @@ export function createComposer(root, view) {
     view.syncCurrentRunFlags();
     view.resizeInput();
     view.suggestions?.update();
-    view.setRunningState(view.running);
+    view.setRunningState(view.state.running);
   });
   inputEl.addEventListener("click", () => {
     view.suggestions?.update();
