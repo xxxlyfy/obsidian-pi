@@ -9268,6 +9268,47 @@ function requeuePendingPrompt(view, queuedId) {
 
 // src/ui/view/chat-dom.mjs
 var import_obsidian20 = require("obsidian");
+
+// src/ui/send-state.mjs
+function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
+  if (canceling) {
+    return {
+      state: "canceling",
+      icon: "loader",
+      label: t("send.canceling"),
+      ariaLabel: t("send.cancelingAria"),
+      disabled: true
+    };
+  }
+  if (running && hasInput) {
+    return {
+      state: "queue",
+      icon: "list-plus",
+      label: t("send.queue"),
+      ariaLabel: t("send.queueAria"),
+      disabled: false
+    };
+  }
+  if (running) {
+    return {
+      state: "cancel",
+      icon: "square",
+      label: t("send.cancel"),
+      ariaLabel: t("send.cancelAria"),
+      disabled: false
+    };
+  }
+  return {
+    state: "send",
+    icon: "send",
+    label: t("send.send"),
+    ariaLabel: t("send.sendAria"),
+    disabled: false,
+    titleSuffix: queuedCount > 0 ? tCount("send.queued", queuedCount) : ""
+  };
+}
+
+// src/ui/view/chat-dom.mjs
 function createChatShell(container) {
   container.empty();
   container.addClass("pi-agent-view");
@@ -9431,45 +9472,210 @@ function createComposer(root, view) {
     sendButtonEl
   };
 }
-
-// src/ui/send-state.mjs
-function getSendActionState({ running, canceling, hasInput, queuedCount = 0 }) {
-  if (canceling) {
-    return {
-      state: "canceling",
-      icon: "loader",
-      label: t("send.canceling"),
-      ariaLabel: t("send.cancelingAria"),
-      disabled: true
-    };
+function renderExtensionWidgets() {
+  this.extensionWidgetsAboveEl?.empty();
+  this.extensionWidgetsBelowEl?.empty();
+  for (const widget of (this.plugin.extensionWidgets ?? /* @__PURE__ */ new Map()).values()) {
+    const target =
+      widget.placement === "belowEditor"
+        ? this.extensionWidgetsBelowEl
+        : this.extensionWidgetsAboveEl;
+    if (!target) continue;
+    const widgetEl = target.createDiv({ cls: "pi-agent-extension-widget" });
+    for (const line of widget.lines) widgetEl.createDiv({ text: line });
   }
-  if (running && hasInput) {
-    return {
-      state: "queue",
-      icon: "list-plus",
-      label: t("send.queue"),
-      ariaLabel: t("send.queueAria"),
-      disabled: false
-    };
-  }
-  if (running) {
-    return {
-      state: "cancel",
-      icon: "square",
-      label: t("send.cancel"),
-      ariaLabel: t("send.cancelAria"),
-      disabled: false
-    };
-  }
-  return {
-    state: "send",
-    icon: "send",
-    label: t("send.send"),
-    ariaLabel: t("send.sendAria"),
-    disabled: false,
-    titleSuffix: queuedCount > 0 ? tCount("send.queued", queuedCount) : ""
-  };
 }
+function renderToolBadges() {
+  const root = this.toolBadgesEl;
+  if (!root) return;
+  root.empty();
+  const badges = root.createDiv({
+    cls: "pi-agent-context-badges",
+    attr: { role: "list", "aria-label": "Pending prompt context" }
+  });
+  const contextFile = this.plugin.getCurrentContextFile();
+  if (contextFile)
+    this.renderPendingBadge(badges, contextFile.name, {
+      title: contextFile.path,
+      removeLabel: `Remove ${contextFile.name} from context`,
+      onRemove: () => {
+        this.plugin.excludeContextFile(contextFile.path);
+        this.renderToolBadges();
+      }
+    });
+  for (const image of this.state.composerImages)
+    this.renderPendingBadge(badges, image.fileName || "image", {
+      removeLabel: `Remove ${image.fileName || "image"}`,
+      onRemove: () => {
+        this.state.composerImages = this.state.composerImages.filter(
+          (item) => item.id !== image.id
+        );
+        this.renderComposerImages();
+      }
+    });
+  for (const attachment of this.state.composerAttachments)
+    this.renderPendingBadge(badges, attachment.fileName, {
+      removeLabel: `Remove ${attachment.fileName}`,
+      onRemove: () => {
+        this.state.composerAttachments = this.state.composerAttachments.filter(
+          (item) => item.id !== attachment.id
+        );
+        this.renderComposerImages();
+      }
+    });
+  const annotations = contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
+  if (annotations.length > 0) {
+    const label = `${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`;
+    this.renderPendingBadge(badges, label, {
+      removeLabel: `Clear ${label}`,
+      onRemove: () => {
+        this.plugin.annotationController?.cancelPick();
+        this.plugin.annotationStore.deletePath(contextFile.path);
+        this.renderToolBadges();
+      }
+    });
+  }
+  this.renderToolBadgesContextUsage(root);
+}
+function renderPendingBadge(parent, label, options = {}) {
+  const { removeLabel, onRemove, title = label } = options;
+  const badge = parent.createSpan({
+    cls: "pi-agent-tool-badge pi-agent-context-badge is-enabled",
+    attr: { title, role: "listitem" }
+  });
+  badge.createSpan({ cls: "pi-agent-context-badge-label", text: label });
+  if (!onRemove) return;
+  const remove = badge.createEl("button", {
+    cls: "clickable-icon pi-agent-context-badge-remove",
+    attr: { type: "button", "aria-label": removeLabel, title: removeLabel }
+  });
+  (0, import_obsidian20.setIcon)(remove, "x");
+  remove.addEventListener("click", onRemove);
+}
+function renderToolBadgesContextUsage(container) {
+  const usage = this.getDisplayedContextUsage();
+  const badge = usage?.compacted
+    ? {
+        label: `ctx compacted \xB7 ?/${formatTokenCount(usage.contextWindow || 0)}`,
+        title:
+          "Pi compacted this session. Exact context usage is unknown until the next model response returns fresh token usage."
+      }
+    : usage
+      ? formatContextUsageBadge(usage.contextUsage, usage.tokenUsage)
+      : void 0;
+  container.createSpan({
+    cls: `pi-agent-tool-badge pi-agent-tool-badge-context${badge ? " is-enabled" : ""}`,
+    text: badge ? badge.label : "ctx --",
+    attr: {
+      title: badge
+        ? badge.title
+        : "Context usage appears after Pi returns token usage for the selected model."
+    }
+  });
+}
+function renderThreadTitle() {
+  if (!this.threadTitleEl) return;
+  const thread = this.plugin.getCurrentThread();
+  this.threadTitleEl.empty();
+  this.threadTitleEl.createSpan({ text: thread.title });
+  this.renderThreadFavorite();
+}
+function renderThreadFavorite() {
+  if (!this.threadFavoriteEl) return;
+  const favorite = this.plugin.getCurrentThread().favorite === true;
+  this.threadFavoriteEl.toggleClass("is-favorite", favorite);
+  this.threadFavoriteEl.setAttr("aria-pressed", String(favorite));
+  this.threadFavoriteEl.setAttr(
+    "aria-label",
+    t(favorite ? "view.favoriteRemove" : "view.favoriteAdd")
+  );
+  this.threadFavoriteEl.setAttr("title", t(favorite ? "view.favoriteRemove" : "view.favoriteAdd"));
+}
+function startThreadTitleRename() {
+  if (!this.threadTitleEl?.isConnected) return;
+  const thread = this.plugin.getCurrentThread();
+  this.threadTitleEl.empty();
+  this.threadTitleEl.addClass("is-editing");
+  const input = this.threadTitleEl.createEl("input", {
+    cls: "pi-agent-thread-title-input",
+    attr: { type: "text", value: thread.title, "aria-label": t("view.chatTitle") }
+  });
+  const finish = (commit) => {
+    const nextTitle = input.value.trim();
+    this.threadTitleEl?.removeClass("is-editing");
+    if (commit && nextTitle && nextTitle !== thread.title)
+      this.plugin.renameThread(thread.id, nextTitle);
+    this.renderThreadTitle();
+  };
+  const stopEvent = (event) => {
+    event.stopPropagation();
+  };
+  input.addEventListener(
+    "keydown",
+    (event) => {
+      stopEvent(event);
+      if (event.key === "Enter") finish(true);
+      if (event.key === "Escape") finish(false);
+    },
+    { capture: true }
+  );
+  input.addEventListener("keypress", stopEvent, { capture: true });
+  input.addEventListener("keyup", stopEvent, { capture: true });
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("blur", () => finish(true));
+  input.focus();
+  input.select();
+}
+function renderImagePicker(parent) {
+  const button = parent.createEl("button", {
+    cls: "clickable-icon pi-agent-image-button",
+    attr: { "aria-label": t("composer.attach"), title: t("composer.attach") }
+  });
+  (0, import_obsidian20.setIcon)(button, "paperclip");
+  button.addEventListener("click", (event) => this.showAttachmentMenu(event));
+}
+function updateComposerBarMode(width) {
+  const bar = this.composerBarEl;
+  if (!bar) return;
+  bar.toggleClass("is-compact", width < 560);
+  bar.toggleClass("is-narrow", width < 390);
+}
+function setRunningState(running) {
+  const hasInput =
+    !!this.inputEl?.value.trim() ||
+    this.state.composerImages.length > 0 ||
+    this.state.composerAttachments.length > 0;
+  const action = getSendActionState({
+    running,
+    canceling: this.state.canceling,
+    hasInput,
+    queuedCount: this.state.promptQueue.length
+  });
+  if (!this.sendButtonEl) return;
+  this.sendButtonEl.empty();
+  (0, import_obsidian20.setIcon)(this.sendButtonEl, action.icon);
+  this.sendButtonEl.createSpan({ cls: "pi-agent-control-label", text: action.label });
+  this.sendButtonEl.toggleAttribute("disabled", action.disabled);
+  this.sendButtonEl.setAttr("aria-label", action.ariaLabel);
+  this.sendButtonEl.setAttr(
+    "title",
+    action.titleSuffix ? `${action.ariaLabel}. ${action.titleSuffix}` : action.ariaLabel
+  );
+  for (const state of ["send", "queue", "cancel", "canceling"])
+    this.sendButtonEl.toggleClass(`is-${state}`, action.state === state);
+}
+var chatDomMethods = {
+  renderExtensionWidgets,
+  renderImagePicker,
+  renderPendingBadge,
+  renderThreadFavorite,
+  renderThreadTitle,
+  renderToolBadges,
+  renderToolBadgesContextUsage,
+  setRunningState,
+  startThreadTitleRename,
+  updateComposerBarMode
+};
 
 // src/ui/editor-file-refresh.mjs
 function getSuccessfulMarkdownMutationPath(event, vaultBasePath = "") {
@@ -9801,113 +10007,12 @@ var PiAgentView = class extends f4.ItemView {
     this.suggestions?.close();
     this.suggestions = void 0;
   }
-  renderExtensionWidgets() {
-    this.extensionWidgetsAboveEl?.empty();
-    this.extensionWidgetsBelowEl?.empty();
-    for (const widget of (this.plugin.extensionWidgets ?? /* @__PURE__ */ new Map()).values()) {
-      const target =
-        widget.placement === "belowEditor"
-          ? this.extensionWidgetsBelowEl
-          : this.extensionWidgetsAboveEl;
-      if (!target) continue;
-      const widgetEl = target.createDiv({ cls: "pi-agent-extension-widget" });
-      for (const line of widget.lines) widgetEl.createDiv({ text: line });
-    }
-  }
   setExtensionEditorText(text) {
     if (!this.inputEl) return;
     this.inputEl.value = text;
     this.resizeInput();
     this.suggestions?.update();
     this.inputEl.focus();
-  }
-  renderToolBadges() {
-    const root = this.toolBadgesEl;
-    if (!root) return;
-    root.empty();
-    const badges = root.createDiv({
-      cls: "pi-agent-context-badges",
-      attr: { role: "list", "aria-label": "Pending prompt context" }
-    });
-    const contextFile = this.plugin.getCurrentContextFile();
-    if (contextFile)
-      this.renderPendingBadge(badges, contextFile.name, {
-        title: contextFile.path,
-        removeLabel: `Remove ${contextFile.name} from context`,
-        onRemove: () => {
-          this.plugin.excludeContextFile(contextFile.path);
-          this.renderToolBadges();
-        }
-      });
-    for (const image of this.state.composerImages)
-      this.renderPendingBadge(badges, image.fileName || "image", {
-        removeLabel: `Remove ${image.fileName || "image"}`,
-        onRemove: () => {
-          this.state.composerImages = this.state.composerImages.filter(
-            (item) => item.id !== image.id
-          );
-          this.renderComposerImages();
-        }
-      });
-    for (const attachment of this.state.composerAttachments)
-      this.renderPendingBadge(badges, attachment.fileName, {
-        removeLabel: `Remove ${attachment.fileName}`,
-        onRemove: () => {
-          this.state.composerAttachments = this.state.composerAttachments.filter(
-            (item) => item.id !== attachment.id
-          );
-          this.renderComposerImages();
-        }
-      });
-    const annotations = contextFile ? this.plugin.annotationStore.list(contextFile.path) : [];
-    if (annotations.length > 0) {
-      const label = `${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`;
-      this.renderPendingBadge(badges, label, {
-        removeLabel: `Clear ${label}`,
-        onRemove: () => {
-          this.plugin.annotationController?.cancelPick();
-          this.plugin.annotationStore.deletePath(contextFile.path);
-          this.renderToolBadges();
-        }
-      });
-    }
-    this.renderToolBadgesContextUsage(root);
-  }
-  renderPendingBadge(parent, label, options = {}) {
-    const { removeLabel, onRemove, title = label } = options;
-    const badge = parent.createSpan({
-      cls: "pi-agent-tool-badge pi-agent-context-badge is-enabled",
-      attr: { title, role: "listitem" }
-    });
-    badge.createSpan({ cls: "pi-agent-context-badge-label", text: label });
-    if (!onRemove) return;
-    const remove = badge.createEl("button", {
-      cls: "clickable-icon pi-agent-context-badge-remove",
-      attr: { type: "button", "aria-label": removeLabel, title: removeLabel }
-    });
-    (0, f4.setIcon)(remove, "x");
-    remove.addEventListener("click", onRemove);
-  }
-  renderToolBadgesContextUsage(e) {
-    let t2 = this.getDisplayedContextUsage(),
-      n = t2?.compacted
-        ? {
-            label: `ctx compacted \xB7 ?/${formatTokenCount(t2.contextWindow || 0)}`,
-            title:
-              "Pi compacted this session. Exact context usage is unknown until the next model response returns fresh token usage."
-          }
-        : t2
-          ? formatContextUsageBadge(t2.contextUsage, t2.tokenUsage)
-          : void 0;
-    e.createSpan({
-      cls: `pi-agent-tool-badge pi-agent-tool-badge-context${n ? " is-enabled" : ""}`,
-      text: n ? n.label : "ctx --",
-      attr: {
-        title: n
-          ? n.title
-          : "Context usage appears after Pi returns token usage for the selected model."
-      }
-    });
   }
   getDisplayedContextUsage() {
     var n;
@@ -9922,27 +10027,6 @@ var PiAgentView = class extends f4.ItemView {
         return { contextUsage: a.contextUsage, tokenUsage: a.tokenUsage };
     }
   }
-  renderThreadTitle() {
-    if (!this.threadTitleEl) return;
-    let e = this.plugin.getCurrentThread();
-    this.threadTitleEl.empty();
-    this.threadTitleEl.createSpan({ text: e.title });
-    this.renderThreadFavorite();
-  }
-  renderThreadFavorite() {
-    if (!this.threadFavoriteEl) return;
-    const favorite = this.plugin.getCurrentThread().favorite === true;
-    this.threadFavoriteEl.toggleClass("is-favorite", favorite);
-    this.threadFavoriteEl.setAttr("aria-pressed", String(favorite));
-    this.threadFavoriteEl.setAttr(
-      "aria-label",
-      t(favorite ? "view.favoriteRemove" : "view.favoriteAdd")
-    );
-    this.threadFavoriteEl.setAttr(
-      "title",
-      t(favorite ? "view.favoriteRemove" : "view.favoriteAdd")
-    );
-  }
   toggleCurrentThreadFavorite() {
     const thread = this.plugin.getCurrentThread();
     if (!this.plugin.toggleThreadFavorite(thread.id)) {
@@ -9951,42 +10035,6 @@ var PiAgentView = class extends f4.ItemView {
     }
     this.renderThreadFavorite();
     this.renderThreadListIfVisible();
-  }
-  startThreadTitleRename() {
-    var a;
-    if (!((a = this.threadTitleEl) != null && a.isConnected)) return;
-    let e = this.plugin.getCurrentThread();
-    this.threadTitleEl.empty();
-    this.threadTitleEl.addClass("is-editing");
-    let t2 = this.threadTitleEl.createEl("input", {
-        cls: "pi-agent-thread-title-input",
-        attr: { type: "text", value: e.title, "aria-label": t("view.chatTitle") }
-      }),
-      n = (o) => {
-        var d;
-        let l = t2.value.trim();
-        if ((d = this.threadTitleEl) != null) d.removeClass("is-editing");
-        if (o && l && l !== e.title) this.plugin.renameThread(e.id, l);
-        this.renderThreadTitle();
-      },
-      s = (o) => {
-        o.stopPropagation();
-      };
-    t2.addEventListener(
-      "keydown",
-      (o) => {
-        s(o);
-        if (o.key === "Enter") n(true);
-        if (o.key === "Escape") n(false);
-      },
-      { capture: true }
-    );
-    t2.addEventListener("keypress", s, { capture: true });
-    t2.addEventListener("keyup", s, { capture: true });
-    t2.addEventListener("click", (o) => o.stopPropagation());
-    t2.addEventListener("blur", () => n(true));
-    t2.focus();
-    t2.select();
   }
   async submitInput() {
     var t2, n;
@@ -10073,20 +10121,6 @@ var PiAgentView = class extends f4.ItemView {
       };
     n.observe(e);
     this.composerBarCleanup = this.lifecycle.addCleanup(a);
-  }
-  updateComposerBarMode(e) {
-    let t2 = this.composerBarEl;
-    if (!t2) return;
-    t2.toggleClass("is-compact", e < 560);
-    t2.toggleClass("is-narrow", e < 390);
-  }
-  renderImagePicker(parent) {
-    const button = parent.createEl("button", {
-      cls: "clickable-icon pi-agent-image-button",
-      attr: { "aria-label": t("composer.attach"), title: t("composer.attach") }
-    });
-    f4.setIcon(button, "paperclip");
-    button.addEventListener("click", (event) => this.showAttachmentMenu(event));
   }
   showAttachmentMenu(event) {
     const menu = new f4.Menu();
@@ -10598,30 +10632,6 @@ var PiAgentView = class extends f4.ItemView {
       run.thinkingUserSet = true;
     }
   }
-  setRunningState(e) {
-    const hasInput =
-      !!this.inputEl?.value.trim() ||
-      this.state.composerImages.length > 0 ||
-      this.state.composerAttachments.length > 0;
-    const action = getSendActionState({
-      running: e,
-      canceling: this.state.canceling,
-      hasInput,
-      queuedCount: this.state.promptQueue.length
-    });
-    if (!this.sendButtonEl) return;
-    this.sendButtonEl.empty();
-    (0, f4.setIcon)(this.sendButtonEl, action.icon);
-    this.sendButtonEl.createSpan({ cls: "pi-agent-control-label", text: action.label });
-    this.sendButtonEl.toggleAttribute("disabled", action.disabled);
-    this.sendButtonEl.setAttr("aria-label", action.ariaLabel);
-    this.sendButtonEl.setAttr(
-      "title",
-      action.titleSuffix ? `${action.ariaLabel}. ${action.titleSuffix}` : action.ariaLabel
-    );
-    for (const state of ["send", "queue", "cancel", "canceling"])
-      this.sendButtonEl.toggleClass(`is-${state}`, action.state === state);
-  }
   renderPiIcon(e) {
     (0, f4.setIcon)(e, PI_AGENT_ICON_ID);
   }
@@ -10663,7 +10673,8 @@ Object.assign(
   thread_list_view_exports,
   vault_link_actions_exports,
   message_renderer_exports,
-  run_activity_state_exports
+  run_activity_state_exports,
+  chatDomMethods
 );
 
 // src/shared/thread-history.mjs

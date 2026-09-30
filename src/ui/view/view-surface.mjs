@@ -40,6 +40,8 @@
  * @property {any} toolBadgesEl Tool badge container element.
  * @property {any} threadTitleEl Thread title element.
  * @property {any} threadFavoriteEl Thread favorite button.
+ * @property {any} extensionWidgetsAboveEl Widget container above the composer.
+ * @property {any} extensionWidgetsBelowEl Widget container below the composer.
  * @property {any} containerEl View container element.
  * @property {any} contentEl View content element.
  * @property {any} app Obsidian app instance.
@@ -94,6 +96,16 @@
  * @property {(...args: any[]) => any} renderThreadListRow
  * @property {(...args: any[]) => any} renderThreadMeta
  * @property {(...args: any[]) => any} renderToolBadges
+ * @property {(...args: any[]) => any} renderPendingBadge
+ * @property {(...args: any[]) => any} renderToolBadgesContextUsage
+ * @property {(...args: any[]) => any} renderThreadTitle
+ * @property {(...args: any[]) => any} renderThreadFavorite
+ * @property {(...args: any[]) => any} startThreadTitleRename
+ * @property {(...args: any[]) => any} renderImagePicker
+ * @property {(...args: any[]) => any} updateComposerBarMode
+ * @property {(...args: any[]) => any} setRunningState
+ * @property {(...args: any[]) => any} showAttachmentMenu
+ * @property {(...args: any[]) => any} getDisplayedContextUsage
  * @property {(...args: any[]) => any} renderChatView
  * @property {(...args: any[]) => any} renderExtensionWidgets
  * @property {(...args: any[]) => any} parseVaultLinkTarget
