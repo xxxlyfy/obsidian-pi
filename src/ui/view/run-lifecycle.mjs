@@ -14,6 +14,7 @@ import { Notice } from "obsidian";
 import { performanceProfiler } from "../../shared/performance-profiler.mjs";
 import { now } from "../../shared/runtime.mjs";
 import { formatToolError, getSkillCommandName, getThinkingDelta } from "../activity.mjs";
+import { requeuePendingPrompt } from "./run-prompt.mjs";
 import { getCurrentRunMetadata } from "./run-metadata.mjs";
 
 /**
@@ -263,6 +264,56 @@ export function beginTrackedRun(view, request) {
   if (!queuedId) addUserMessage();
   view.renderThreadListIfVisible();
   return { run, addUserMessage, acknowledgeQueuedDelivery };
+}
+
+/**
+ * Run the prompt to completion and settle it on every exit path.
+ *
+ * Returns whether the queue should be left alone this round; the caller then
+ * passes that to `settleRunCleanup`, so cleanup stays one line at the call site
+ * and there is exactly one place that releases run state.
+ *
+ * @param {any} view Chat view.
+ * @param {{ prompt: any, threadId: string, images: any[], queuedId: string | undefined,
+ *   promptContext: any }} request
+ * @param {{ run: any, acknowledgeQueuedDelivery: () => void }} tracked
+ * @param {any} handlers Run callbacks from `createRunEventHandlers`.
+ * @param {() => void} restoreUnsentAnnotations Gives consumed annotations back.
+ * @returns {Promise<boolean>} The `skipQueueDrain` flag for cleanup.
+ */
+export async function executePromptRun(view, request, tracked, handlers, restoreUnsentAnnotations) {
+  const { prompt, threadId, images, queuedId, promptContext } = request;
+  const { run, acknowledgeQueuedDelivery } = tracked;
+  let skipQueueDrain = false;
+  try {
+    const result = await view.plugin.runPiPrompt(
+      prompt,
+      {
+        isCanceled: () => run.canceling,
+        onEvent: handlers.onEvent,
+        onTextDelta: handlers.onTextDelta,
+        onPromptAccepted: handlers.onPromptAccepted
+      },
+      threadId,
+      run.runner,
+      images,
+      promptContext
+    );
+    acknowledgeQueuedDelivery();
+    settleRunSuccess(view, run, threadId, result);
+  } catch (error) {
+    // A queued prompt that was never accepted goes back to pending and the
+    // queue must not drain; a directly-typed one gives its consumed annotations
+    // back. A cancel is neither: the queue drains as usual.
+    if (queuedId && !run.accepted) {
+      requeuePendingPrompt(view, queuedId);
+      skipQueueDrain = true;
+    } else if (!run.accepted) {
+      restoreUnsentAnnotations();
+    }
+    if (settleRunFailure(view, run, threadId, error) !== "canceled") skipQueueDrain = true;
+  }
+  return skipQueueDrain;
 }
 
 /**

@@ -9348,7 +9348,91 @@ var ThreadActions = class {
 };
 
 // src/ui/view/run-lifecycle.mjs
+var import_obsidian21 = require("obsidian");
+
+// src/ui/view/run-prompt.mjs
 var import_obsidian20 = require("obsidian");
+async function resolvePromptInput(view, annotationSourcePath, annotations) {
+  if (annotations !== void 0) return { annotations, failed: false };
+  try {
+    return {
+      annotations: await view.plugin.consumeAnnotationsForPrompt(annotationSourcePath),
+      failed: false
+    };
+  } catch (error) {
+    new import_obsidian20.Notice(error instanceof Error ? error.message : String(error));
+    return { annotations: void 0, failed: true };
+  }
+}
+async function enrichPromptDelivery(view, request) {
+  let delivery;
+  try {
+    delivery = await view.plugin.enrichPromptDelivery(
+      {
+        prompt: request.prompt,
+        images: request.images,
+        attachments: request.attachments,
+        annotations: request.annotations,
+        contextFilePath: request.annotationSourcePath
+      },
+      { mode: "prompt", threadId: request.threadId }
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      notice: true,
+      failure: error instanceof Error ? error.message : String(error)
+    };
+  }
+  const prompt = String(delivery.prompt || "").trim();
+  const images = delivery.images || [];
+  const attachments = delivery.attachments || [];
+  if (delivery.promptContext && attachments.length > 0)
+    delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
+  if (!prompt && images.length === 0 && attachments.length === 0)
+    return {
+      ok: false,
+      failure: "The queued message became empty and was not sent.",
+      notice: false
+    };
+  if (images.length > 0) await view.plugin.ensureModelCatalogLoaded();
+  if (images.length > 0 && !modelSupportsImages(view.plugin.getSelectedModelInfo()))
+    return {
+      ok: false,
+      notice: true,
+      failure: "The selected Pi model does not support image input."
+    };
+  return { ok: true, prompt, images, attachments, promptContext: delivery.promptContext };
+}
+function reportDeliveryFailure(view, delivery, queuedId, restoreUnsentAnnotations) {
+  if (queuedId) requeuePendingPrompt(view, queuedId);
+  else restoreUnsentAnnotations();
+  if (delivery.notice || queuedId) new import_obsidian20.Notice(delivery.failure);
+}
+function enqueueOrRequeue(
+  view,
+  prompt,
+  threadId,
+  images,
+  attachments,
+  annotations,
+  queuedId,
+  annotationSourcePath
+) {
+  if (queuedId) {
+    requeuePendingPrompt(view, queuedId);
+    return;
+  }
+  view.enqueuePrompt(prompt, threadId, images, attachments, annotations, annotationSourcePath);
+}
+function requeuePendingPrompt(view, queuedId) {
+  if (!queuedId) return;
+  view.state.promptQueue = view.state.promptQueue.map((item) =>
+    item.id === queuedId ? { ...item, state: "pending" } : item
+  );
+  view.plugin.replaceLocalPromptQueue(view.state.promptQueue);
+  view.renderPromptQueue();
+}
 
 // src/ui/view/run-metadata.mjs
 function getCurrentRunMetadata(settings, runtimeState) {
@@ -9485,7 +9569,7 @@ function settleRunSuccess(view, run, threadId, result) {
 function settleRunFailure(view, run, threadId, error) {
   const message = error instanceof Error ? error.message : String(error);
   if (message === "Pi run canceled.") {
-    new import_obsidian20.Notice("Agent run canceled.");
+    new import_obsidian21.Notice("Agent run canceled.");
     return "canceled";
   }
   const createdAt = Date.now();
@@ -9505,7 +9589,7 @@ function settleRunFailure(view, run, threadId, error) {
     view.renderMessages();
     view.renderToolBadges();
   }
-  new import_obsidian20.Notice(message);
+  new import_obsidian21.Notice(message);
   view.notifyRunCompleted(
     run.notificationRunId,
     threadId,
@@ -9576,6 +9660,37 @@ function beginTrackedRun(view, request) {
   view.renderThreadListIfVisible();
   return { run, addUserMessage, acknowledgeQueuedDelivery };
 }
+async function executePromptRun(view, request, tracked, handlers, restoreUnsentAnnotations) {
+  const { prompt, threadId, images, queuedId, promptContext } = request;
+  const { run, acknowledgeQueuedDelivery } = tracked;
+  let skipQueueDrain = false;
+  try {
+    const result = await view.plugin.runPiPrompt(
+      prompt,
+      {
+        isCanceled: () => run.canceling,
+        onEvent: handlers.onEvent,
+        onTextDelta: handlers.onTextDelta,
+        onPromptAccepted: handlers.onPromptAccepted
+      },
+      threadId,
+      run.runner,
+      images,
+      promptContext
+    );
+    acknowledgeQueuedDelivery();
+    settleRunSuccess(view, run, threadId, result);
+  } catch (error) {
+    if (queuedId && !run.accepted) {
+      requeuePendingPrompt(view, queuedId);
+      skipQueueDrain = true;
+    } else if (!run.accepted) {
+      restoreUnsentAnnotations();
+    }
+    if (settleRunFailure(view, run, threadId, error) !== "canceled") skipQueueDrain = true;
+  }
+  return skipQueueDrain;
+}
 function settleRunCleanup(view, threadId, skipQueueDrain) {
   view.state.activeRuns.delete(threadId);
   view.syncCurrentRunFlags();
@@ -9609,90 +9724,6 @@ function settleRunCleanup(view, threadId, skipQueueDrain) {
   view.plugin.endAnnotationProcessingForThread(threadId);
   view.plugin.rebuildServicesIfPending();
   if (!skipQueueDrain) view.runNextQueuedPrompt();
-}
-
-// src/ui/view/run-prompt.mjs
-var import_obsidian21 = require("obsidian");
-async function resolvePromptInput(view, annotationSourcePath, annotations) {
-  if (annotations !== void 0) return { annotations, failed: false };
-  try {
-    return {
-      annotations: await view.plugin.consumeAnnotationsForPrompt(annotationSourcePath),
-      failed: false
-    };
-  } catch (error) {
-    new import_obsidian21.Notice(error instanceof Error ? error.message : String(error));
-    return { annotations: void 0, failed: true };
-  }
-}
-async function enrichPromptDelivery(view, request) {
-  let delivery;
-  try {
-    delivery = await view.plugin.enrichPromptDelivery(
-      {
-        prompt: request.prompt,
-        images: request.images,
-        attachments: request.attachments,
-        annotations: request.annotations,
-        contextFilePath: request.annotationSourcePath
-      },
-      { mode: "prompt", threadId: request.threadId }
-    );
-  } catch (error) {
-    return {
-      ok: false,
-      notice: true,
-      failure: error instanceof Error ? error.message : String(error)
-    };
-  }
-  const prompt = String(delivery.prompt || "").trim();
-  const images = delivery.images || [];
-  const attachments = delivery.attachments || [];
-  if (delivery.promptContext && attachments.length > 0)
-    delivery.promptContext.fileAttachmentsContext = appendTextAttachmentContext("", attachments);
-  if (!prompt && images.length === 0 && attachments.length === 0)
-    return {
-      ok: false,
-      failure: "The queued message became empty and was not sent.",
-      notice: false
-    };
-  if (images.length > 0) await view.plugin.ensureModelCatalogLoaded();
-  if (images.length > 0 && !modelSupportsImages(view.plugin.getSelectedModelInfo()))
-    return {
-      ok: false,
-      notice: true,
-      failure: "The selected Pi model does not support image input."
-    };
-  return { ok: true, prompt, images, attachments, promptContext: delivery.promptContext };
-}
-function reportDeliveryFailure(view, delivery, queuedId, restoreUnsentAnnotations) {
-  if (queuedId) requeuePendingPrompt(view, queuedId);
-  else restoreUnsentAnnotations();
-  if (delivery.notice || queuedId) new import_obsidian21.Notice(delivery.failure);
-}
-function enqueueOrRequeue(
-  view,
-  prompt,
-  threadId,
-  images,
-  attachments,
-  annotations,
-  queuedId,
-  annotationSourcePath
-) {
-  if (queuedId) {
-    requeuePendingPrompt(view, queuedId);
-    return;
-  }
-  view.enqueuePrompt(prompt, threadId, images, attachments, annotations, annotationSourcePath);
-}
-function requeuePendingPrompt(view, queuedId) {
-  if (!queuedId) return;
-  view.state.promptQueue = view.state.promptQueue.map((item) =>
-    item.id === queuedId ? { ...item, state: "pending" } : item
-  );
-  view.plugin.replaceLocalPromptQueue(view.state.promptQueue);
-  view.renderPromptQueue();
 }
 
 // src/ui/view/chat-dom.mjs
@@ -10682,8 +10713,7 @@ var PiAgentView = class extends f4.ItemView {
       );
       return;
     }
-    let skipQueueDrain = false;
-    const { run: n, acknowledgeQueuedDelivery } = beginTrackedRun(this, {
+    const tracked = beginTrackedRun(this, {
       prompt: e,
       threadId: t2,
       images,
@@ -10691,35 +10721,20 @@ var PiAgentView = class extends f4.ItemView {
       annotations,
       queuedId
     });
-    const handlers = createRunEventHandlers(this, n, t2, acknowledgeQueuedDelivery);
-    try {
-      const result = await this.plugin.runPiPrompt(
-        e,
-        {
-          isCanceled: () => n.canceling,
-          onEvent: handlers.onEvent,
-          onTextDelta: handlers.onTextDelta,
-          onPromptAccepted: handlers.onPromptAccepted
-        },
-        t2,
-        n.runner,
-        images,
-        delivery.promptContext
-      );
-      acknowledgeQueuedDelivery();
-      settleRunSuccess(this, n, t2, result);
-    } catch (error) {
-      if (queuedId && !n.accepted) {
-        requeuePendingPrompt(this, queuedId);
-        skipQueueDrain = true;
-      } else if (!n.accepted) {
-        restoreUnsentAnnotations();
-      }
-      if (settleRunFailure(this, n, t2, error) === "canceled") return;
-      skipQueueDrain = true;
-    } finally {
-      settleRunCleanup(this, t2, skipQueueDrain);
-    }
+    const handlers = createRunEventHandlers(
+      this,
+      tracked.run,
+      t2,
+      tracked.acknowledgeQueuedDelivery
+    );
+    const skipQueueDrain = await executePromptRun(
+      this,
+      { prompt: e, threadId: t2, images, queuedId, promptContext: delivery.promptContext },
+      tracked,
+      handlers,
+      restoreUnsentAnnotations
+    );
+    settleRunCleanup(this, t2, skipQueueDrain);
   }
   notifyRunCompleted(runId, threadId, body = "Agent response completed. Click to open the chat.") {
     if (!this.plugin.settings.desktopNotifications) return false;

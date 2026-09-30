@@ -31,15 +31,13 @@ import { ThreadActions } from "./thread-actions.mjs";
 import {
   beginTrackedRun,
   createRunEventHandlers,
-  settleRunCleanup,
-  settleRunFailure,
-  settleRunSuccess
+  executePromptRun,
+  settleRunCleanup
 } from "./view/run-lifecycle.mjs";
 import {
   enrichPromptDelivery,
   enqueueOrRequeue,
   reportDeliveryFailure,
-  requeuePendingPrompt,
   resolvePromptInput
 } from "./view/run-prompt.mjs";
 import {
@@ -481,8 +479,7 @@ export class PiAgentView extends f.ItemView {
       );
       return;
     }
-    let skipQueueDrain = false;
-    const { run: n, acknowledgeQueuedDelivery } = beginTrackedRun(this, {
+    const tracked = beginTrackedRun(this, {
       prompt: e,
       threadId: t,
       images,
@@ -490,38 +487,20 @@ export class PiAgentView extends f.ItemView {
       annotations,
       queuedId
     });
-    const handlers = createRunEventHandlers(this, n, t, acknowledgeQueuedDelivery);
-    try {
-      const result = await this.plugin.runPiPrompt(
-        e,
-        {
-          isCanceled: () => n.canceling,
-          onEvent: handlers.onEvent,
-          onTextDelta: handlers.onTextDelta,
-          onPromptAccepted: handlers.onPromptAccepted
-        },
-        t,
-        n.runner,
-        images,
-        delivery.promptContext
-      );
-      acknowledgeQueuedDelivery();
-      settleRunSuccess(this, n, t, result);
-    } catch (error) {
-      // A queued prompt that was never accepted goes back to pending and the
-      // queue must not drain; a directly-typed one gives its consumed
-      // annotations back. A cancel is neither: the queue drains as usual.
-      if (queuedId && !n.accepted) {
-        requeuePendingPrompt(this, queuedId);
-        skipQueueDrain = true;
-      } else if (!n.accepted) {
-        restoreUnsentAnnotations();
-      }
-      if (settleRunFailure(this, n, t, error) === "canceled") return;
-      skipQueueDrain = true;
-    } finally {
-      settleRunCleanup(this, t, skipQueueDrain);
-    }
+    const handlers = createRunEventHandlers(
+      this,
+      tracked.run,
+      t,
+      tracked.acknowledgeQueuedDelivery
+    );
+    const skipQueueDrain = await executePromptRun(
+      this,
+      { prompt: e, threadId: t, images, queuedId, promptContext: delivery.promptContext },
+      tracked,
+      handlers,
+      restoreUnsentAnnotations
+    );
+    settleRunCleanup(this, t, skipQueueDrain);
   }
   notifyRunCompleted(runId, threadId, body = "Agent response completed. Click to open the chat.") {
     if (!this.plugin.settings.desktopNotifications) return false;
