@@ -122,6 +122,7 @@ function createPlugin(runners = []) {
   const plugin = Object.create(PiAgentPlugin.prototype);
   plugin.settings = { ...DEFAULT_SETTINGS };
   plugin.threadRunners = new Map(runners);
+  plugin.ephemeralRunners = new Set();
   plugin.annotationController = { destroy: vi.fn() };
   return plugin;
 }

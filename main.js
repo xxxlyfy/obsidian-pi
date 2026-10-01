@@ -11738,6 +11738,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = /* @__PURE__ */ new Map();
+    this.ephemeralRunners = /* @__PURE__ */ new Set();
     this.unloading = false;
     this.piCommands = [];
     this.commandCatalogLoaded = false;
@@ -11880,6 +11881,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.annotationController?.destroy();
     this.cancelAllPiRuns();
     this.disposeThreadRunners();
+    this.disposeEphemeralThreadRunners();
   }
   async loadSettings() {
     const rawData = (await this.loadData()) ?? {};
@@ -12151,14 +12153,19 @@ var PiAgentPlugin = class extends P.Plugin {
    *
    * Built from the same settings, context builder, directories and extension UI as
    * a chat runner, but deliberately not registered in `threadRunners`: the caller
-   * owns it and disposes it, so a temporary lookup cannot leave a Pi process
-   * behind. `threadId` plays no part in the configuration -- it is only the key a
-   * chat runner is cached under -- so no thread id is needed here.
+   * owns it and disposes it through `disposeEphemeralThreadRunner()`, so a temporary
+   * lookup cannot leave a Pi process behind. `threadId` plays no part in the
+   * configuration -- it is only the key a chat runner is cached under -- so no thread
+   * id is needed here.
+   *
+   * The runner is tracked in `ephemeralRunners` until the caller releases it, so
+   * `onunload()` can release a lookup that is still waiting for Pi. It never sets
+   * `isRunning` and is never cancelled: disposing its client is what ends its request.
    */
   createEphemeralThreadRunner() {
     (!this.graph || !this.contextBuilder) && this.rebuildServices({ disposeThreadRunners: false });
     if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
-    return new PiRunner(
+    const runner = new PiRunner(
       this.settings,
       this.contextBuilder,
       this.getVaultBasePath(),
@@ -12166,6 +12173,37 @@ var PiAgentPlugin = class extends P.Plugin {
       void 0,
       this.getExtensionUiHandler()
     );
+    this.ephemeralRunners.add(runner);
+    return runner;
+  }
+  /**
+   * Release one ephemeral runner and stop tracking it.
+   *
+   * Idempotent on purpose: `onunload()` may already have released this runner, so the
+   * `finally` of the operation that borrowed it can run afterwards without reporting
+   * anything. A failing release is a warning; it must not break the caller.
+   *
+   * @param {PiRunner} runner Runner a one-shot session operation borrowed.
+   */
+  disposeEphemeralThreadRunner(runner) {
+    this.ephemeralRunners.delete(runner);
+    try {
+      runner.dispose();
+    } catch (error) {
+      console.warn("Pi Agent: could not dispose an ephemeral Pi runner", error);
+    }
+  }
+  /**
+   * Release every ephemeral runner that is still in flight, for `onunload()`.
+   *
+   * Snapshot before clearing, so a runner that settles while this loop runs cannot
+   * change what is being released, and so one failing release cannot leave the others
+   * running.
+   */
+  disposeEphemeralThreadRunners() {
+    const runners = [...this.ephemeralRunners];
+    this.ephemeralRunners.clear();
+    for (const runner of runners) this.disposeEphemeralThreadRunner(runner);
   }
   async getThreadSessionStats(threadId) {
     const thread = this.threadHistory.getThread(threadId);
@@ -12176,7 +12214,7 @@ var PiAgentPlugin = class extends P.Plugin {
     try {
       return await runner.getSessionStats(thread.piSessionId);
     } finally {
-      runner.dispose();
+      this.disposeEphemeralThreadRunner(runner);
     }
   }
   async exportThreadSession(threadId) {
@@ -12188,7 +12226,7 @@ var PiAgentPlugin = class extends P.Plugin {
     try {
       return await runner.exportSession(thread.piSessionId);
     } finally {
-      runner.dispose();
+      this.disposeEphemeralThreadRunner(runner);
     }
   }
   async getThreadSessionTree(threadId) {
@@ -12200,7 +12238,7 @@ var PiAgentPlugin = class extends P.Plugin {
     try {
       return await runner.getSessionTree(thread.piSessionId);
     } finally {
-      runner.dispose();
+      this.disposeEphemeralThreadRunner(runner);
     }
   }
   async getThreadSessionEntries(threadId, since) {
@@ -12384,9 +12422,17 @@ var PiAgentPlugin = class extends P.Plugin {
     this.saveThreadHistory();
     if (thread?.piSessionId) {
       const sessionName = this.threadHistory.getThread(e)?.title ?? t2;
-      this.createPiRunner(e)
+      const existing = this.threadRunners.get(e);
+      const runner = existing ?? this.createEphemeralThreadRunner();
+      void runner
         .setSessionName(thread.piSessionId, sessionName)
-        .catch((error) => console.warn("Pi Agent: could not rename Pi session", error));
+        .catch((error) => {
+          console.warn("Pi Agent: could not rename Pi session", error);
+        })
+        .finally(() => {
+          if (existing) return;
+          this.disposeEphemeralThreadRunner(runner);
+        });
     }
     return true;
   }

@@ -45,6 +45,8 @@ const { PiRunner } = await import("../src/pi/runner.mjs");
 const { ThreadStore } = await import("../src/threads/thread-store.mjs");
 
 const PI_FIXTURE = path.resolve("tests/fixtures/fake-pi-rpc.mjs");
+/** Receives one-shot session commands and never answers them, keeping them pending. */
+const PI_PENDING_FIXTURE = path.resolve("tests/fixtures/fake-pi-rpc-pending.mjs");
 
 let tempDirs = [];
 let plugins = [];
@@ -60,14 +62,29 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  for (const client of startedClients) if (!client.disposed) client.dispose();
-  startedClients = [];
-  // A chat runner a test created on purpose still owns a real Pi child process.
+afterEach(async () => {
+  const clients = startedClients.splice(0);
+  for (const client of clients) if (!client.disposed) client.dispose();
+  // A chat runner a test created on purpose still owns a real Pi child process, and so
+  // does an ephemeral runner a test left in flight.
   for (const plugin of plugins.splice(0)) {
     for (const runner of plugin.threadRunners.values()) runner.rpcClient?.dispose();
     plugin.threadRunners.clear();
+    for (const runner of plugin.ephemeralRunners ?? []) runner.rpcClient?.dispose();
+    plugin.ephemeralRunners?.clear();
   }
+  // Wait for every real child process of this test to be gone, so the next test starts
+  // on a quiet machine.
+  await vi.waitFor(
+    () =>
+      expect(
+        clients.every(
+          (client) =>
+            !client.child || client.child.exitCode !== null || client.child.signalCode !== null
+        )
+      ).toBe(true),
+    { timeout: 10_000 }
+  );
   for (const tempDir of tempDirs) {
     fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
@@ -88,15 +105,15 @@ function createTempDir() {
  * environment, and `PiRunner` always launches its client with Pi's own CLI
  * arguments, so the launcher ignores those arguments and starts the fixture.
  */
-function createFakePiLauncher() {
+function createFakePiLauncher(fixture = PI_FIXTURE) {
   const directory = createTempDir();
   if (process.platform === "win32") {
     const launcher = path.join(directory, "fake-pi.cmd");
-    fs.writeFileSync(launcher, `@echo off\r\n"${process.execPath}" "${PI_FIXTURE}"\r\n`, "utf8");
+    fs.writeFileSync(launcher, `@echo off\r\n"${process.execPath}" "${fixture}"\r\n`, "utf8");
     return launcher;
   }
   const launcher = path.join(directory, "fake-pi.sh");
-  fs.writeFileSync(launcher, `#!/bin/sh\nexec "${process.execPath}" "${PI_FIXTURE}"\n`, "utf8");
+  fs.writeFileSync(launcher, `#!/bin/sh\nexec "${process.execPath}" "${fixture}"\n`, "utf8");
   fs.chmodSync(launcher, 0o755);
   return launcher;
 }
@@ -107,7 +124,7 @@ function createFakePiLauncher() {
  * looks exactly like a historical thread the thread list offers Session Info or
  * Export for.
  */
-function createSessionPlugin(threadIds) {
+function createSessionPlugin(threadIds, { piFixture = PI_FIXTURE } = {}) {
   const pluginDirectory = createTempDir();
   const sessionDirectory = path.join(pluginDirectory, "pi-sessions");
   fs.mkdirSync(sessionDirectory, { recursive: true });
@@ -128,8 +145,10 @@ function createSessionPlugin(threadIds) {
   });
 
   const plugin = Object.create(PiAgentPlugin.prototype);
-  plugin.settings = { ...DEFAULT_SETTINGS, piExecutablePath: createFakePiLauncher() };
+  plugin.settings = { ...DEFAULT_SETTINGS, piExecutablePath: createFakePiLauncher(piFixture) };
   plugin.threadRunners = new Map();
+  // The constructor field `createEphemeralThreadRunner()` registers into.
+  plugin.ephemeralRunners = new Set();
   plugin.modelCatalogGeneration = 0;
   plugin.modelCatalogRefreshedAt = 0;
   plugin.piCommands = [];
@@ -157,6 +176,7 @@ function trackSessionActivity({ failRequestTypes = [] } = {}) {
   const runners = [];
   const requests = [];
   const disposals = [];
+  const events = [];
 
   for (const method of [
     "getSessionStats",
@@ -185,7 +205,28 @@ function trackSessionActivity({ failRequestTypes = [] } = {}) {
     return originalDispose.apply(this, args);
   });
 
-  return { runners, requests, disposals };
+  // Every message the client parsed out of Pi's stdout, so a test can prove what the
+  // child really received and answered.
+  const originalEmit = PiRpcClient.prototype.emit;
+  vi.spyOn(PiRpcClient.prototype, "emit").mockImplementation(function (...args) {
+    events.push({ client: this, message: args[0] });
+    return originalEmit.apply(this, args);
+  });
+
+  return { runners, requests, disposals, events };
+}
+
+/** Wait until a fake Pi child has reported that it is holding `command` unanswered. */
+async function waitForRequestPending(events, command, timeoutMs = 10_000) {
+  await vi.waitFor(
+    () =>
+      expect(
+        events.filter(
+          ({ message }) => message.type === "request_pending" && message.command === command
+        )
+      ).toHaveLength(1),
+    { timeout: timeoutMs }
+  );
 }
 
 function distinctClients({ requests }) {
@@ -219,9 +260,13 @@ describe("session operations on a thread that has no runner", () => {
     expect(tracker.requests.map(({ type }) => type)).toEqual(["get_session_stats"]);
     expect(plugin.threadRunners.size).toBe(0);
     expect(plugin.threadRunners.has("thread-a")).toBe(false);
+    // The plugin tracked the runner it borrowed, and stopped tracking it when the
+    // operation completed.
+    expect(plugin.ephemeralRunners.size).toBe(0);
     expect(tracker.runners).toHaveLength(1);
     expect(tracker.runners[0]).toBeInstanceOf(PiRunner);
     expect(tracker.runners[0].disposed).toBe(true);
+    expect(plugin.ephemeralRunners.has(tracker.runners[0])).toBe(false);
     const clients = distinctClients(tracker);
     expect(clients).toHaveLength(1);
     expect(clients[0]).toBeInstanceOf(PiRpcClient);
@@ -239,6 +284,7 @@ describe("session operations on a thread that has no runner", () => {
 
     expect(tracker.requests.map(({ type }) => type)).toEqual(["get_tree"]);
     expect(plugin.threadRunners.size).toBe(0);
+    expect(plugin.ephemeralRunners.size).toBe(0);
     expect(tracker.runners).toHaveLength(1);
     expect(tracker.runners[0].disposed).toBe(true);
     const clients = distinctClients(tracker);
@@ -255,6 +301,7 @@ describe("session operations on a thread that has no runner", () => {
 
     expect(tracker.requests.map(({ type }) => type)).toEqual(["export_html"]);
     expect(plugin.threadRunners.size).toBe(0);
+    expect(plugin.ephemeralRunners.size).toBe(0);
     expect(tracker.runners).toHaveLength(1);
     expect(tracker.runners[0].disposed).toBe(true);
     const clients = distinctClients(tracker);
@@ -265,18 +312,24 @@ describe("session operations on a thread that has no runner", () => {
 
   it("never registers the temporary runner while it is working", async () => {
     const plugin = createSessionPlugin(["thread-a"]);
-    const sizesDuringRequests = [];
+    const threadRegistrySizes = [];
+    const ephemeralRegistrySizes = [];
     const originalRequest = PiRpcClient.prototype.request;
     vi.spyOn(PiRpcClient.prototype, "request").mockImplementation(function (type, ...rest) {
-      sizesDuringRequests.push(plugin.threadRunners.size);
+      threadRegistrySizes.push(plugin.threadRunners.size);
+      ephemeralRegistrySizes.push(plugin.ephemeralRunners.size);
       return originalRequest.call(this, type, ...rest);
     });
 
     await plugin.getThreadSessionStats("thread-a");
 
-    // Not registered before, during, or after the request.
-    expect(sizesDuringRequests).toEqual([0]);
+    // Not registered as a thread runner before, during, or after the request...
+    expect(threadRegistrySizes).toEqual([0]);
     expect(plugin.threadRunners.size).toBe(0);
+    // ...but tracked as the plugin's ephemeral runner for exactly as long as it exists,
+    // which is what lets `onunload()` release it.
+    expect(ephemeralRegistrySizes).toEqual([1]);
+    expect(plugin.ephemeralRunners.size).toBe(0);
   });
 
   it("runs Session Info stats and tree concurrently without either releasing the other", async () => {
@@ -306,6 +359,7 @@ describe("session operations on a thread that has no runner", () => {
     expect(clients.every((client) => client.disposed === true)).toBe(true);
     expect(tracker.disposals).toHaveLength(2);
     expect(plugin.threadRunners.size).toBe(0);
+    expect(plugin.ephemeralRunners.size).toBe(0);
     await expectChildProcessesGone(tracker);
   });
 
@@ -323,6 +377,9 @@ describe("session operations on a thread that has no runner", () => {
     // The failure happened before any client was started.
     expect(tracker.requests).toEqual([]);
     expect(plugin.threadRunners.size).toBe(0);
+    // A failed lookup is not tracked either.
+    expect(plugin.ephemeralRunners.size).toBe(0);
+    expect(plugin.ephemeralRunners.has(tracker.runners[0])).toBe(false);
   });
 
   it("disposes the temporary client and Pi process when the session RPC fails", async () => {
@@ -340,6 +397,8 @@ describe("session operations on a thread that has no runner", () => {
     expect(clients[0].disposed).toBe(true);
     expect(tracker.disposals.map(({ client }) => client)).toEqual(clients);
     expect(plugin.threadRunners.size).toBe(0);
+    // A failing RPC releases the borrowed runner and stops tracking it too.
+    expect(plugin.ephemeralRunners.size).toBe(0);
     await expectChildProcessesGone(tracker);
   });
 
@@ -366,6 +425,7 @@ describe("session operations on a thread that has no runner", () => {
     expect(clients.every((client) => client.disposed === true)).toBe(true);
     expect(tracker.disposals).toHaveLength(30);
     await expectChildProcessesGone(tracker);
+    expect(plugin.ephemeralRunners.size).toBe(0);
   }, 120_000);
 });
 
@@ -399,5 +459,53 @@ describe("session operations on a thread that already has a runner", () => {
       "get_session_stats",
       "get_tree"
     ]);
+    // A reused thread runner is never an ephemeral one.
+    expect(plugin.ephemeralRunners.size).toBe(0);
   });
+});
+
+describe("session operations pending when the plugin unloads", () => {
+  it("releases a pending session lookup, its client and its Pi process", async () => {
+    const plugin = createSessionPlugin(["thread-a"], { piFixture: PI_PENDING_FIXTURE });
+    const tracker = trackSessionActivity();
+
+    // Session Info asks for the stats and never gets an answer: the operation is still
+    // in flight when the plugin unloads. Its outcome is captured in the same tick, so
+    // the test observes the rejection instead of leaving Node to report it as unhandled.
+    const stats = plugin.getThreadSessionStats("thread-a");
+    const statsOutcome = stats.then(
+      () => undefined,
+      (error) => error
+    );
+    await waitForRequestPending(tracker.events, "get_session_stats");
+    const [client] = distinctClients(tracker);
+    const child = client.child;
+    expect(plugin.threadRunners.size).toBe(0);
+    expect(plugin.ephemeralRunners.size).toBe(1);
+    expect(tracker.runners).toHaveLength(1);
+    expect(plugin.ephemeralRunners.has(tracker.runners[0])).toBe(true);
+    expect(client.pending.size).toBe(1);
+    expect(client.running).toBe(true);
+    expect(child.exitCode).toBeNull();
+
+    expect(() => plugin.onunload()).not.toThrow();
+
+    // The generic owner released a session lookup exactly like a rename: Set cleared,
+    // runner and client disposed, process on its way out -- no 30s RPC timeout needed.
+    expect(plugin.ephemeralRunners.size).toBe(0);
+    expect(tracker.runners[0].disposed).toBe(true);
+    expect(tracker.runners[0].rpcClient).toBeUndefined();
+    expect(client.disposed).toBe(true);
+    await vi.waitFor(
+      () => expect(child.exitCode !== null || child.signalCode !== null).toBe(true),
+      { timeout: 2_000 }
+    );
+
+    // The operation that borrowed the runner still settles, through the rejection the
+    // disposed client gives it, instead of hanging until the request times out.
+    expect((await statsOutcome)?.message).toBe("Pi RPC client disposed.");
+    expect(plugin.ephemeralRunners.size).toBe(0);
+    expect(harness.notices).toEqual([]);
+    expect(plugin.threadRunners.size).toBe(0);
+  }, 60_000);
 });
