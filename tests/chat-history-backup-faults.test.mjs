@@ -423,45 +423,95 @@ describe("2: replacing the current snapshot fails", () => {
 // ---------------------------------------------------------------------------
 // 3. Temporary file cleanup fails
 // ---------------------------------------------------------------------------
+//
+// Cleanup runs *after* the step that decided the outcome, so it must never decide it.
+// A completed replace has already published the new snapshot: failing to unlink the
+// (already renamed away) temporary file is a diagnostic, not a failed save. And when
+// the replace itself failed, the cleanup error must not take the place of the error in
+// flight, or the caller is told "EPERM on a temporary file" instead of the real reason
+// the snapshot was not written.
 
-describe("3: temporary file cleanup fails", () => {
-  it("3a: a cleanup failure reports the write as failed although both snapshots are durable", async () => {
+describe("3: a failed temporary cleanup never overrides the main result", () => {
+  it("3a: a cleanup failure after a completed write still resolves, and current is the new version", async () => {
     const fsFaults = installFaults();
     const directory = createDirectory();
     await writeChatHistoryBackup(directory, createHistory("v1"));
 
+    // Only the temporary file the write created for this generation resists deletion;
+    // the rotation's own temporary file and `current` are untouched by the rule.
     fsFaults.fail("rm", {
       code: "EPERM",
-      match: (e) =>
-        e.path === currentPath(directory) || e.path.startsWith(`${currentPath(directory)}.tmp-`)
-    });
-    await expect(writeChatHistoryBackup(directory, createHistory("v2"))).rejects.toMatchObject({
-      code: "EPERM"
+      match: (e) => e.path.startsWith(`${currentPath(directory)}.tmp-`)
     });
 
+    const outcome = await writeChatHistoryBackup(directory, createHistory("v2")).then(
+      () => ({ rejected: false, error: undefined }),
+      (error) => ({ rejected: true, error })
+    );
+
     const snapshot = await inspect(directory);
-    // The data is exactly what a successful write would have left behind, and the
-    // cleanup error was not swallowed: the caller was told the write failed. (A
-    // successful rename has already consumed the temporary file, so the failing
-    // `rm` targets a path that no longer exists -- the point here is that a throwing
-    // cleanup propagates at all.)
-    expect(injectedFailures(fsFaults.calls("rm"))).toEqual(["rm:EPERM"]);
+    // The rename that published the new snapshot succeeded, so the write is a success:
+    // the caller must not be told the save failed while current already holds v2.
+    expect(outcome.rejected).toBe(false);
+    expect(outcome.error).toBeUndefined();
     expect(snapshot.current).toBe("valid:v2");
     expect(snapshot.previous).toBe("valid:v1");
     expect(snapshot.recovered).toBe("v2");
     expect(snapshot.bothUnrecoverable).toBe(false);
+
+    // A successful rename consumed the temporary file, so the failing `rm` targeted a
+    // path that no longer exists: nothing is left behind on this path, and the reader
+    // in any case only ever consults current/previous.
+    expect(injectedFailures(fsFaults.calls("rm"))).toEqual(["rm:EPERM"]);
     expect(snapshot.leftovers).toEqual([]);
-    logFacts("3a", "finally rm(main temp) EPERM after a completed write", snapshot);
+    logFacts("3a", "cleanup rm(main temp) EPERM after a completed write", snapshot);
   });
 
-  it("3b: a cleanup failure replaces the original error the write failed with", async () => {
+  it("3a2: a leftover temporary file is ignored, so the write stays current and recoverable", async () => {
+    const fsFaults = installFaults();
+    const directory = createDirectory();
+    await writeChatHistoryBackup(directory, createHistory("v1"));
+
+    // The cleanup of the main temporary file fails; the rotation's own cleanup is left
+    // alone so the write reaches publication.
+    fsFaults.fail("rm", {
+      code: "EPERM",
+      match: (e) => e.path.startsWith(`${currentPath(directory)}.tmp-`)
+    });
+    const outcome = await writeChatHistoryBackup(directory, createHistory("v2")).then(
+      () => ({ rejected: false, error: undefined }),
+      (error) => ({ rejected: true, error })
+    );
+    // On a platform where that delete really fails, the temporary file is still there.
+    // Recreate it under the name this write used, which is what a failed unlink would
+    // have left behind, and check that it changes nothing for the reader.
+    const [mainTemporary] = mainTemporaryPaths(fsFaults.log, directory);
+    expect(mainTemporary).toContain(`${BACKUP_FILE}.tmp-`);
+    fs.writeFileSync(mainTemporary, "leftover", "utf8");
+
+    const snapshot = await inspect(directory);
+    expect(outcome.rejected).toBe(false);
+    expect(snapshot.current).toBe("valid:v2");
+    expect(snapshot.recovered).toBe("v2");
+    // The stray temporary file exists and is simply not a snapshot.
+    expect(snapshot.leftovers).toHaveLength(1);
+    expect(await readChatHistoryBackup(directory)).toEqual(createHistory("v2"));
+    logFacts(
+      "3a2",
+      "cleanup rm(main temp) EPERM, leftover on disk, write still succeeds",
+      snapshot
+    );
+  });
+
+  it("3b: a cleanup failure keeps the original replace error as the rejection", async () => {
     const fsFaults = installFaults();
     const directory = createDirectory();
     await writeChatHistoryBackup(directory, createHistory("v1"));
     await writeChatHistoryBackup(directory, createHistory("v2"));
 
-    // The rename fails first with EACCES; the finally-block cleanup then fails with
-    // EPERM, which is the error the caller actually sees.
+    // The replacing rename fails first with EACCES; the cleanup then fails with EPERM.
+    // The EACCES is the real reason v3 was not written, so it must be what the caller
+    // sees -- not the cleanup's EPERM.
     fsFaults.fail("rename", {
       code: "EACCES",
       match: (e) => e.destination === currentPath(directory)
@@ -470,13 +520,19 @@ describe("3: temporary file cleanup fails", () => {
       code: "EPERM",
       match: (e) => e.path.startsWith(`${currentPath(directory)}.tmp-`)
     });
-    await expect(writeChatHistoryBackup(directory, createHistory("v3"))).rejects.toMatchObject({
-      code: "EPERM"
-    });
+
+    const outcome = await writeChatHistoryBackup(directory, createHistory("v3")).then(
+      () => ({ rejected: false, error: undefined }),
+      (error) => ({ rejected: true, error })
+    );
 
     const snapshot = await inspect(directory);
-    // The rotation to previous=v2 ran first, so the history is intact; the rename
-    // error the write failed with is replaced by the cleanup error in flight.
+    expect(outcome.rejected).toBe(true);
+    expect(outcome.error).toMatchObject({ code: "EACCES" });
+    expect(outcome.error?.code).not.toBe("EPERM");
+
+    // The rotation to previous=v2 ran before the failing replace, so both generations
+    // survive; the current snapshot was never touched.
     expect(injectedFailures(fsFaults.log)).toEqual(["rename:EACCES", "rm:EPERM"]);
     expect(snapshot.current).toBe("valid:v2");
     expect(snapshot.previous).toBe("valid:v2");
@@ -485,31 +541,101 @@ describe("3: temporary file cleanup fails", () => {
     // The temporary file the failed rename left behind also survives the failed
     // cleanup, and the reader simply ignores it.
     expect(snapshot.leftovers).toHaveLength(1);
-    logFacts("3b", "replaceFile rename(EACCES) masked by finally rm(EPERM)", snapshot);
+    logFacts("3b", "replaceFile rename(EACCES) with cleanup rm(EPERM) behind it", snapshot);
   });
 
-  it("3c: a cleanup failure in the copy aborts before current is replaced", async () => {
+  it("3c: a cleanup failure in copyAtomic after a completed rotation still resolves", async () => {
     const fsFaults = installFaults();
     const directory = createDirectory();
     await writeChatHistoryBackup(directory, createHistory("v1"));
 
-    // Only the previous-generation temporary file resists deletion.
+    // `copyAtomic()` replaced previous=v1 successfully; only its now-consumed
+    // temporary file resists deletion.
     fsFaults.fail("rm", {
       code: "EPERM",
       match: (e) => e.path.startsWith(`${previousPath(directory)}.tmp-`)
     });
-    await expect(writeChatHistoryBackup(directory, createHistory("v2"))).rejects.toMatchObject({
-      code: "EPERM"
-    });
+
+    const outcome = await writeChatHistoryBackup(directory, createHistory("v2")).then(
+      () => ({ rejected: false, error: undefined }),
+      (error) => ({ rejected: true, error })
+    );
 
     const snapshot = await inspect(directory);
-    // The previous generation was written and the current was never replaced: the
-    // new version was not applied, and nothing was lost.
-    expect(snapshot.current).toBe("valid:v1");
+    // The rotation succeeded, so the write carries on and publishes v2 as current.
+    expect(outcome.rejected).toBe(false);
+    expect(outcome.error).toBeUndefined();
+    expect(snapshot.current).toBe("valid:v2");
     expect(snapshot.previous).toBe("valid:v1");
+    expect(snapshot.recovered).toBe("v2");
+    expect(snapshot.bothUnrecoverable).toBe(false);
+    logFacts("3c", "copyAtomic cleanup rm(previous temp) EPERM after its replace", snapshot);
+  });
+
+  it("3d: a cleanup failure in copyAtomic keeps the original replace error", async () => {
+    const fsFaults = installFaults();
+    const directory = createDirectory();
+    await writeChatHistoryBackup(directory, createHistory("v1"));
+
+    // `copyAtomic(backup -> previous)` writes its temporary file, fails to replace
+    // previous with EACCES (not retryable, so previous is left as it is), and then
+    // fails to clean up with EPERM.
+    fsFaults.fail("rename", {
+      code: "EACCES",
+      match: (e) => e.destination === previousPath(directory)
+    });
+    fsFaults.fail("rm", {
+      code: "EPERM",
+      match: (e) => e.path.startsWith(`${previousPath(directory)}.tmp-`)
+    });
+
+    const outcome = await writeChatHistoryBackup(directory, createHistory("v2")).then(
+      () => ({ rejected: false, error: undefined }),
+      (error) => ({ rejected: true, error })
+    );
+
+    const snapshot = await inspect(directory);
+    expect(outcome.rejected).toBe(true);
+    expect(outcome.error).toMatchObject({ code: "EACCES" });
+    // The rotation failure stopped the write before any `current` replace, so v1 is
+    // still current and still recoverable.
+    expect(injectedFailures(fsFaults.log)).toEqual(["rename:EACCES", "rm:EPERM"]);
+    expect(snapshot.current).toBe("valid:v1");
+    expect(snapshot.previous).toBe("missing");
     expect(snapshot.recovered).toBe("v1");
     expect(snapshot.bothUnrecoverable).toBe(false);
-    logFacts("3c", "copyAtomic finally rm(previous temp) EPERM", snapshot);
+    logFacts("3d", "copyAtomic replace rename(EACCES) with cleanup rm(EPERM) behind it", snapshot);
+  });
+
+  it("3e: a cleanup failure never turns a main copyAtomic failure into a cleanup rejection", async () => {
+    const fsFaults = installFaults();
+    const directory = createDirectory();
+    await writeChatHistoryBackup(directory, createHistory("old"));
+
+    // The rotation's copy fails, and the main temporary file the writer then has to
+    // clean up resists deletion as well.
+    fsFaults.fail("copyFile", { code: "ENOSPC", match: () => true });
+    fsFaults.fail("rm", {
+      code: "EPERM",
+      match: (e) => e.path.startsWith(`${currentPath(directory)}.tmp-`)
+    });
+    const mark = fsFaults.mark();
+
+    const outcome = await writeChatHistoryBackup(directory, createHistory("new")).then(
+      () => ({ rejected: false, error: undefined }),
+      (error) => ({ rejected: true, error })
+    );
+
+    const snapshot = await inspect(directory);
+    // The out-of-space failure is the reason nothing was written; the cleanup EPERM
+    // behind it is not allowed to take its place.
+    expect(outcome.rejected).toBe(true);
+    expect(outcome.error).toMatchObject({ code: "ENOSPC" });
+    expect(injectedFailures(fsFaults.log.slice(mark))).toEqual(["copyFile:ENOSPC", "rm:EPERM"]);
+    expect(snapshot.current).toBe("valid:old");
+    expect(snapshot.recovered).toBe("old");
+    expect(snapshot.bothUnrecoverable).toBe(false);
+    logFacts("3e", "copyAtomic copyFile(ENOSPC) with cleanup rm(EPERM) behind it", snapshot);
   });
 });
 

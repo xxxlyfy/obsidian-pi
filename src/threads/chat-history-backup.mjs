@@ -31,7 +31,7 @@ export async function writeChatHistoryBackup(pluginDirectory, history) {
     if (current) await copyAtomic(backupPath, previousPath);
     await replaceFile(temporaryPath, backupPath);
   } finally {
-    await fs.promises.rm(temporaryPath, { force: true });
+    await removeTemporaryFile(temporaryPath);
   }
 }
 
@@ -132,7 +132,7 @@ async function copyAtomic(sourcePath, destinationPath) {
   try {
     await replaceFile(temporaryPath, destinationPath);
   } finally {
-    await fs.promises.rm(temporaryPath, { force: true });
+    await removeTemporaryFile(temporaryPath);
   }
 }
 
@@ -143,5 +143,35 @@ async function replaceFile(sourcePath, destinationPath) {
     if (!["EEXIST", "EPERM"].includes(error?.code)) throw error;
     await fs.promises.rm(destinationPath, { force: true });
     await fs.promises.rename(sourcePath, destinationPath);
+  }
+}
+
+/**
+ * Best-effort removal of one write's temporary file.
+ *
+ * This runs after the rename (or the copy) that decided the outcome, so it is the only
+ * remaining step, and it must never decide that outcome itself:
+ *
+ * - A `rename(temporary -> backup)` that succeeded has already published the new
+ *   snapshot. Failing to delete the now-gone temporary file afterwards says nothing
+ *   about the write, so reporting it as a failed save would tell the caller the very
+ *   opposite of what is on disk.
+ * - A failed replace leaves its own error in flight. Throwing here would replace that
+ *   error with a cleanup error and hide the real reason the write failed.
+ *
+ * The temporary name is unique per write, so a leftover is a bounded, unreferenced
+ * file that no later write or reader can mistake for a snapshot; it can never take the
+ * place of the current one. The failure is therefore reported as a diagnostic and
+ * swallowed, and the caller keeps whichever result the main operation produced.
+ */
+async function removeTemporaryFile(temporaryPath) {
+  try {
+    await fs.promises.rm(temporaryPath, { force: true });
+  } catch (error) {
+    console.warn(
+      "Pi Agent: could not remove a temporary chat history backup file",
+      temporaryPath,
+      error
+    );
   }
 }

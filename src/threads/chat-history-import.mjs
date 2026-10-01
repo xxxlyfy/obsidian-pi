@@ -126,19 +126,31 @@ async function loadJsonThreads(folder) {
 
 async function loadIndexedThreads(root) {
   const result = await loadJsonThreads(path.join(root, "chats"));
+  // No `access()` pre-check: "the file is not there" and "the file could not be read" are
+  // different facts, and only a real read can tell them apart. A failed read warns
+  // instead of aborting, because the chat files were already read successfully and one
+  // unreadable metadata file must not discard them.
   const indexPath = path.join(root, "index.json");
-  if (await exists(indexPath)) {
+  const indexText = await readSnapshot(indexPath, result);
+  if (indexText !== undefined) {
     result.managedFiles.push(indexPath);
     try {
-      const index = JSON.parse(await fs.promises.readFile(indexPath, "utf8"));
+      const index = JSON.parse(indexText);
       if (typeof index?.currentThreadId === "string")
         result.currentThreadId = index.currentThreadId;
     } catch (error) {
+      // The bytes were read successfully, so a malformed payload is a content problem.
       result.warnings.push(`${indexPath}: ${errorMessage(error)}`);
     }
   }
+  // The legacy backup is only recorded as managed, never parsed, so its own check stays a
+  // probe -- but one that tells "absent" apart from "unreadable".
   const backupPath = path.join(root, "migration-backup-v0.json");
-  if (await exists(backupPath)) result.managedFiles.push(backupPath);
+  try {
+    if (await exists(backupPath)) result.managedFiles.push(backupPath);
+  } catch (error) {
+    result.warnings.push(`${backupPath}: ${errorMessage(error)}`);
+  }
   return result;
 }
 
@@ -322,8 +334,30 @@ async function exists(filePath) {
   try {
     await fs.promises.access(filePath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // Only a missing path is "not there". Every other failure -- EACCES, EPERM, EIO --
+    // says nothing about the path's existence, so it is handed to the caller instead of
+    // being reported as an absent file.
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+/**
+ * Read one optional snapshot file of the indexed layout.
+ *
+ * `undefined` means exactly "there is nothing here to read": the file is missing. Any
+ * other failure is a real read failure, and it is recorded as a warning on `result`
+ * rather than thrown, because the snapshot is metadata for a layout whose chat files were
+ * already read: losing `index.json` may cost a `currentThreadId`, never the chat threads.
+ */
+async function readSnapshot(filePath, result) {
+  try {
+    return await fs.promises.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    result.warnings.push(`${filePath}: ${errorMessage(error)}`);
+    return undefined;
   }
 }
 

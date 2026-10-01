@@ -11090,7 +11090,7 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
     if (current) await copyAtomic(backupPath, previousPath);
     await replaceFile(temporaryPath, backupPath);
   } finally {
-    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
+    await removeTemporaryFile(temporaryPath);
   }
 }
 async function readChatHistoryBackup(pluginDirectory) {
@@ -11165,7 +11165,7 @@ async function copyAtomic(sourcePath, destinationPath) {
   try {
     await replaceFile(temporaryPath, destinationPath);
   } finally {
-    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
+    await removeTemporaryFile(temporaryPath);
   }
 }
 async function replaceFile(sourcePath, destinationPath) {
@@ -11175,6 +11175,17 @@ async function replaceFile(sourcePath, destinationPath) {
     if (!["EEXIST", "EPERM"].includes(error?.code)) throw error;
     await import_node_fs4.default.promises.rm(destinationPath, { force: true });
     await import_node_fs4.default.promises.rename(sourcePath, destinationPath);
+  }
+}
+async function removeTemporaryFile(temporaryPath) {
+  try {
+    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
+  } catch (error) {
+    console.warn(
+      "Pi Agent: could not remove a temporary chat history backup file",
+      temporaryPath,
+      error
+    );
   }
 }
 
@@ -11301,10 +11312,11 @@ async function loadJsonThreads(folder) {
 async function loadIndexedThreads(root) {
   const result = await loadJsonThreads(import_node_path5.default.join(root, "chats"));
   const indexPath = import_node_path5.default.join(root, "index.json");
-  if (await exists(indexPath)) {
+  const indexText = await readSnapshot(indexPath, result);
+  if (indexText !== void 0) {
     result.managedFiles.push(indexPath);
     try {
-      const index = JSON.parse(await import_node_fs5.default.promises.readFile(indexPath, "utf8"));
+      const index = JSON.parse(indexText);
       if (typeof index?.currentThreadId === "string")
         result.currentThreadId = index.currentThreadId;
     } catch (error) {
@@ -11312,7 +11324,11 @@ async function loadIndexedThreads(root) {
     }
   }
   const backupPath = import_node_path5.default.join(root, "migration-backup-v0.json");
-  if (await exists(backupPath)) result.managedFiles.push(backupPath);
+  try {
+    if (await exists(backupPath)) result.managedFiles.push(backupPath);
+  } catch (error) {
+    result.warnings.push(`${backupPath}: ${errorMessage(error)}`);
+  }
   return result;
 }
 function parseMarkdownThread(content) {
@@ -11481,8 +11497,18 @@ async function exists(filePath) {
   try {
     await import_node_fs5.default.promises.access(filePath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+async function readSnapshot(filePath, result) {
+  try {
+    return await import_node_fs5.default.promises.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return void 0;
+    result.warnings.push(`${filePath}: ${errorMessage(error)}`);
+    return void 0;
   }
 }
 function emptyResult() {
