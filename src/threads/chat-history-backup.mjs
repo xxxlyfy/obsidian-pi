@@ -19,10 +19,15 @@ export async function writeChatHistoryBackup(pluginDirectory, history) {
 
   const backupPath = path.join(pluginDirectory, BACKUP_FILE);
   const previousPath = path.join(pluginDirectory, PREVIOUS_BACKUP_FILE);
-  const temporaryPath = `${backupPath}.tmp-${process.pid}-${Date.now()}`;
+  const temporaryPath = createTemporaryPath(backupPath);
   await fs.promises.writeFile(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   try {
-    const current = await readValidBackup(backupPath);
+    // Strict read on purpose: `undefined` here means "there is no usable current
+    // snapshot to rotate", so a real read failure aborts the write before anything is
+    // copied or replaced. Treating an unreadable current as an absent one used to skip
+    // the rotation and then let the replacing rename overwrite the only valid snapshot
+    // with nothing behind it.
+    const current = await readBackupSnapshot(backupPath);
     if (current) await copyAtomic(backupPath, previousPath);
     await replaceFile(temporaryPath, backupPath);
   } finally {
@@ -39,9 +44,27 @@ export async function readChatHistoryBackup(pluginDirectory) {
   return undefined;
 }
 
-async function readValidBackup(filePath) {
+/**
+ * Read one backup snapshot, separating "this file holds nothing usable" from "this
+ * file could not be read".
+ *
+ * `undefined` is returned for exactly the content-level outcomes: the snapshot does
+ * not exist (ENOENT), or what is in it is not a valid snapshot (unparsable JSON,
+ * wrong schema version, checksum mismatch, structurally invalid history). Every other
+ * failure -- EACCES, EPERM, EIO, EMFILE -- is rethrown, because it says nothing about
+ * the snapshot's content, and a caller must never treat a file it could not read as an
+ * empty one.
+ */
+async function readBackupSnapshot(filePath) {
+  let text;
   try {
-    const backup = JSON.parse(await fs.promises.readFile(filePath, "utf8"));
+    text = await fs.promises.readFile(filePath, "utf8");
+  } catch (error) {
+    if (/** @type {any} */ (error)?.code === "ENOENT") return undefined;
+    throw error;
+  }
+  try {
+    const backup = JSON.parse(text);
     if (
       backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
       backup.checksum !== checksum(backup.chatHistory)
@@ -49,6 +72,20 @@ async function readValidBackup(filePath) {
       return undefined;
     }
     return { ...backup, chatHistory: cloneHistory(backup.chatHistory) };
+  } catch {
+    // The bytes were read successfully, so a malformed payload is a content problem.
+    return undefined;
+  }
+}
+
+/**
+ * The recovery reader's view of a snapshot: one it cannot validate is simply skipped
+ * so the caller can try the next generation. This keeps `readChatHistoryBackup()`
+ * tolerant of unreadable files, which is the behaviour it has always had.
+ */
+async function readValidBackup(filePath) {
+  try {
+    return await readBackupSnapshot(filePath);
   } catch {
     return undefined;
   }
@@ -76,8 +113,21 @@ function checksum(history) {
   return crypto.createHash("sha256").update(JSON.stringify(history)).digest("hex");
 }
 
+/**
+ * The temporary name for one atomic write.
+ *
+ * `Date.now()` alone is not unique: two writers in the same process and the same
+ * millisecond used to compute the same path, so they truncated and overwrote each
+ * other's temporary file and then published the mixture as the new snapshot. A random
+ * UUID makes every generated name unique, which is what the write-then-rename pattern
+ * requires; the pid is kept only to make stray files easy to attribute.
+ */
+function createTemporaryPath(filePath) {
+  return `${filePath}.tmp-${process.pid}-${crypto.randomUUID()}`;
+}
+
 async function copyAtomic(sourcePath, destinationPath) {
-  const temporaryPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
+  const temporaryPath = createTemporaryPath(destinationPath);
   await fs.promises.copyFile(sourcePath, temporaryPath);
   try {
     await replaceFile(temporaryPath, destinationPath);

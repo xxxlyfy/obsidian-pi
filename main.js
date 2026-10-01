@@ -11078,7 +11078,7 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
   await import_node_fs4.default.promises.mkdir(pluginDirectory, { recursive: true });
   const backupPath = import_node_path4.default.join(pluginDirectory, BACKUP_FILE);
   const previousPath = import_node_path4.default.join(pluginDirectory, PREVIOUS_BACKUP_FILE);
-  const temporaryPath = `${backupPath}.tmp-${process.pid}-${Date.now()}`;
+  const temporaryPath = createTemporaryPath(backupPath);
   await import_node_fs4.default.promises.writeFile(
     temporaryPath,
     `${JSON.stringify(payload, null, 2)}
@@ -11086,7 +11086,7 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
     "utf8"
   );
   try {
-    const current = await readValidBackup(backupPath);
+    const current = await readBackupSnapshot(backupPath);
     if (current) await copyAtomic(backupPath, previousPath);
     await replaceFile(temporaryPath, backupPath);
   } finally {
@@ -11101,9 +11101,20 @@ async function readChatHistoryBackup(pluginDirectory) {
   }
   return void 0;
 }
-async function readValidBackup(filePath) {
+async function readBackupSnapshot(filePath) {
+  let text;
   try {
-    const backup = JSON.parse(await import_node_fs4.default.promises.readFile(filePath, "utf8"));
+    text = await import_node_fs4.default.promises.readFile(filePath, "utf8");
+  } catch (error) {
+    if (
+      /** @type {any} */
+      error?.code === "ENOENT"
+    )
+      return void 0;
+    throw error;
+  }
+  try {
+    const backup = JSON.parse(text);
     if (
       backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
       backup.checksum !== checksum(backup.chatHistory)
@@ -11111,6 +11122,13 @@ async function readValidBackup(filePath) {
       return void 0;
     }
     return { ...backup, chatHistory: cloneHistory(backup.chatHistory) };
+  } catch {
+    return void 0;
+  }
+}
+async function readValidBackup(filePath) {
+  try {
+    return await readBackupSnapshot(filePath);
   } catch {
     return void 0;
   }
@@ -11138,8 +11156,11 @@ function checksum(history) {
     .update(JSON.stringify(history))
     .digest("hex");
 }
+function createTemporaryPath(filePath) {
+  return `${filePath}.tmp-${process.pid}-${import_node_crypto2.default.randomUUID()}`;
+}
 async function copyAtomic(sourcePath, destinationPath) {
-  const temporaryPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
+  const temporaryPath = createTemporaryPath(destinationPath);
   await import_node_fs4.default.promises.copyFile(sourcePath, temporaryPath);
   try {
     await replaceFile(temporaryPath, destinationPath);
@@ -12033,7 +12054,15 @@ var PiAgentPlugin = class extends P.Plugin {
     this.piSessionMessageCounter?.dispose();
   }
   async loadSettings() {
-    const rawData = (await this.loadData()) ?? {};
+    let rawData =
+      /** @type {any} */
+      {};
+    try {
+      rawData = (await this.loadData()) ?? {};
+    } catch (error) {
+      if (!isJsonParseFailure(error)) throw error;
+      console.warn("Pi Agent: data.json could not be parsed; using default settings", error);
+    }
     const {
       chatHistory,
       messages,
@@ -13283,6 +13312,9 @@ var PiAgentPlugin = class extends P.Plugin {
     return n.endsWith(`/${configDir}`) ? `${n}/${s}` : `${n}/${configDir}/${s}`;
   }
 };
+function isJsonParseFailure(error) {
+  return error instanceof SyntaxError || /** @type {any} */ error?.name === "SyntaxError";
+}
 function isStoredChatHistory(history) {
   return (
     history &&

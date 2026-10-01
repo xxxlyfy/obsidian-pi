@@ -345,7 +345,22 @@ export class PiAgentPlugin extends P.Plugin {
     this.piSessionMessageCounter?.dispose();
   }
   async loadSettings() {
-    const rawData = (await this.loadData()) ?? {};
+    // The persisted plugin data, or an empty object when only a parse failure stood
+    // in the way. Typed loosely because it is whatever `data.json` held.
+    let rawData = /** @type {any} */ ({});
+    try {
+      rawData = (await this.loadData()) ?? {};
+    } catch (error) {
+      // Obsidian's `loadData()` reads `data.json` and hands its text to `JSON.parse`,
+      // so a corrupted file reaches this point as a SyntaxError from that parse. Only
+      // that case counts as damaged plugin data: a missing file, a permission failure
+      // or any other I/O error must keep failing loudly, because continuing with
+      // default settings would hide a vault the plugin cannot read. The chat history
+      // backup is consulted further down either way, so a damaged `data.json` no
+      // longer blocks recovery.
+      if (!isJsonParseFailure(error)) throw error;
+      console.warn("Pi Agent: data.json could not be parsed; using default settings", error);
+    }
     const {
       chatHistory,
       messages,
@@ -1699,6 +1714,18 @@ export class PiAgentPlugin extends P.Plugin {
     }
     return n.endsWith(`/${configDir}`) ? `${n}/${s}` : `${n}/${configDir}/${s}`;
   }
+}
+/**
+ * Whether a failed `loadData()` is a JSON parse failure.
+ *
+ * Reading `data.json` is `adapter.read()` followed by `JSON.parse`, and only that
+ * second step throws a SyntaxError. The name check is a fallback for a SyntaxError
+ * created in another realm, where `instanceof` does not hold.
+ *
+ * @param {unknown} error
+ */
+function isJsonParseFailure(error) {
+  return error instanceof SyntaxError || /** @type {any} */ (error)?.name === "SyntaxError";
 }
 function isStoredChatHistory(history) {
   return (
