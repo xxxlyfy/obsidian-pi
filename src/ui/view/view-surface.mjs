@@ -6,10 +6,21 @@
  * modules a name to type against, so a misspelled field or method is caught by
  * `npm run typecheck` instead of at runtime inside a stream callback.
  *
- * The index signature is deliberate: this is a transitional description of an
- * existing prototype, not a design. It keeps new fields type-checked for their
- * arguments and return values without forcing every method to be declared
- * before the composition is untangled.
+ * The description is closed on purpose. `PiAgentView` uses it as the type of the
+ * class it extends (see the `ComposedItemView` typedef in `PiAgentView.mjs`), so
+ * every member of the composed view must be named here: a misspelled or missing
+ * member is a `npm run typecheck` error instead of a silent `undefined`. An
+ * index signature would turn that check back into a no-op, which is why there is
+ * none. (The `[key]` entry this file used to carry was not one: in a `@property`
+ * list, brackets mark an *optional* property, so it declared an optional
+ * property literally named `key` and never acted as a fallback. It was removed
+ * as dead weight -- nothing was relying on it.)
+ *
+ * Members are described as function-typed properties rather than with method
+ * syntax because that is all a `@typedef {object}` property list can express.
+ * A class cannot override a base *property* with a *method* (ts2425), so the
+ * handful of members `PiAgentView` declares in its own body are subtracted from
+ * this surface there -- see `PiAgentViewOwnMember`.
  *
  * Transient state is no longer part of this surface: it lives on `this.state`
  * and is described once by `ViewState` in `./view-state.mjs`.
@@ -42,7 +53,7 @@
  * @property {any} threadFavoriteEl Thread favorite button.
  * @property {any} extensionWidgetsAboveEl Widget container above the composer.
  * @property {any} extensionWidgetsBelowEl Widget container below the composer.
- * @property {any} containerEl View container element.
+ * @property {HTMLElement} containerEl View container element.
  * @property {any} contentEl View content element.
  * @property {any} app Obsidian app instance.
  * @property {any} renderedThreadId Thread id currently rendered.
@@ -160,13 +171,14 @@
  * @property {(...args: any[]) => any} addLocalFiles
  * @property {(...args: any[]) => any} addVaultFile
  * @property {(...args: any[]) => any} addImageFiles
+ * @property {(...args: any[]) => any} handleImagePaste
+ * @property {(...args: any[]) => any} handleImageDrop
  *
  * @property {any} streamingItemEl
  * @property {any} streamingTextEl
  * @property {any} liveThinkingSetExpanded
  * @property {(...args: any[]) => any} formatThreadDate
  * @property {(...args: any[]) => any} formatThreadMeta
- * @property {(...args: any[]) => any} [key]
  */
 
 export {};

@@ -42,7 +42,6 @@ import { SUPPORTED_IMAGE_MIME_TYPES, SUPPORTED_TEXT_EXTENSIONS } from "../prompt
  * @property {() => void} resizeInput
  * @property {() => void} syncCurrentRunFlags
  * @property {(force: boolean) => void} setRunningState
- * @property {boolean} running
  * @property {() => void} cancelCurrentRun
  * @property {() => void} submitInput
  * @property {(event: ClipboardEvent) => void} handleImagePaste
@@ -62,8 +61,8 @@ import { SUPPORTED_IMAGE_MIME_TYPES, SUPPORTED_TEXT_EXTENSIONS } from "../prompt
 /**
  * Empty the view container and give it the chat-view class.
  *
- * @param {HTMLElement} container View container to fill.
- * @returns {{ root: HTMLElement }} The filled container.
+ * @param {Element} container View container to fill.
+ * @returns {{ root: Element }} The filled container.
  */
 export function createChatShell(container) {
   container.empty();
@@ -74,7 +73,7 @@ export function createChatShell(container) {
 /**
  * Build the header: brand icon, editable thread title, and thread actions.
  *
- * @param {HTMLElement} root Chat shell.
+ * @param {Element} root Chat shell.
  * @param {ChatDomView} view View that owns this region's callbacks.
  * @returns {{ threadTitleEl: HTMLElement, threadFavoriteEl: HTMLElement }}
  */
@@ -150,7 +149,7 @@ export function createHeader(root, view) {
 /**
  * Build the scrollable message area and its scroll/link wiring.
  *
- * @param {HTMLElement} root Chat shell.
+ * @param {Element} root Chat shell.
  * @param {ChatDomView} view View that owns this region's callbacks.
  * @returns {{ messagesEl: HTMLElement }}
  */
@@ -170,7 +169,7 @@ export function createMessagesArea(root, view) {
  * prompt queue, widgets above the editor, the textarea, widgets below, the
  * hidden file input, then the composer bar with the pickers and send button.
  *
- * @param {HTMLElement} root Chat shell.
+ * @param {Element} root Chat shell.
  * @param {ChatDomView} view View that owns this region's callbacks.
  * @returns {{
  *   toolBadgesEl: HTMLElement,

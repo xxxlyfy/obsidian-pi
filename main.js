@@ -10376,11 +10376,9 @@ var PiAgentView = class extends f4.ItemView {
   }
   // The mixin modules above add their methods to this class's prototype at
   // runtime via Object.assign at the end of this file; their state is created
-  // above and reached through `this.state`. There is no way to declare that
-  // composition in plain JavaScript without creating real instance fields,
-  // which would shadow those methods with `undefined`. This file therefore opts
-  // out of `checkJs`; see `tsconfig.src.json` for the checked surface and
-  // `src/ui/view/view-surface.mjs` for the shape those mixins share.
+  // above and reached through `this.state`. `ComposedItemView`, the type this
+  // class extends, is what makes those members visible to `checkJs` without
+  // declaring any of them here.
   getViewType() {
     return PI_AGENT_VIEW_TYPE;
   }

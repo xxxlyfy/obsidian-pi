@@ -1,15 +1,3 @@
-// @ts-nocheck -- deliberate, and measured: removing it reports 105 errors, all
-// of them "this file cannot see the members its runtime mixins add" (the
-// prompt-queue, thread-list, vault-link, message-renderer, and
-// run-activity-state modules assigned onto the prototype at the end of the
-// file). Declaring those members is not an option: Obsidian loads this class
-// without a transform, so a bare `foo;` field declaration creates a real
-// instance property that shadows the mixin method with `undefined` (this
-// already caused a live `this.clearCoalescedActivity is not a function`
-// crash). The correct fix is to stop composing at runtime, which is the next
-// step of this work, not a type annotation. Everything else in `src/` is type
-// checked, and the surface these mixins share is described in
-// `./view/view-surface.mjs`; see `tsconfig.src.json` for the checked surface.
 import * as f from "obsidian";
 import {
   PI_AGENT_DISPLAY_NAME as Ce,
@@ -60,15 +48,52 @@ import { createViewState } from "./view/view-state.mjs";
 import { t as tr } from "../shared/i18n/index.mjs";
 
 /**
- * Chat view. Its methods are assembled here plus the mixin modules imported
- * below (message-renderer, run-activity-state, prompt-queue, thread-list-view,
- * vault-link-actions), which all operate on this same instance.
+ * The members this class declares in its own body. They are subtracted from the
+ * inherited surface in `ComposedItemView` below, because checkJs rejects a class
+ * method that overrides a base *property* (ts2425) and the surface describes
+ * every mixin member as a function-typed property.
  *
- * The members declared after the constructor with `@type` tags are provided by
- * those mixins at runtime. Declaring them makes the composition visible and,
- * with `checkJs` enabled for `src/`, type-checked.
+ * The list is load-bearing in both directions: naming a member here that this
+ * class does not declare, or leaving out one that it does, is a
+ * `npm run typecheck` error rather than a silent change in what is checked.
+ *
+ * @typedef {"captureUiCallbackGuard" | "cleanupComposerBarObserver"
+ *   | "getCurrentThreadId" | "getCurrentThreadRun" | "getDisplayedContextUsage"
+ *   | "isCurrentThread" | "isStaleUiCallback" | "isThreadRunning"
+ *   | "noteStaleUiCallback" | "renderChatView" | "renderComposerImages"
+ *   | "renderPiIcon" | "resetTransientRunUiState" | "resizeInput" | "runPrompt"
+ *   | "setLiveThinkingExpanded" | "syncCurrentRunFlags"} PiAgentViewOwnMember
  */
-export class PiAgentView extends f.ItemView {
+
+/**
+ * The composed view type: Obsidian's `ItemView` plus every member the runtime
+ * mixins add to `PiAgentView.prototype` at the end of this file
+ * (message-renderer, run-activity-state, prompt-queue, thread-list-view,
+ * vault-link-actions, composer-attachments, chat-dom).
+ *
+ * `PiAgentViewSurface` in `./view/view-surface.mjs` is the single description of
+ * that shared shape, and it is a closed description: a member that is not
+ * declared there is a `checkJs` error instead of a silent `undefined`.
+ *
+ * This is a type cast, not a declaration. It emits nothing, so the class still
+ * extends `ItemView` itself, the mixins are still applied to the prototype
+ * exactly as before, and Obsidian's view lifecycle is untouched.
+ *
+ * Declaring the members in the class body is not an option: Obsidian loads this
+ * class without a transform, so a bare `foo;` field declaration would create a
+ * real instance property and shadow the mixin method with `undefined`, which is
+ * how `this.clearCoalescedActivity is not a function` happened once already.
+ *
+ * @typedef {new (leaf: any) => f.ItemView & Omit<import("./view/view-surface.mjs").PiAgentViewSurface, PiAgentViewOwnMember>} ComposedItemView
+ */
+
+/**
+ * Chat view. Its methods are assembled here plus the mixin modules imported
+ * above (message-renderer, run-activity-state, prompt-queue, thread-list-view,
+ * vault-link-actions, composer-attachments, chat-dom), which all operate on this
+ * same instance.
+ */
+export class PiAgentView extends /** @type {ComposedItemView} */ (f.ItemView) {
   constructor(e, t) {
     super(e);
     this.plugin = t;
@@ -84,11 +109,9 @@ export class PiAgentView extends f.ItemView {
 
   // The mixin modules above add their methods to this class's prototype at
   // runtime via Object.assign at the end of this file; their state is created
-  // above and reached through `this.state`. There is no way to declare that
-  // composition in plain JavaScript without creating real instance fields,
-  // which would shadow those methods with `undefined`. This file therefore opts
-  // out of `checkJs`; see `tsconfig.src.json` for the checked surface and
-  // `src/ui/view/view-surface.mjs` for the shape those mixins share.
+  // above and reached through `this.state`. `ComposedItemView`, the type this
+  // class extends, is what makes those members visible to `checkJs` without
+  // declaring any of them here.
 
   getViewType() {
     return T;
