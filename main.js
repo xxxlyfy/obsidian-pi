@@ -12075,7 +12075,7 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   async refreshCommandCatalog(showNotice = false) {
     if (this.commandCatalogRefreshPromise) return this.commandCatalogRefreshPromise;
-    this.commandCatalog || this.rebuildServices();
+    this.commandCatalog || this.rebuildServices({ disposeThreadRunners: false });
     const catalog = this.commandCatalog;
     const refreshPromise = (async () => {
       try {
@@ -12392,14 +12392,14 @@ var PiAgentPlugin = class extends P.Plugin {
     }
     this.app.workspace.revealLeaf(t2);
   }
-  async runPiPrompt(e, t2, n, i = this.pi, images = [], promptContext) {
+  async runPiPrompt(e, t2, n, i, images = [], promptContext) {
     var p;
     if (t2 != null && t2.isCanceled && t2.isCanceled()) throw new Error("Pi run canceled.");
-    if (
-      ((!this.graph || !this.contextBuilder || !this.pi) && this.rebuildServices(),
-      !this.graph || !this.contextBuilder || !this.pi)
-    )
+    if (!this.graph || !this.contextBuilder || !this.pi)
+      this.rebuildServices({ disposeThreadRunners: false });
+    if (!this.graph || !this.contextBuilder || !this.pi)
       throw new Error("Pi services are not available.");
+    i ??= this.pi;
     let s = this.getEditorSelection();
     if (
       e.trim().startsWith("/") &&
@@ -12527,8 +12527,8 @@ var PiAgentPlugin = class extends P.Plugin {
     return n ? this.settings.availableModels.find((s) => s.slug === n) : void 0;
   }
   async inspectPiContext(e) {
-    if (((!this.graph || !this.contextBuilder) && this.rebuildServices(), !this.contextBuilder))
-      throw new Error("Pi context builder is not available.");
+    if (!this.graph || !this.contextBuilder) this.rebuildServices({ disposeThreadRunners: false });
+    if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
     return this.contextBuilder.inspectContext(e, this.getEditorSelection());
   }
   getCurrentContextFile() {
@@ -12572,7 +12572,7 @@ var PiAgentPlugin = class extends P.Plugin {
     return aborts;
   }
   createPiRunner(threadId = this.getCurrentThread().id) {
-    (!this.graph || !this.contextBuilder) && this.rebuildServices();
+    (!this.graph || !this.contextBuilder) && this.rebuildServices({ disposeThreadRunners: false });
     if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
     const existing = this.threadRunners.get(threadId);
     if (existing) return existing;
@@ -12599,10 +12599,27 @@ var PiAgentPlugin = class extends P.Plugin {
       }
     }
   }
-  rebuildServices() {
+  /**
+   * Replace the services the plugin's runners are built on.
+   *
+   * @param {{ disposeThreadRunners?: boolean }} [options] `disposeThreadRunners`
+   *   defaults to true: the thread runners were built on the services being
+   *   replaced, so a settings change releases them with it. A caller that only
+   *   restores missing service parts while a run is already using its registered
+   *   runner passes false, so a service rebuild cannot dispose that run's runner.
+   */
+  rebuildServices({ disposeThreadRunners = true } = {}) {
     this.modelCatalogGeneration += 1;
     this.modelCatalogRefreshedAt = 0;
-    this.disposeThreadRunners();
+    if (disposeThreadRunners) this.disposeThreadRunners();
+    const previousServiceRunner = this.pi;
+    if (previousServiceRunner) {
+      try {
+        previousServiceRunner.dispose();
+      } catch (error) {
+        console.warn("Pi Agent: could not dispose the previous Pi service runner", error);
+      }
+    }
     this.piCommands = [];
     this.commandCatalogLoaded = false;
     this.commandCatalogRefreshPromise = void 0;
@@ -12782,7 +12799,7 @@ var PiAgentPlugin = class extends P.Plugin {
   }
   async suggestFrontmatterForCurrentNote() {
     var o;
-    this.graph || this.rebuildServices();
+    this.graph || this.rebuildServices({ disposeThreadRunners: false });
     let e = (o = this.graph) == null ? void 0 : o.getActiveFile();
     if (!e) {
       new P.Notice("Open a markdown note first.");

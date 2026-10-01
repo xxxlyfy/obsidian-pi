@@ -503,7 +503,9 @@ export class PiAgentPlugin extends P.Plugin {
   }
   async refreshCommandCatalog(showNotice = false) {
     if (this.commandCatalogRefreshPromise) return this.commandCatalogRefreshPromise;
-    this.commandCatalog || this.rebuildServices();
+    // Service restore: only the missing catalog is rebuilt, so the thread runners
+    // that are already in use are left alone (a settings rebuild still releases them).
+    this.commandCatalog || this.rebuildServices({ disposeThreadRunners: false });
     const catalog = this.commandCatalog;
     const refreshPromise = (async () => {
       try {
@@ -831,14 +833,22 @@ export class PiAgentPlugin extends P.Plugin {
     }
     this.app.workspace.revealLeaf(t);
   }
-  async runPiPrompt(e, t, n, i = this.pi, images = [], promptContext) {
+  async runPiPrompt(e, t, n, i, images = [], promptContext) {
     var p;
     if (t != null && t.isCanceled && t.isCanceled()) throw new Error("Pi run canceled.");
-    if (
-      ((!this.graph || !this.contextBuilder || !this.pi) && this.rebuildServices(),
-      !this.graph || !this.contextBuilder || !this.pi)
-    )
+    // Repair path: only the missing service parts are restored. This run's runner
+    // is registered in `threadRunners` (and other threads' runners may be live), so
+    // the rebuild must not release thread runners. A settings change still does.
+    if (!this.graph || !this.contextBuilder || !this.pi)
+      this.rebuildServices({ disposeThreadRunners: false });
+    if (!this.graph || !this.contextBuilder || !this.pi)
       throw new Error("Pi services are not available.");
+    // Resolved here, after the guard above, and never as a parameter default: a
+    // default would capture `this.pi` on entry, and the guard can replace -- and
+    // now dispose -- that runner before the run starts. A runner the caller passed
+    // is left alone: a chat run's thread runner is not the service runner, and a
+    // rebuild must not swap it out.
+    i ??= this.pi;
     let s = this.getEditorSelection();
     if (
       e.trim().startsWith("/") &&
@@ -965,8 +975,10 @@ export class PiAgentPlugin extends P.Plugin {
     return n ? this.settings.availableModels.find((s) => s.slug === n) : void 0;
   }
   async inspectPiContext(e) {
-    if (((!this.graph || !this.contextBuilder) && this.rebuildServices(), !this.contextBuilder))
-      throw new Error("Pi context builder is not available.");
+    // Service restore: only the missing service parts are rebuilt, so the thread
+    // runners that are already in use are left alone.
+    if (!this.graph || !this.contextBuilder) this.rebuildServices({ disposeThreadRunners: false });
+    if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
     return this.contextBuilder.inspectContext(e, this.getEditorSelection());
   }
   getCurrentContextFile() {
@@ -1010,7 +1022,10 @@ export class PiAgentPlugin extends P.Plugin {
     return aborts;
   }
   createPiRunner(threadId = this.getCurrentThread().id) {
-    (!this.graph || !this.contextBuilder) && this.rebuildServices();
+    // Service restore: this thread's runner may already be registered, so the
+    // rebuild must not clear `threadRunners` and hand back a second runner for the
+    // same thread.
+    (!this.graph || !this.contextBuilder) && this.rebuildServices({ disposeThreadRunners: false });
     if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
     const existing = this.threadRunners.get(threadId);
     if (existing) return existing;
@@ -1042,10 +1057,33 @@ export class PiAgentPlugin extends P.Plugin {
       }
     }
   }
-  rebuildServices() {
+  /**
+   * Replace the services the plugin's runners are built on.
+   *
+   * @param {{ disposeThreadRunners?: boolean }} [options] `disposeThreadRunners`
+   *   defaults to true: the thread runners were built on the services being
+   *   replaced, so a settings change releases them with it. A caller that only
+   *   restores missing service parts while a run is already using its registered
+   *   runner passes false, so a service rebuild cannot dispose that run's runner.
+   */
+  rebuildServices({ disposeThreadRunners = true } = {}) {
     this.modelCatalogGeneration += 1;
     this.modelCatalogRefreshedAt = 0;
-    this.disposeThreadRunners();
+    // Release the runners this rebuild replaces. Thread runners first, when this
+    // rebuild owns them, then the service-level runner: it is overwritten further
+    // down, and a Pi process it started would otherwise keep running with no owner
+    // left to dispose it. The old runner has to be released before the new one is
+    // created, not after the assignment.
+    if (disposeThreadRunners) this.disposeThreadRunners();
+    const previousServiceRunner = this.pi;
+    if (previousServiceRunner) {
+      try {
+        previousServiceRunner.dispose();
+      } catch (error) {
+        // A failed release must not block the rebuild that is already in progress.
+        console.warn("Pi Agent: could not dispose the previous Pi service runner", error);
+      }
+    }
     this.piCommands = [];
     this.commandCatalogLoaded = false;
     this.commandCatalogRefreshPromise = undefined;
@@ -1223,7 +1261,9 @@ export class PiAgentPlugin extends P.Plugin {
   }
   async suggestFrontmatterForCurrentNote() {
     var o;
-    this.graph || this.rebuildServices();
+    // Service restore: only the missing graph is rebuilt, so the thread runners
+    // that are already in use are left alone.
+    this.graph || this.rebuildServices({ disposeThreadRunners: false });
     let e = (o = this.graph) == null ? void 0 : o.getActiveFile();
     if (!e) {
       new P.Notice("Open a markdown note first.");
