@@ -12118,9 +12118,11 @@ var PiAgentPlugin = class extends P.Plugin {
   async forkCurrentThread() {
     const current = this.getCurrentThread();
     if (current.messages.length === 0) return void 0;
+    if (this.threadRunners.get(current.id)?.isRunning) return void 0;
     let clonedSession;
     if (current.piSessionId) {
-      const runner = this.createPiRunner(current.id);
+      const existing = this.threadRunners.get(current.id);
+      const runner = existing ?? this.createEphemeralThreadRunner();
       try {
         clonedSession = await runner.cloneSession(current.piSessionId);
         if (clonedSession) {
@@ -12129,8 +12131,7 @@ var PiAgentPlugin = class extends P.Plugin {
             .catch((error) => console.warn("Pi Agent: could not name cloned Pi session", error));
         }
       } finally {
-        runner.rpcClient?.dispose();
-        this.threadRunners.delete(current.id);
+        if (!existing) this.disposeEphemeralThreadRunner(runner);
       }
       if (!clonedSession) return void 0;
     }
@@ -12244,7 +12245,14 @@ var PiAgentPlugin = class extends P.Plugin {
   async getThreadSessionEntries(threadId, since) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).getSessionEntries(thread.piSessionId, since);
+    const existing = this.threadRunners.get(threadId);
+    if (existing) return existing.getSessionEntries(thread.piSessionId, since);
+    const runner = this.createEphemeralThreadRunner();
+    try {
+      return await runner.getSessionEntries(thread.piSessionId, since);
+    } finally {
+      this.disposeEphemeralThreadRunner(runner);
+    }
   }
   getThreadDisplayMessageCount(e) {
     let t2 = Array.isArray(e == null ? void 0 : e.messages) ? e.messages.length : 0,

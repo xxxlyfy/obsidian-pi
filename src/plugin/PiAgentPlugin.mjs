@@ -558,10 +558,22 @@ export class PiAgentPlugin extends P.Plugin {
   async forkCurrentThread() {
     const current = this.getCurrentThread();
     if (current.messages.length === 0) return undefined;
+    // A run in flight owns the thread's runner. Forking it would send the clone
+    // through the client that run is streaming on and switch the current thread
+    // mid-run, so a running thread is refused here as well as in the UI.
+    if (this.threadRunners.get(current.id)?.isRunning) return undefined;
 
     let clonedSession;
     if (current.piSessionId) {
-      const runner = this.createPiRunner(current.id);
+      // A thread that already has a runner keeps it: that runner's client and Pi
+      // process belong to the thread's own lifecycle (archive and delete release
+      // them), so a fork neither releases nor replaces it. A thread that has no
+      // runner borrows an ephemeral one instead of registering a thread runner: a
+      // fork is not a chat run, so the runner it uses is released here once the
+      // requests have settled -- on success and on failure alike. The clone and the
+      // session name both run on the one borrowed runner.
+      const existing = this.threadRunners.get(current.id);
+      const runner = existing ?? this.createEphemeralThreadRunner();
       try {
         clonedSession = await runner.cloneSession(current.piSessionId);
         if (clonedSession) {
@@ -570,8 +582,7 @@ export class PiAgentPlugin extends P.Plugin {
             .catch((error) => console.warn("Pi Agent: could not name cloned Pi session", error));
         }
       } finally {
-        runner.rpcClient?.dispose();
-        this.threadRunners.delete(current.id);
+        if (!existing) this.disposeEphemeralThreadRunner(runner);
       }
       if (!clonedSession) return undefined;
     }
@@ -690,7 +701,19 @@ export class PiAgentPlugin extends P.Plugin {
   async getThreadSessionEntries(threadId, since) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return undefined;
-    return this.createPiRunner(threadId).getSessionEntries(thread.piSessionId, since);
+    // A thread that already has a runner keeps it: that runner may be carrying a
+    // chat run, so a read-only lookup must never dispose it.
+    const existing = this.threadRunners.get(threadId);
+    if (existing) return existing.getSessionEntries(thread.piSessionId, since);
+    // Reading a historical thread is a one-shot lookup like Session Info or export:
+    // it borrows a temporary runner and releases it either way, so it cannot leave a
+    // Pi process behind in `threadRunners`.
+    const runner = this.createEphemeralThreadRunner();
+    try {
+      return await runner.getSessionEntries(thread.piSessionId, since);
+    } finally {
+      this.disposeEphemeralThreadRunner(runner);
+    }
   }
   getThreadDisplayMessageCount(e) {
     let t = Array.isArray(e == null ? void 0 : e.messages) ? e.messages.length : 0,
