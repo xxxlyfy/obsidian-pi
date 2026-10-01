@@ -263,11 +263,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     expect(oldOutcome.status).toBe("rejected");
     expect(oldOutcome.value.message).toContain("code 9");
     // All three new-generation requests keep waiting for their own answers.
-    expect(newOutcomes.map((outcome) => outcome.status)).toEqual([
-      "pending",
-      "pending",
-      "pending"
-    ]);
+    expect(newOutcomes.map((outcome) => outcome.status)).toEqual(["pending", "pending", "pending"]);
     expect(client.pending.size).toBe(3);
 
     newChild.pushStdout(

@@ -94,8 +94,7 @@ function createFakeRpcClient({
     },
     abort: vi.fn(async () => {
       order.push(`${label}:abort`);
-      if (abortSettles)
-        for (const listener of [...listeners]) listener({ type: "agent_settled" });
+      if (abortSettles) for (const listener of [...listeners]) listener({ type: "agent_settled" });
     }),
     dispose() {
       this.disposed = true;
