@@ -121,6 +121,12 @@ export class PiAgentView extends /** @type {ComposedItemView} */ (f.ItemView) {
     // next to the methods that use it.
     /** @type {import("./view/view-state.mjs").ViewState} */
     this.state = createViewState(t);
+    // Thread-list render bookkeeping, owned by thread-list-view.mjs: the generation
+    // of the current render, and the meta element of each row it created so a
+    // background session count can repaint one row in place.
+    this.threadListRenderGeneration = 0;
+    /** @type {Map<string, { row: any, metaEl: any }>} */
+    this.threadListRows = new Map();
     // Handles owned by the current onOpen. They are cleared by
     // cleanupOpenEventListeners(), so the view can be opened and closed
     // repeatedly without collecting listeners.

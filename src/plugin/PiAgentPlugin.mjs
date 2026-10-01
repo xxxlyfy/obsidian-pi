@@ -15,6 +15,7 @@ import {
 } from "../pi/extension-ui.mjs";
 import { PiModelCatalog } from "../pi/model-catalog.mjs";
 import { getCompactInstructions, PiRunner } from "../pi/runner.mjs";
+import { createPiSessionMessageCounter } from "./session-message-counter.mjs";
 import { t } from "../shared/i18n/index.mjs";
 import { CUSTOM_MODEL_VALUE as b, DEFAULT_SETTINGS as H, normalizeSettings } from "./settings.mjs";
 import { PiAgentSettingTab } from "./settings-tab.mjs";
@@ -166,6 +167,35 @@ export class PiAgentPlugin extends P.Plugin {
     this.modelCatalogRefreshedAt = 0;
     this.modelCatalogGeneration = 0;
     this.modelCatalogError = "";
+    /**
+     * Pi session message counts by resolved session path, with the size and mtime
+     * the count was taken from.
+     *
+     * Keyed by path rather than thread id because several threads can reference one
+     * Pi session file: they share the entry. A thread list paints from this cache
+     * only, so rendering never reads a session file; the background refresh fills it
+     * in and re-checks size and mtime to stay honest.
+     *
+     * @type {Map<string, { size: number, mtimeMs: number, count: number, fileKnown: boolean, scanKnown: boolean }>}
+     */
+    this.sessionMessageCountCache = new Map();
+    /**
+     * Refreshes that are still running, by resolved session path, so several threads
+     * referencing one session file share a single read of it.
+     *
+     * @type {Map<string, Promise<number | undefined>>}
+     */
+    this.sessionMessageCountRefreshes = new Map();
+    /** Streaming, deduplicated, concurrency-limited session scanner. */
+    this.piSessionMessageCounter = createPiSessionMessageCounter({ concurrency: 2 });
+    /**
+     * Generation of the thread-list render that last asked for counts. The view owns
+     * the counter; the plugin only reads it to decide whether a finished count may
+     * still repaint a row.
+     *
+     * @type {number}
+     */
+    this.threadListRenderGeneration = 0;
   }
   async onload() {
     await this.loadSettings();
@@ -309,6 +339,10 @@ export class PiAgentPlugin extends P.Plugin {
     // is still waiting for Pi. There is nothing to cancel first: those operations never
     // set `isRunning`, and disposing the client is what ends their request.
     this.disposeEphemeralThreadRunners();
+    // Releases any background session scan that is still reading a file: nothing
+    // depends on those counts once the plugin is going away. Guarded because unload
+    // paths exist that never ran this constructor.
+    this.piSessionMessageCounter?.dispose();
   }
   async loadSettings() {
     const rawData = (await this.loadData()) ?? {};
@@ -727,9 +761,25 @@ export class PiAgentPlugin extends P.Plugin {
       this.disposeEphemeralThreadRunner(runner);
     }
   }
+  /**
+   * The Pi session message count for one thread, served from cache only.
+   *
+   * This is the accessor the thread list calls while it paints, so it must never
+   * touch the filesystem: a cache hit returns the remembered count, a miss returns
+   * zero and the caller falls back to `thread.messages.length`. The file read and
+   * parse happen later, off the render path, in `refreshThreadListSessionCounts()`.
+   *
+   * @param {any} thread
+   * @returns {number}
+   */
+  getCachedPiSessionMessageCount(thread) {
+    const sessionPath = this.pi?.resolveSessionPath(thread?.piSessionId);
+    const stats = sessionPath ? this.sessionMessageCountCache.get(sessionPath) : undefined;
+    return stats?.scanKnown ? stats.count : 0;
+  }
   getThreadDisplayMessageCount(e) {
     let t = Array.isArray(e == null ? void 0 : e.messages) ? e.messages.length : 0,
-      n = this.countPiSessionChatMessages(e == null ? void 0 : e.piSessionId);
+      n = this.getCachedPiSessionMessageCount(e);
     return Math.max(t, n);
   }
   countPiSessionChatMessages(e) {
@@ -754,6 +804,121 @@ export class PiAgentPlugin extends P.Plugin {
     } catch {
       return 0;
     }
+  }
+  /**
+   * Schedule the off-thread session counts the thread list is missing.
+   *
+   * Called right after `renderThreadList()` has painted, so the UI is already on
+   * screen and this only decides what still needs a real count. A thread whose
+   * session file is already cached with its current size and mtime needs nothing.
+   *
+   * `onCount` is invoked only for a scan that still belongs to the render that asked
+   * for it, so a result that arrives after the user left the list cannot touch that
+   * DOM. The cache is written either way: it is keyed by session path, which does not
+   * depend on the render.
+   *
+   * @param {any[]} threads Threads as rendered, in render order.
+   * @param {number} renderGeneration The generation of the render that asked.
+   * @param {(thread: any, count: number) => void} onCount Receives the fresh count.
+   */
+  refreshThreadListSessionCounts(threads, renderGeneration, onCount) {
+    for (const thread of threads) {
+      const sessionPath = this.pi?.resolveSessionPath(thread.piSessionId);
+      if (!sessionPath) continue;
+      if (this.isSessionMessageCountCacheFresh(sessionPath)) continue;
+
+      this.getPiSessionMessageCount(sessionPath).then((count) => {
+        if (count === undefined) return;
+        if (renderGeneration !== this.threadListRenderGeneration) return;
+        onCount(thread, count);
+      });
+    }
+  }
+  /**
+   * Whether the cached count for one session path still describes the file.
+   *
+   * A known-missing file stays valid until the background scan is asked to look at
+   * it again, so a thread list full of missing sessions does not re-stat on every
+   * render. Everything else is only valid while size and mtime are unchanged.
+   *
+   * @param {string} sessionPath Resolved Pi session file path.
+   * @returns {boolean}
+   */
+  isSessionMessageCountCacheFresh(sessionPath) {
+    const entry = this.sessionMessageCountCache.get(sessionPath);
+    if (!entry?.scanKnown || !entry.fileKnown) return false;
+    try {
+      const stats = fs.statSync(sessionPath);
+      return stats.size === entry.size && stats.mtimeMs === entry.mtimeMs;
+    } catch {
+      return false;
+    }
+  }
+  /**
+   * The refresh for one session path, shared by every caller that asks while it runs.
+   *
+   * A thread list usually asks for all its paths in the same tick, and each request
+   * awaits a stat before it reaches the scanner. Without this, N threads pointing at
+   * one session file would each start their own read of it. The entry is dropped when
+   * the refresh settles, so a later render asks again and gets an honest answer from
+   * the cache check inside.
+   *
+   * @param {string} sessionPath Resolved Pi session file path.
+   * @returns {Promise<number | undefined>}
+   */
+  getPiSessionMessageCount(sessionPath) {
+    const inFlight = this.sessionMessageCountRefreshes.get(sessionPath);
+    if (inFlight) return inFlight;
+
+    const refresh = this.refreshPiSessionMessageCount(sessionPath).finally(() => {
+      this.sessionMessageCountRefreshes.delete(sessionPath);
+    });
+    this.sessionMessageCountRefreshes.set(sessionPath, refresh);
+    return refresh;
+  }
+  /**
+   * Compute one session path's message count, from cache when it is still valid and
+   * from a streaming background scan otherwise.
+   *
+   * @param {string} sessionPath Resolved Pi session file path.
+   * @returns {Promise<number | undefined>} The count, or undefined when the file is
+   *   not statable and there is therefore nothing to report.
+   */
+  async refreshPiSessionMessageCount(sessionPath) {
+    if (this.isSessionMessageCountCacheFresh(sessionPath)) {
+      return this.sessionMessageCountCache.get(sessionPath)?.count ?? 0;
+    }
+
+    let stats;
+    try {
+      stats = await fs.promises.stat(sessionPath);
+    } catch {
+      // The file is not statable, so there is nothing to count and nothing to
+      // report: a thread without a readable session shows `thread.messages.length`.
+      this.sessionMessageCountCache.delete(sessionPath);
+      return undefined;
+    }
+
+    const count = await this.piSessionMessageCounter.scan(sessionPath);
+
+    // Attribute the count to the revision that was on disk when the scan finished:
+    // if the file changed while it was read, the recorded size/mtime no longer match
+    // and the next refresh re-scans instead of serving this count as current.
+    let finalStats = stats;
+    try {
+      finalStats = await fs.promises.stat(sessionPath);
+    } catch {
+      // Keep the pre-scan stats; the next freshness check will notice the failure.
+    }
+
+    this.sessionMessageCountCache.set(sessionPath, {
+      size: finalStats.size,
+      mtimeMs: finalStats.mtimeMs,
+      count,
+      fileKnown: true,
+      scanKnown: true
+    });
+    return count;
   }
   switchThread(e) {
     return this.threadHistory.switchThread(e)

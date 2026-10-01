@@ -69,6 +69,12 @@
  * @property {import("./lifecycle.mjs").ViewLifecycle} lifecycle Timers and cleanup handles owned by this view.
  * @property {any} composerBarCleanup Release handle for the composer-bar observer.
  * @property {boolean} showingThreadList Whether the thread list replaces the chat.
+ * @property {number} threadListRenderGeneration
+ *   Generation of the current thread-list render. A background session count may only
+ *   repaint a row while its generation is still current.
+ * @property {Map<string, { row: any, metaEl: any }>} threadListRows
+ *   Meta elements of the current thread-list render, by thread id, so a background
+ *   session count repaints one row instead of re-rendering the list.
  * @property {(...args: any[]) => any} releaseStreamingFlushCleanup
  * @property {(...args: any[]) => any} cleanupComposerBarObserver
  *
@@ -179,6 +185,7 @@
  * @property {any} liveThinkingSetExpanded
  * @property {(...args: any[]) => any} formatThreadDate
  * @property {(...args: any[]) => any} formatThreadMeta
+ * @property {(thread: any, count: number, renderGeneration: number) => void} updateThreadListRowMeta
  */
 
 export {};

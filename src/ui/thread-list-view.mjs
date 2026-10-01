@@ -19,6 +19,11 @@ export function renderThreadList() {
   let e = this.containerEl.children[1],
     t = this.plugin.listThreads({ includeArchived: !0 }),
     n = this.plugin.getCurrentThread();
+  // Every render claims a generation. A background session count is only allowed to
+  // touch the DOM while its generation is still the current one, so a result that
+  // arrives after the list was re-rendered (or left) cannot update stale rows.
+  this.threadListRenderGeneration += 1;
+  this.threadListRows = new Map();
   if ((a = this.suggestions) != null) a.close();
   this.cleanupComposerBarObserver();
   this.messagesEl = void 0;
@@ -60,9 +65,19 @@ export function renderThreadList() {
     this.renderChatView();
   });
   let h = e.createDiv({ cls: "pi-agent-thread-list" });
-  t.length === 0
-    ? h.createDiv({ cls: "pi-agent-empty", text: tr("threadList.empty") })
-    : t.forEach((m) => this.renderThreadListRow(h, m, m.id === n.id));
+  if (t.length === 0) {
+    h.createDiv({ cls: "pi-agent-empty", text: tr("threadList.empty") });
+    return;
+  }
+  // `formatThreadMeta` reads the session count cache only, so this whole loop is
+  // synchronous and never blocks on session files.
+  const renderGeneration = this.threadListRenderGeneration;
+  t.forEach((m) => this.renderThreadListRow(h, m, m.id === n.id));
+  // The callback runs later, from the plugin's async refresh, so it carries its own
+  // view binding instead of relying on how the plugin calls it.
+  const repaintRow = (thread, count) =>
+    this.updateThreadListRowMeta(thread, count, renderGeneration);
+  this.plugin.refreshThreadListSessionCounts(t, renderGeneration, repaintRow);
 }
 
 /** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
@@ -87,7 +102,14 @@ export function renderThreadListRow(e, t, n) {
     this.plugin.switchThread(t.id);
     this.renderChatView();
   });
-  a.createDiv({ cls: "pi-agent-thread-list-meta", text: this.formatThreadMeta(t, n) });
+  const metaEl = a.createDiv({
+    cls: "pi-agent-thread-list-meta",
+    text: this.formatThreadMeta(t, n)
+  });
+  // The background session count refresh updates exactly this element through
+  // `updateThreadListRowMeta`, so the row has to remember it and the thread it
+  // belongs to. The map is rebuilt by every render.
+  this.threadListRows.set(t.id, { row: s, metaEl });
   let l = s.createDiv({ cls: "pi-agent-thread-list-actions" }),
     d = l.createEl("button", {
       cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${t.favorite ? " is-favorite" : ""}`,
@@ -274,13 +296,53 @@ export async function deleteThreadFromList(e) {
   }
 }
 
-/** @this {import("./view/view-surface.mjs").PiAgentViewSurface} */
+/**
+ * Paint one row's meta from the session count cache.
+ *
+ * Called synchronously while the row is created, which is why it may only use the
+ * cache: a thread whose session file has not been counted yet falls back to its own
+ * message count, and the background refresh repaints the row when the real count
+ * arrives.
+ *
+ * @this {import("./view/view-surface.mjs").PiAgentViewSurface}
+ */
 export function formatThreadMeta(e, t) {
   let n = this.plugin.getThreadDisplayMessageCount
       ? this.plugin.getThreadDisplayMessageCount(e)
       : e.messages.length,
     s = trCount("threadList.meta", n, { date: this.formatThreadDate(e.updatedAt) });
   return t ? tr("threadList.currentMeta", { meta: s }) : s;
+}
+
+/**
+ * Repaint one row's meta after its session count came back.
+ *
+ * Deliberately not a re-render: rebuilding the list would recreate every row and
+ * flicker. The row is still updated only when it is the row this render created for
+ * this thread and the render is still current, so a late count cannot land on a
+ * rebuilt list, on another thread's row, or on rows that are gone.
+ *
+ * @this {import("./view/view-surface.mjs").PiAgentViewSurface}
+ * @param {any} thread The thread this count belongs to.
+ * @param {number} count The scanned Pi session message count.
+ * @param {number} renderGeneration The generation of the render that asked.
+ */
+export function updateThreadListRowMeta(thread, count, renderGeneration) {
+  if (renderGeneration !== this.threadListRenderGeneration) return;
+  const entry = this.threadListRows?.get(thread.id);
+  if (!entry) return;
+
+  // Same rule as `getThreadDisplayMessageCount`, now that the count is cached.
+  const displayed = Math.max(thread.messages?.length ?? 0, count);
+  const meta = trCount("threadList.meta", displayed, {
+    date: this.formatThreadDate(thread.updatedAt)
+  });
+  // `threadListRows` only ever holds the rows this render created, so a surviving
+  // entry is the row for this thread; the generation check above covers the render
+  // this row came from.
+  entry.metaEl.setText(
+    this.isCurrentThread(thread.id) ? tr("threadList.currentMeta", { meta }) : meta
+  );
 }
 
 export function countSessionEntries(nodes) {

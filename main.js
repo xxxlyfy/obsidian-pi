@@ -42,7 +42,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 
 // src/plugin/PiAgentPlugin.mjs
-var import_node_fs5 = __toESM(require("node:fs"), 1);
+var import_node_fs6 = __toESM(require("node:fs"), 1);
 var P = __toESM(require("obsidian"), 1);
 
 // src/shared/runtime.mjs
@@ -5829,6 +5829,123 @@ function isSafeRelativePath(relativePath) {
   );
 }
 
+// src/plugin/session-message-counter.mjs
+var import_node_fs3 = __toESM(require("node:fs"), 1);
+var import_node_readline = require("node:readline");
+function createPiSessionMessageCounter(options = {}) {
+  const concurrency = Math.max(1, Number(options.concurrency ?? 2));
+  const onScan = options.onScan;
+  const activeStreams = /* @__PURE__ */ new Set();
+  const readSession =
+    options.readSession ??
+    ((sessionPath) =>
+      countSessionMessagesStreaming(sessionPath, (stream) => activeStreams.add(stream)));
+  const scheduled = /* @__PURE__ */ new Map();
+  const queue = [];
+  const running = /* @__PURE__ */ new Set();
+  let disposed = false;
+  let scans = 0;
+  function startNext() {
+    while (!disposed && running.size < concurrency && queue.length > 0) {
+      const sessionPath = queue.shift();
+      const entry = scheduled.get(sessionPath);
+      if (!entry) continue;
+      running.add(sessionPath);
+      Promise.resolve()
+        .then(() => {
+          if (disposed) return 0;
+          scans += 1;
+          onScan?.();
+          return readSession(sessionPath);
+        })
+        .then(
+          (count) => entry.resolve(typeof count === "number" ? count : 0),
+          () => entry.resolve(0)
+        )
+        .then(() => {
+          running.delete(sessionPath);
+          scheduled.delete(sessionPath);
+          startNext();
+        });
+    }
+  }
+  return {
+    scan(sessionPath) {
+      if (!sessionPath || disposed) return Promise.resolve(0);
+      const existing = scheduled.get(sessionPath);
+      if (existing) return existing.promise;
+      const entry = { promise: void 0, resolve: void 0 };
+      entry.promise = new Promise((resolve) => {
+        entry.resolve = resolve;
+      });
+      scheduled.set(sessionPath, entry);
+      queue.push(sessionPath);
+      startNext();
+      return entry.promise;
+    },
+    pendingCount() {
+      return queue.length + running.size;
+    },
+    isScanning() {
+      return this.pendingCount() > 0;
+    },
+    scanCount() {
+      return scans;
+    },
+    dispose() {
+      disposed = true;
+      for (const sessionPath of queue) {
+        scheduled.get(sessionPath)?.resolve(0);
+        scheduled.delete(sessionPath);
+      }
+      queue.length = 0;
+      for (const stream of activeStreams) {
+        try {
+          stream.destroy();
+        } catch {}
+      }
+      activeStreams.clear();
+    }
+  };
+}
+function countSessionMessagesStreaming(sessionPath, onStream) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (stream2, count2) => {
+      if (settled) return;
+      settled = true;
+      stream2?.destroy();
+      resolve(count2);
+    };
+    let stream;
+    try {
+      stream = import_node_fs3.default.createReadStream(sessionPath, { encoding: "utf8" });
+    } catch {
+      resolve(0);
+      return;
+    }
+    onStream?.(stream);
+    stream.once("error", () => settle(stream, 0));
+    const lines = (0, import_node_readline.createInterface)({ input: stream, crlfDelay: Infinity });
+    lines.once("error", () => settle(stream, 0));
+    let count = 0;
+    lines.on("line", (line) => {
+      if (!line.trim()) return;
+      try {
+        const record = JSON.parse(line);
+        const message = record?.message;
+        if (
+          record?.type === "message" &&
+          (message?.role === "user" || message?.role === "assistant")
+        ) {
+          count += 1;
+        }
+      } catch {}
+    });
+    lines.once("close", () => settle(stream, count));
+  });
+}
+
 // src/plugin/settings-tab.mjs
 var import_obsidian7 = require("obsidian");
 
@@ -7613,7 +7730,8 @@ __export(thread_list_view_exports, {
   showThreadList: () => showThreadList,
   showThreadRowMenu: () => showThreadRowMenu,
   startThreadListRename: () => startThreadListRename,
-  toggleThreadFavorite: () => toggleThreadFavorite
+  toggleThreadFavorite: () => toggleThreadFavorite,
+  updateThreadListRowMeta: () => updateThreadListRowMeta
 });
 var f2 = __toESM(require("obsidian"), 1);
 
@@ -7770,6 +7888,8 @@ function renderThreadList() {
   let e = this.containerEl.children[1],
     t2 = this.plugin.listThreads({ includeArchived: true }),
     n = this.plugin.getCurrentThread();
+  this.threadListRenderGeneration += 1;
+  this.threadListRows = /* @__PURE__ */ new Map();
   if ((a = this.suggestions) != null) a.close();
   this.cleanupComposerBarObserver();
   this.messagesEl = void 0;
@@ -7811,9 +7931,15 @@ function renderThreadList() {
     this.renderChatView();
   });
   let h = e.createDiv({ cls: "pi-agent-thread-list" });
-  t2.length === 0
-    ? h.createDiv({ cls: "pi-agent-empty", text: t("threadList.empty") })
-    : t2.forEach((m) => this.renderThreadListRow(h, m, m.id === n.id));
+  if (t2.length === 0) {
+    h.createDiv({ cls: "pi-agent-empty", text: t("threadList.empty") });
+    return;
+  }
+  const renderGeneration = this.threadListRenderGeneration;
+  t2.forEach((m) => this.renderThreadListRow(h, m, m.id === n.id));
+  const repaintRow = (thread, count) =>
+    this.updateThreadListRowMeta(thread, count, renderGeneration);
+  this.plugin.refreshThreadListSessionCounts(t2, renderGeneration, repaintRow);
 }
 function renderThreadListRow(e, t2, n) {
   let s = e.createDiv({
@@ -7836,7 +7962,11 @@ function renderThreadListRow(e, t2, n) {
     this.plugin.switchThread(t2.id);
     this.renderChatView();
   });
-  a.createDiv({ cls: "pi-agent-thread-list-meta", text: this.formatThreadMeta(t2, n) });
+  const metaEl = a.createDiv({
+    cls: "pi-agent-thread-list-meta",
+    text: this.formatThreadMeta(t2, n)
+  });
+  this.threadListRows.set(t2.id, { row: s, metaEl });
   let l = s.createDiv({ cls: "pi-agent-thread-list-actions" }),
     d = l.createEl("button", {
       cls: `clickable-icon pi-agent-thread-list-action pi-agent-thread-favorite${t2.favorite ? " is-favorite" : ""}`,
@@ -8022,6 +8152,18 @@ function formatThreadMeta(e, t2) {
       : e.messages.length,
     s = tCount("threadList.meta", n, { date: this.formatThreadDate(e.updatedAt) });
   return t2 ? t("threadList.currentMeta", { meta: s }) : s;
+}
+function updateThreadListRowMeta(thread, count, renderGeneration) {
+  if (renderGeneration !== this.threadListRenderGeneration) return;
+  const entry = this.threadListRows?.get(thread.id);
+  if (!entry) return;
+  const displayed = Math.max(thread.messages?.length ?? 0, count);
+  const meta = tCount("threadList.meta", displayed, {
+    date: this.formatThreadDate(thread.updatedAt)
+  });
+  entry.metaEl.setText(
+    this.isCurrentThread(thread.id) ? t("threadList.currentMeta", { meta }) : meta
+  );
 }
 function countSessionEntries(nodes) {
   return nodes.reduce(
@@ -10428,6 +10570,8 @@ var PiAgentView = class extends f4.ItemView {
     this.plugin = t2;
     this.lifecycle = createViewLifecycle();
     this.state = createViewState(t2);
+    this.threadListRenderGeneration = 0;
+    this.threadListRows = /* @__PURE__ */ new Map();
     this.openEventListeners = {
       keydown: void 0,
       fileOpen: void 0,
@@ -10917,7 +11061,7 @@ function sanitizeThreadHistory(history) {
 
 // src/threads/chat-history-backup.mjs
 var import_node_crypto2 = __toESM(require("node:crypto"), 1);
-var import_node_fs3 = __toESM(require("node:fs"), 1);
+var import_node_fs4 = __toESM(require("node:fs"), 1);
 var import_node_path4 = __toESM(require("node:path"), 1);
 var BACKUP_SCHEMA_VERSION = 1;
 var BACKUP_FILE = "chat-history.backup.json";
@@ -10931,11 +11075,11 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
     checksum: checksum(normalized),
     chatHistory: normalized
   };
-  await import_node_fs3.default.promises.mkdir(pluginDirectory, { recursive: true });
+  await import_node_fs4.default.promises.mkdir(pluginDirectory, { recursive: true });
   const backupPath = import_node_path4.default.join(pluginDirectory, BACKUP_FILE);
   const previousPath = import_node_path4.default.join(pluginDirectory, PREVIOUS_BACKUP_FILE);
   const temporaryPath = `${backupPath}.tmp-${process.pid}-${Date.now()}`;
-  await import_node_fs3.default.promises.writeFile(
+  await import_node_fs4.default.promises.writeFile(
     temporaryPath,
     `${JSON.stringify(payload, null, 2)}
 `,
@@ -10946,7 +11090,7 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
     if (current) await copyAtomic(backupPath, previousPath);
     await replaceFile(temporaryPath, backupPath);
   } finally {
-    await import_node_fs3.default.promises.rm(temporaryPath, { force: true });
+    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
   }
 }
 async function readChatHistoryBackup(pluginDirectory) {
@@ -10959,7 +11103,7 @@ async function readChatHistoryBackup(pluginDirectory) {
 }
 async function readValidBackup(filePath) {
   try {
-    const backup = JSON.parse(await import_node_fs3.default.promises.readFile(filePath, "utf8"));
+    const backup = JSON.parse(await import_node_fs4.default.promises.readFile(filePath, "utf8"));
     if (
       backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
       backup.checksum !== checksum(backup.chatHistory)
@@ -10996,25 +11140,25 @@ function checksum(history) {
 }
 async function copyAtomic(sourcePath, destinationPath) {
   const temporaryPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
-  await import_node_fs3.default.promises.copyFile(sourcePath, temporaryPath);
+  await import_node_fs4.default.promises.copyFile(sourcePath, temporaryPath);
   try {
     await replaceFile(temporaryPath, destinationPath);
   } finally {
-    await import_node_fs3.default.promises.rm(temporaryPath, { force: true });
+    await import_node_fs4.default.promises.rm(temporaryPath, { force: true });
   }
 }
 async function replaceFile(sourcePath, destinationPath) {
   try {
-    await import_node_fs3.default.promises.rename(sourcePath, destinationPath);
+    await import_node_fs4.default.promises.rename(sourcePath, destinationPath);
   } catch (error) {
     if (!["EEXIST", "EPERM"].includes(error?.code)) throw error;
-    await import_node_fs3.default.promises.rm(destinationPath, { force: true });
-    await import_node_fs3.default.promises.rename(sourcePath, destinationPath);
+    await import_node_fs4.default.promises.rm(destinationPath, { force: true });
+    await import_node_fs4.default.promises.rename(sourcePath, destinationPath);
   }
 }
 
 // src/threads/chat-history-import.mjs
-var import_node_fs4 = __toESM(require("node:fs"), 1);
+var import_node_fs5 = __toESM(require("node:fs"), 1);
 var import_node_path5 = __toESM(require("node:path"), 1);
 var MARKDOWN_STORAGE_VERSION = 3;
 var JSON_STORAGE_VERSION = 2;
@@ -11063,7 +11207,7 @@ async function removeImportedVaultChatHistory(vaultBasePath, managedFiles, vault
       .replaceAll(import_node_path5.default.sep, "/");
     const abstractFile = vault?.getAbstractFileByPath?.(vaultPath);
     if (abstractFile && abstractFile.extension === "md") await vault.delete(abstractFile, true);
-    else await import_node_fs4.default.promises.rm(resolved, { force: true });
+    else await import_node_fs5.default.promises.rm(resolved, { force: true });
     directories.add(import_node_path5.default.dirname(resolved));
   }
   for (const directory of [...directories].sort((left, right) => right.length - left.length)) {
@@ -11100,7 +11244,7 @@ async function loadMarkdownThreads(folder) {
     const filePath = import_node_path5.default.join(folder, fileName);
     try {
       const thread = parseMarkdownThread(
-        await import_node_fs4.default.promises.readFile(filePath, "utf8")
+        await import_node_fs5.default.promises.readFile(filePath, "utf8")
       );
       if (!thread) continue;
       result.threads.push(thread);
@@ -11123,7 +11267,7 @@ async function loadJsonThreads(folder) {
     const filePath = import_node_path5.default.join(folder, fileName);
     try {
       const thread = parseJsonThread(
-        JSON.parse(await import_node_fs4.default.promises.readFile(filePath, "utf8"))
+        JSON.parse(await import_node_fs5.default.promises.readFile(filePath, "utf8"))
       );
       result.threads.push(thread);
       result.managedFiles.push(filePath);
@@ -11139,7 +11283,7 @@ async function loadIndexedThreads(root) {
   if (await exists(indexPath)) {
     result.managedFiles.push(indexPath);
     try {
-      const index = JSON.parse(await import_node_fs4.default.promises.readFile(indexPath, "utf8"));
+      const index = JSON.parse(await import_node_fs5.default.promises.readFile(indexPath, "utf8"));
       if (typeof index?.currentThreadId === "string")
         result.currentThreadId = index.currentThreadId;
     } catch (error) {
@@ -11285,7 +11429,7 @@ function isInside(basePath, candidate) {
 }
 async function listFiles(folder, extension, includeHidden = false) {
   try {
-    return (await import_node_fs4.default.promises.readdir(folder, { withFileTypes: true }))
+    return (await import_node_fs5.default.promises.readdir(folder, { withFileTypes: true }))
       .filter(
         (entry) =>
           entry.isFile() &&
@@ -11303,7 +11447,7 @@ async function removeEmptyDirectory(directory, boundary) {
   let current = directory;
   while (isInside(boundary, current)) {
     try {
-      await import_node_fs4.default.promises.rmdir(current);
+      await import_node_fs5.default.promises.rmdir(current);
     } catch (error) {
       if (error?.code === "ENOENT") return;
       if (["ENOTEMPTY", "EEXIST"].includes(error?.code)) return;
@@ -11314,7 +11458,7 @@ async function removeEmptyDirectory(directory, boundary) {
 }
 async function exists(filePath) {
   try {
-    await import_node_fs4.default.promises.access(filePath);
+    await import_node_fs5.default.promises.access(filePath);
     return true;
   } catch {
     return false;
@@ -11756,6 +11900,10 @@ var PiAgentPlugin = class extends P.Plugin {
     this.modelCatalogRefreshedAt = 0;
     this.modelCatalogGeneration = 0;
     this.modelCatalogError = "";
+    this.sessionMessageCountCache = /* @__PURE__ */ new Map();
+    this.sessionMessageCountRefreshes = /* @__PURE__ */ new Map();
+    this.piSessionMessageCounter = createPiSessionMessageCounter({ concurrency: 2 });
+    this.threadListRenderGeneration = 0;
   }
   async onload() {
     await this.loadSettings();
@@ -11882,6 +12030,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.cancelAllPiRuns();
     this.disposeThreadRunners();
     this.disposeEphemeralThreadRunners();
+    this.piSessionMessageCounter?.dispose();
   }
   async loadSettings() {
     const rawData = (await this.loadData()) ?? {};
@@ -12264,16 +12413,32 @@ var PiAgentPlugin = class extends P.Plugin {
       this.disposeEphemeralThreadRunner(runner);
     }
   }
+  /**
+   * The Pi session message count for one thread, served from cache only.
+   *
+   * This is the accessor the thread list calls while it paints, so it must never
+   * touch the filesystem: a cache hit returns the remembered count, a miss returns
+   * zero and the caller falls back to `thread.messages.length`. The file read and
+   * parse happen later, off the render path, in `refreshThreadListSessionCounts()`.
+   *
+   * @param {any} thread
+   * @returns {number}
+   */
+  getCachedPiSessionMessageCount(thread) {
+    const sessionPath = this.pi?.resolveSessionPath(thread?.piSessionId);
+    const stats = sessionPath ? this.sessionMessageCountCache.get(sessionPath) : void 0;
+    return stats?.scanKnown ? stats.count : 0;
+  }
   getThreadDisplayMessageCount(e) {
     let t2 = Array.isArray(e == null ? void 0 : e.messages) ? e.messages.length : 0,
-      n = this.countPiSessionChatMessages(e == null ? void 0 : e.piSessionId);
+      n = this.getCachedPiSessionMessageCount(e);
     return Math.max(t2, n);
   }
   countPiSessionChatMessages(e) {
     let t2 = this.pi?.resolveSessionPath(e);
-    if (!t2 || !import_node_fs5.default.existsSync(t2)) return 0;
+    if (!t2 || !import_node_fs6.default.existsSync(t2)) return 0;
     try {
-      return import_node_fs5.default
+      return import_node_fs6.default
         .readFileSync(t2, "utf8")
         .split(/\r?\n/)
         .reduce((t3, n) => {
@@ -12291,6 +12456,108 @@ var PiAgentPlugin = class extends P.Plugin {
     } catch {
       return 0;
     }
+  }
+  /**
+   * Schedule the off-thread session counts the thread list is missing.
+   *
+   * Called right after `renderThreadList()` has painted, so the UI is already on
+   * screen and this only decides what still needs a real count. A thread whose
+   * session file is already cached with its current size and mtime needs nothing.
+   *
+   * `onCount` is invoked only for a scan that still belongs to the render that asked
+   * for it, so a result that arrives after the user left the list cannot touch that
+   * DOM. The cache is written either way: it is keyed by session path, which does not
+   * depend on the render.
+   *
+   * @param {any[]} threads Threads as rendered, in render order.
+   * @param {number} renderGeneration The generation of the render that asked.
+   * @param {(thread: any, count: number) => void} onCount Receives the fresh count.
+   */
+  refreshThreadListSessionCounts(threads, renderGeneration, onCount) {
+    for (const thread of threads) {
+      const sessionPath = this.pi?.resolveSessionPath(thread.piSessionId);
+      if (!sessionPath) continue;
+      if (this.isSessionMessageCountCacheFresh(sessionPath)) continue;
+      this.getPiSessionMessageCount(sessionPath).then((count) => {
+        if (count === void 0) return;
+        if (renderGeneration !== this.threadListRenderGeneration) return;
+        onCount(thread, count);
+      });
+    }
+  }
+  /**
+   * Whether the cached count for one session path still describes the file.
+   *
+   * A known-missing file stays valid until the background scan is asked to look at
+   * it again, so a thread list full of missing sessions does not re-stat on every
+   * render. Everything else is only valid while size and mtime are unchanged.
+   *
+   * @param {string} sessionPath Resolved Pi session file path.
+   * @returns {boolean}
+   */
+  isSessionMessageCountCacheFresh(sessionPath) {
+    const entry = this.sessionMessageCountCache.get(sessionPath);
+    if (!entry?.scanKnown || !entry.fileKnown) return false;
+    try {
+      const stats = import_node_fs6.default.statSync(sessionPath);
+      return stats.size === entry.size && stats.mtimeMs === entry.mtimeMs;
+    } catch {
+      return false;
+    }
+  }
+  /**
+   * The refresh for one session path, shared by every caller that asks while it runs.
+   *
+   * A thread list usually asks for all its paths in the same tick, and each request
+   * awaits a stat before it reaches the scanner. Without this, N threads pointing at
+   * one session file would each start their own read of it. The entry is dropped when
+   * the refresh settles, so a later render asks again and gets an honest answer from
+   * the cache check inside.
+   *
+   * @param {string} sessionPath Resolved Pi session file path.
+   * @returns {Promise<number | undefined>}
+   */
+  getPiSessionMessageCount(sessionPath) {
+    const inFlight = this.sessionMessageCountRefreshes.get(sessionPath);
+    if (inFlight) return inFlight;
+    const refresh = this.refreshPiSessionMessageCount(sessionPath).finally(() => {
+      this.sessionMessageCountRefreshes.delete(sessionPath);
+    });
+    this.sessionMessageCountRefreshes.set(sessionPath, refresh);
+    return refresh;
+  }
+  /**
+   * Compute one session path's message count, from cache when it is still valid and
+   * from a streaming background scan otherwise.
+   *
+   * @param {string} sessionPath Resolved Pi session file path.
+   * @returns {Promise<number | undefined>} The count, or undefined when the file is
+   *   not statable and there is therefore nothing to report.
+   */
+  async refreshPiSessionMessageCount(sessionPath) {
+    if (this.isSessionMessageCountCacheFresh(sessionPath)) {
+      return this.sessionMessageCountCache.get(sessionPath)?.count ?? 0;
+    }
+    let stats;
+    try {
+      stats = await import_node_fs6.default.promises.stat(sessionPath);
+    } catch {
+      this.sessionMessageCountCache.delete(sessionPath);
+      return void 0;
+    }
+    const count = await this.piSessionMessageCounter.scan(sessionPath);
+    let finalStats = stats;
+    try {
+      finalStats = await import_node_fs6.default.promises.stat(sessionPath);
+    } catch {}
+    this.sessionMessageCountCache.set(sessionPath, {
+      size: finalStats.size,
+      mtimeMs: finalStats.mtimeMs,
+      count,
+      fileKnown: true,
+      scanKnown: true
+    });
+    return count;
   }
   switchThread(e) {
     return this.threadHistory.switchThread(e)
@@ -12363,7 +12630,7 @@ var PiAgentPlugin = class extends P.Plugin {
     if (options.deletePiSession && thread.piSessionId) {
       const resolver = runner ?? this.pi;
       sessionPath = resolver?.resolveSessionPath(thread.piSessionId);
-      if (!sessionPath || !import_node_fs5.default.existsSync(sessionPath)) return false;
+      if (!sessionPath || !import_node_fs6.default.existsSync(sessionPath)) return false;
       const sessionIsShared = this.threadHistory
         .listThreads({ includeArchived: true })
         .some(
@@ -12377,7 +12644,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.disposeThreadRunner(e);
     if (sessionPath) {
       try {
-        import_node_fs5.default.unlinkSync(sessionPath);
+        import_node_fs6.default.unlinkSync(sessionPath);
       } catch (error) {
         console.warn("Pi Agent: could not delete local Pi session", error);
         return false;
