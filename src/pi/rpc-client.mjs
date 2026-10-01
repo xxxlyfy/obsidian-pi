@@ -90,6 +90,11 @@ export class PiRpcClient {
       this.stdoutBuffer = "";
       this.decoder = new StringDecoder("utf8");
       this.generation += 1;
+      // Bind this child to the generation it owns for the rest of its life.
+      // Re-reading this.generation inside the callbacks below would pick up a
+      // replacement child's generation, and this child's exit could then reject
+      // requests that the replacement child already owns.
+      const childGeneration = this.generation;
       this.stdoutEnded = false;
       this.drainPending = false;
       this.drainPromise = undefined;
@@ -116,7 +121,7 @@ export class PiRpcClient {
       child.once("error", (error) => {
         const normalized = createPiCliError({ error });
         failStart(normalized);
-        this.handleExit(normalized);
+        this.handleExit(normalized, childGeneration);
       });
       child.once("close", async (exitCode) => {
         if (this.child === child) this.child = undefined;
@@ -128,7 +133,7 @@ export class PiRpcClient {
           formatPiCliFailure({ context: "Pi RPC process stopped", stderr: this.stderr, exitCode })
         );
         failStart(error);
-        this.handleExit(error);
+        this.handleExit(error, childGeneration);
       });
     });
 
@@ -155,6 +160,10 @@ export class PiRpcClient {
 
       this.pending.set(id, {
         type,
+        // Ownership marker: handleExit() only fails the generation that exited,
+        // so an exit that lands after a replacement child started cannot touch
+        // this request.
+        generation: this.generation,
         resolve: (response) => {
           if (timeout) timerHost.clearTimeout(timeout);
           response.success
@@ -362,9 +371,28 @@ export class PiRpcClient {
     }
   }
 
-  handleExit(error) {
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
+  /**
+   * Fail the pending requests owned by one exiting child generation.
+   *
+   * The generation is a required parameter on purpose: the caller must state
+   * which child exited. Reading `this.generation` here would be wrong, because a
+   * close/error callback can run after a replacement child already started, and
+   * that child's requests must keep waiting for their own responses.
+   *
+   * @param {Error} error Failure reported to each affected request.
+   * @param {number} generation Generation of the child that exited.
+   */
+  handleExit(error, generation) {
+    // Collect first, then delete: only the affected generation leaves the map,
+    // and rpc_exit is emitted even when nothing matched.
+    const affected = [];
+    for (const [id, pending] of this.pending) {
+      if (pending.generation === generation) affected.push([id, pending]);
+    }
+    for (const [id, pending] of affected) {
+      this.pending.delete(id);
+      pending.reject(error);
+    }
     this.emit({ type: "rpc_exit", error: error.message });
   }
 

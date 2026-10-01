@@ -4166,6 +4166,7 @@ var PiRpcClient = class {
       this.stdoutBuffer = "";
       this.decoder = new import_node_string_decoder.StringDecoder("utf8");
       this.generation += 1;
+      const childGeneration = this.generation;
       this.stdoutEnded = false;
       this.drainPending = false;
       this.drainPromise = void 0;
@@ -4190,7 +4191,7 @@ var PiRpcClient = class {
       child.once("error", (error) => {
         const normalized = createPiCliError({ error });
         failStart(normalized);
-        this.handleExit(normalized);
+        this.handleExit(normalized, childGeneration);
       });
       child.once("close", async (exitCode) => {
         if (this.child === child) this.child = void 0;
@@ -4200,7 +4201,7 @@ var PiRpcClient = class {
           formatPiCliFailure({ context: "Pi RPC process stopped", stderr: this.stderr, exitCode })
         );
         failStart(error);
-        this.handleExit(error);
+        this.handleExit(error, childGeneration);
       });
     });
     return this.startPromise;
@@ -4222,6 +4223,10 @@ var PiRpcClient = class {
           : void 0;
       this.pending.set(id, {
         type,
+        // Ownership marker: handleExit() only fails the generation that exited,
+        // so an exit that lands after a replacement child started cannot touch
+        // this request.
+        generation: this.generation,
         resolve: (response) => {
           if (timeout) timerHost.clearTimeout(timeout);
           response.success
@@ -4412,9 +4417,26 @@ var PiRpcClient = class {
       }
     }
   }
-  handleExit(error) {
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
+  /**
+   * Fail the pending requests owned by one exiting child generation.
+   *
+   * The generation is a required parameter on purpose: the caller must state
+   * which child exited. Reading `this.generation` here would be wrong, because a
+   * close/error callback can run after a replacement child already started, and
+   * that child's requests must keep waiting for their own responses.
+   *
+   * @param {Error} error Failure reported to each affected request.
+   * @param {number} generation Generation of the child that exited.
+   */
+  handleExit(error, generation) {
+    const affected = [];
+    for (const [id, pending] of this.pending) {
+      if (pending.generation === generation) affected.push([id, pending]);
+    }
+    for (const [id, pending] of affected) {
+      this.pending.delete(id);
+      pending.reject(error);
+    }
     this.emit({ type: "rpc_exit", error: error.message });
   }
   async abort() {
