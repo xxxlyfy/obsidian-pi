@@ -12162,6 +12162,12 @@ var PiAgentPlugin = class extends P.Plugin {
    * The runner is tracked in `ephemeralRunners` until the caller releases it, so
    * `onunload()` can release a lookup that is still waiting for Pi. It never sets
    * `isRunning` and is never cancelled: disposing its client is what ends its request.
+   *
+   * After `onunload()` the caller receives that same runner already disposed, exactly
+   * like `createPiRunner()`: a session operation that is still scheduled once the
+   * plugin is going away must not start Pi. Handing back a disposed runner keeps the
+   * factory's contract -- the caller still owns and releases a runner -- while the
+   * operation fails through PiRunner's existing cancellation semantics.
    */
   createEphemeralThreadRunner() {
     (!this.graph || !this.contextBuilder) && this.rebuildServices({ disposeThreadRunners: false });
@@ -12174,6 +12180,10 @@ var PiAgentPlugin = class extends P.Plugin {
       void 0,
       this.getExtensionUiHandler()
     );
+    if (this.unloading) {
+      runner.dispose();
+      return runner;
+    }
     this.ephemeralRunners.add(runner);
     return runner;
   }
@@ -12364,8 +12374,7 @@ var PiAgentPlugin = class extends P.Plugin {
         );
       if (sessionIsShared) return false;
     }
-    runner?.rpcClient?.dispose();
-    this.threadRunners.delete(e);
+    this.disposeThreadRunner(e);
     if (sessionPath) {
       try {
         import_node_fs5.default.unlinkSync(sessionPath);
@@ -12393,10 +12402,7 @@ var PiAgentPlugin = class extends P.Plugin {
     const deleteIds = threads
       .filter((thread) => !skipped.has(thread.id))
       .map((thread) => thread.id);
-    for (const threadId of deleteIds) {
-      this.threadRunners.get(threadId)?.rpcClient?.dispose();
-      this.threadRunners.delete(threadId);
-    }
+    for (const threadId of deleteIds) this.disposeThreadRunner(threadId);
     const result = this.threadHistory.deleteThreads(deleteIds);
     if (result.deletedIds.length > 0) {
       this.syncCurrentThreadState();

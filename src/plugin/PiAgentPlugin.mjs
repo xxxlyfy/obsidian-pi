@@ -614,6 +614,12 @@ export class PiAgentPlugin extends P.Plugin {
    * The runner is tracked in `ephemeralRunners` until the caller releases it, so
    * `onunload()` can release a lookup that is still waiting for Pi. It never sets
    * `isRunning` and is never cancelled: disposing its client is what ends its request.
+   *
+   * After `onunload()` the caller receives that same runner already disposed, exactly
+   * like `createPiRunner()`: a session operation that is still scheduled once the
+   * plugin is going away must not start Pi. Handing back a disposed runner keeps the
+   * factory's contract -- the caller still owns and releases a runner -- while the
+   * operation fails through PiRunner's existing cancellation semantics.
    */
   createEphemeralThreadRunner() {
     (!this.graph || !this.contextBuilder) && this.rebuildServices({ disposeThreadRunners: false });
@@ -626,6 +632,12 @@ export class PiAgentPlugin extends P.Plugin {
       undefined,
       this.getExtensionUiHandler()
     );
+    // Not tracked in this case: there is nothing left to release, and `onunload()` has
+    // already drained the registry.
+    if (this.unloading) {
+      runner.dispose();
+      return runner;
+    }
     this.ephemeralRunners.add(runner);
     return runner;
   }
@@ -835,8 +847,10 @@ export class PiAgentPlugin extends P.Plugin {
       if (sessionIsShared) return false;
     }
 
-    runner?.rpcClient?.dispose();
-    this.threadRunners.delete(e);
+    // The deleted thread's idle runner is released exactly like an archived one, so
+    // the runner itself reaches its terminal state (disposed, client cleared) instead
+    // of surviving as an untracked object that could start Pi again.
+    this.disposeThreadRunner(e);
     if (sessionPath) {
       try {
         fs.unlinkSync(sessionPath);
@@ -866,10 +880,10 @@ export class PiAgentPlugin extends P.Plugin {
       .filter((thread) => !skipped.has(thread.id))
       .map((thread) => thread.id);
 
-    for (const threadId of deleteIds) {
-      this.threadRunners.get(threadId)?.rpcClient?.dispose();
-      this.threadRunners.delete(threadId);
-    }
+    // Every thread that can be deleted releases its idle runner through the same
+    // lifecycle deleteThread() uses, so both entry points leave a disposed runner
+    // behind and never an untracked one that still owns a Pi client.
+    for (const threadId of deleteIds) this.disposeThreadRunner(threadId);
 
     const result = this.threadHistory.deleteThreads(deleteIds);
     if (result.deletedIds.length > 0) {
