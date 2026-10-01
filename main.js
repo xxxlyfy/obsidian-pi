@@ -4121,6 +4121,7 @@ var PiRpcClient = class {
     this.pending = /* @__PURE__ */ new Map();
     this.listeners = /* @__PURE__ */ new Set();
     this.stderr = "";
+    this.stdinError = void 0;
     this.stdoutBuffer = "";
     this.decoder = new import_node_string_decoder.StringDecoder("utf8");
     this.timerHost = options.hostWindow;
@@ -4163,6 +4164,7 @@ var PiRpcClient = class {
       );
       this.child = child;
       this.stderr = "";
+      this.stdinError = void 0;
       this.stdoutBuffer = "";
       this.decoder = new import_node_string_decoder.StringDecoder("utf8");
       this.generation += 1;
@@ -4187,6 +4189,9 @@ var PiRpcClient = class {
       child.stdout.on("end", () => this.flushDecoder());
       child.stderr.on("data", (chunk) => {
         this.stderr += chunk.toString("utf8");
+      });
+      child.stdin?.on?.("error", (error) => {
+        this.stdinError = error;
       });
       child.once("error", (error) => {
         const normalized = createPiCliError({ error });

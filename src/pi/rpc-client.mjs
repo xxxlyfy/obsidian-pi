@@ -45,6 +45,7 @@ export class PiRpcClient {
     this.pending = new Map();
     this.listeners = new Set();
     this.stderr = "";
+    this.stdinError = undefined;
     this.stdoutBuffer = "";
     this.decoder = new StringDecoder("utf8");
     this.timerHost = options.hostWindow;
@@ -87,6 +88,7 @@ export class PiRpcClient {
       const child = spawn(invocation.command, invocation.args, invocation.options);
       this.child = child;
       this.stderr = "";
+      this.stdinError = undefined;
       this.stdoutBuffer = "";
       this.decoder = new StringDecoder("utf8");
       this.generation += 1;
@@ -117,6 +119,16 @@ export class PiRpcClient {
       child.stdout.on("end", () => this.flushDecoder());
       child.stderr.on("data", (chunk) => {
         this.stderr += chunk.toString("utf8");
+      });
+      // A write to a child that has already exited fails with EPIPE, and Node
+      // reports that failure twice: to the write callback in `request()` and as
+      // an 'error' event on the stream. The callback rejects the one request that
+      // lost the race, but an 'error' event with no listener is thrown as an
+      // uncaught exception, which ended the whole run - and the whole host
+      // process - instead of failing that request. Keep the reason for
+      // diagnostics; the child's close handler still reports the run failure.
+      child.stdin?.on?.("error", (error) => {
+        this.stdinError = error;
       });
       child.once("error", (error) => {
         const normalized = createPiCliError({ error });
