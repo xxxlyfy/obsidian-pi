@@ -29,10 +29,31 @@ export class PiRunner {
     this.rpcClient = rpcClient;
     this.extensionUiHandler = extensionUiHandler;
     this.cancelRequested = false;
+    // Terminal. Set once by dispose() and never cleared, so a disposed runner can
+    // neither continue nor start a Pi process.
+    this.disposed = false;
+    /**
+     * Rejection handle of the run that is currently waiting for Pi's final event,
+     * when there is one. `dispose()` uses it because that wait is not a pending
+     * RPC request, so disposing the client could not wake the run by itself.
+     *
+     * @type {((error: Error) => void) | undefined}
+     */
+    this.runCompletionRejector = undefined;
+  }
+
+  /**
+   * Whether this runner must treat its current (or next) run as canceled: the
+   * caller asked Pi to abort, or the runner was disposed by the plugin.
+   *
+   * @returns {boolean}
+   */
+  get cancelPending() {
+    return this.cancelRequested || this.disposed;
   }
 
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== undefined)
       return this.runPiRpcCompact(sessionId, compactInstructions, callbacks);
@@ -43,22 +64,68 @@ export class PiRunner {
       context,
       threadHistory
     );
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
     return this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
   }
 
+  /**
+   * Ask the run that is executing on this runner to stop.
+   *
+   * Synchronous on purpose. The abort request is written to Pi's stdin before this
+   * method returns, so a caller that has to tear the runner down in the same tick
+   * -- plugin unload, which Obsidian does not await -- cannot preempt the request
+   * with a dispose. `PiRpcClient.abort()` terminates the process tree itself when
+   * the request cannot be delivered, so an unawaited cancel still stops Pi.
+   *
+   * @returns {Promise<void> | undefined} Settles with the abort request; callers
+   * that cannot await it (Obsidian's `onunload()`) may ignore it.
+   */
   cancelCurrentRun() {
     this.cancelRequested = true;
-    this.rpcClient?.abort();
+    const client = this.rpcClient;
+    if (!client) return undefined;
+    try {
+      return Promise.resolve(client.abort()).catch(() => {});
+    } catch (error) {
+      console.warn("Pi Agent: could not request a Pi run abort", error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Release this runner for good and let any run it still carries settle.
+   *
+   * Disposal only frees resources; asking a live run to stop stays
+   * `cancelCurrentRun()`'s job and the plugin always cancels first. Disposal does
+   * have to finish what a cancel started: it marks the runner as canceled instead
+   * of letting the closed client surface as an agent failure, and it settles a run
+   * that is waiting for a final event the disposed client can no longer deliver.
+   * After this call the runner cannot start Pi again.
+   */
+  dispose() {
+    this.disposed = true;
+    const client = this.rpcClient;
+    this.rpcClient = undefined;
+    this.rpcSession = undefined;
+    const rejectRun = this.runCompletionRejector;
+    this.runCompletionRejector = undefined;
+    rejectRun?.(new Error("Pi RPC client disposed."));
+    client?.dispose();
   }
 
   async getOrCreateRpcClient(sessionReference) {
+    // A disposed runner must never spawn another Pi process, not even when a
+    // stale callback or a queue drain still asks it for one.
+    if (this.disposed) throw new Error("Pi run canceled.");
     if (this.rpcClient) {
       const client = this.rpcClient;
       this.rpcSession ??= this.resolveOrCreateSession(sessionReference);
       try {
         await client.start();
+        // Disposed while Pi was starting: the process this start just produced has
+        // no owner left, so it is taken down here instead of leaking.
+        if (this.disposed) throw new Error("Pi run canceled.");
         return { client, session: this.rpcSession };
       } catch (error) {
         this.resetRpcClientAfterStartupFailure(client);
@@ -77,6 +144,7 @@ export class PiRunner {
     this.rpcSession = session;
     try {
       await client.start();
+      if (this.disposed) throw new Error("Pi run canceled.");
       return { client, session };
     } catch (error) {
       this.resetRpcClientAfterStartupFailure(client);
@@ -92,14 +160,14 @@ export class PiRunner {
 
   async runPiRpc(prompt, sessionId, callbacks, images = []) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
       const runtimeState = await client.request("get_state").catch(() => undefined);
       const state = createRunState();
@@ -136,8 +204,12 @@ export class PiRunner {
       });
       await promptRequest;
       callbacks?.onPromptAccepted?.();
+      // From here the run waits for Pi's final event, which no pending RPC request
+      // can wake. Hand dispose() the rejection handle so releasing the runner
+      // settles the run instead of leaving it pending forever.
+      this.runCompletionRejector = rejectRun;
       await completion;
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       if (state.errorMessage) throw new Error(state.errorMessage);
       return {
         finalResponse: this.getFinalResponse(state),
@@ -150,12 +222,13 @@ export class PiRunner {
         diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
-      if (this.cancelRequested || callbacks?.isCanceled?.())
+      if (this.cancelPending || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
       throw error;
     } finally {
       this.cancelRequested = false;
       this.isRunning = false;
+      this.runCompletionRejector = undefined;
       unsubscribe();
     }
   }
@@ -171,14 +244,14 @@ export class PiRunner {
 
   async runPiRpcCompact(sessionId, customInstructions = "", callbacks) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
       const state = createRunState();
       unsubscribe = client.subscribe((event) => {
@@ -191,7 +264,7 @@ export class PiRunner {
         },
         { timeoutMs: 0 }
       );
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       return {
         finalResponse: "Context compacted.",
         sessionId: session.reference,
@@ -203,7 +276,7 @@ export class PiRunner {
         diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
-      if (this.cancelRequested || callbacks?.isCanceled?.())
+      if (this.cancelPending || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
       throw error;
     } finally {

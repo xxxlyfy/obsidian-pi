@@ -5455,9 +5455,20 @@ var PiRunner = class {
     this.rpcClient = rpcClient;
     this.extensionUiHandler = extensionUiHandler;
     this.cancelRequested = false;
+    this.disposed = false;
+    this.runCompletionRejector = void 0;
+  }
+  /**
+   * Whether this runner must treat its current (or next) run as canceled: the
+   * caller asked Pi to abort, or the runner was disposed by the plugin.
+   *
+   * @returns {boolean}
+   */
+  get cancelPending() {
+    return this.cancelRequested || this.disposed;
   }
   async run(prompt, context, sessionId, threadHistory = [], callbacks, images = []) {
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     const compactInstructions = getCompactInstructions(prompt);
     if (compactInstructions !== void 0)
       return this.runPiRpcCompact(sessionId, compactInstructions, callbacks);
@@ -5467,19 +5478,60 @@ var PiRunner = class {
       context,
       threadHistory
     );
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     return this.runPiRpc(formattedPrompt, sessionId, callbacks, images);
   }
+  /**
+   * Ask the run that is executing on this runner to stop.
+   *
+   * Synchronous on purpose. The abort request is written to Pi's stdin before this
+   * method returns, so a caller that has to tear the runner down in the same tick
+   * -- plugin unload, which Obsidian does not await -- cannot preempt the request
+   * with a dispose. `PiRpcClient.abort()` terminates the process tree itself when
+   * the request cannot be delivered, so an unawaited cancel still stops Pi.
+   *
+   * @returns {Promise<void> | undefined} Settles with the abort request; callers
+   * that cannot await it (Obsidian's `onunload()`) may ignore it.
+   */
   cancelCurrentRun() {
     this.cancelRequested = true;
-    this.rpcClient?.abort();
+    const client = this.rpcClient;
+    if (!client) return void 0;
+    try {
+      return Promise.resolve(client.abort()).catch(() => {});
+    } catch (error) {
+      console.warn("Pi Agent: could not request a Pi run abort", error);
+      return void 0;
+    }
+  }
+  /**
+   * Release this runner for good and let any run it still carries settle.
+   *
+   * Disposal only frees resources; asking a live run to stop stays
+   * `cancelCurrentRun()`'s job and the plugin always cancels first. Disposal does
+   * have to finish what a cancel started: it marks the runner as canceled instead
+   * of letting the closed client surface as an agent failure, and it settles a run
+   * that is waiting for a final event the disposed client can no longer deliver.
+   * After this call the runner cannot start Pi again.
+   */
+  dispose() {
+    this.disposed = true;
+    const client = this.rpcClient;
+    this.rpcClient = void 0;
+    this.rpcSession = void 0;
+    const rejectRun = this.runCompletionRejector;
+    this.runCompletionRejector = void 0;
+    rejectRun?.(new Error("Pi RPC client disposed."));
+    client?.dispose();
   }
   async getOrCreateRpcClient(sessionReference) {
+    if (this.disposed) throw new Error("Pi run canceled.");
     if (this.rpcClient) {
       const client2 = this.rpcClient;
       this.rpcSession ??= this.resolveOrCreateSession(sessionReference);
       try {
         await client2.start();
+        if (this.disposed) throw new Error("Pi run canceled.");
         return { client: client2, session: this.rpcSession };
       } catch (error) {
         this.resetRpcClientAfterStartupFailure(client2);
@@ -5497,6 +5549,7 @@ var PiRunner = class {
     this.rpcSession = session;
     try {
       await client.start();
+      if (this.disposed) throw new Error("Pi run canceled.");
       return { client, session };
     } catch (error) {
       this.resetRpcClientAfterStartupFailure(client);
@@ -5510,13 +5563,13 @@ var PiRunner = class {
   }
   async runPiRpc(prompt, sessionId, callbacks, images = []) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       const runtimeState = await client.request("get_state").catch(() => void 0);
       const state = createRunState();
       let settled = false;
@@ -5548,8 +5601,9 @@ var PiRunner = class {
       });
       await promptRequest;
       callbacks?.onPromptAccepted?.();
+      this.runCompletionRejector = rejectRun;
       await completion;
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       if (state.errorMessage) throw new Error(state.errorMessage);
       return {
         finalResponse: this.getFinalResponse(state),
@@ -5562,12 +5616,13 @@ var PiRunner = class {
         diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
-      if (this.cancelRequested || callbacks?.isCanceled?.())
+      if (this.cancelPending || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
       throw error;
     } finally {
       this.cancelRequested = false;
       this.isRunning = false;
+      this.runCompletionRejector = void 0;
       unsubscribe();
     }
   }
@@ -5581,13 +5636,13 @@ var PiRunner = class {
   }
   async runPiRpcCompact(sessionId, customInstructions = "", callbacks) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
-    if (callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+    if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
     this.cancelRequested = false;
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       const state = createRunState();
       unsubscribe = client.subscribe((event) => {
         handlePiEvent(event, state, callbacks);
@@ -5599,7 +5654,7 @@ var PiRunner = class {
         },
         { timeoutMs: 0 }
       );
-      if (this.cancelRequested || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
+      if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       return {
         finalResponse: "Context compacted.",
         sessionId: session.reference,
@@ -5611,7 +5666,7 @@ var PiRunner = class {
         diagnostics: state.diagnostics.snapshot()
       };
     } catch (error) {
-      if (this.cancelRequested || callbacks?.isCanceled?.())
+      if (this.cancelPending || callbacks?.isCanceled?.())
         throw new Error("Pi run canceled.", { cause: error });
       throw error;
     } finally {
@@ -10373,6 +10428,12 @@ var PiAgentView = class extends f4.ItemView {
     this.plugin = t2;
     this.lifecycle = createViewLifecycle();
     this.state = createViewState(t2);
+    this.openEventListeners = {
+      keydown: void 0,
+      fileOpen: void 0,
+      activeLeafChange: void 0
+    };
+    this.register(() => this.cleanupOpenEventListeners());
   }
   // The mixin modules above add their methods to this class's prototype at
   // runtime via Object.assign at the end of this file; their state is created
@@ -10388,24 +10449,51 @@ var PiAgentView = class extends f4.ItemView {
   getIcon() {
     return PI_AGENT_ICON_ID;
   }
-  async onOpen() {
-    this.registerDomEvent(document, "keydown", (e) => {
+  /**
+   * Install the three listeners that live for as long as the view is open.
+   *
+   * Assumes the previous round was released: `onOpen()` calls
+   * `cleanupOpenEventListeners()` first, so this replaces rather than appends.
+   */
+  setupOpenEventListeners() {
+    const listeners = this.openEventListeners;
+    const workspace = this.plugin.app.workspace;
+    listeners.keydown = (event) => {
       this.syncCurrentRunFlags();
-      if (e.key === "Escape" && this.state.running) {
-        e.preventDefault();
+      if (event.key === "Escape" && this.state.running) {
+        event.preventDefault();
         this.cancelCurrentRun();
       }
+    };
+    document.addEventListener("keydown", listeners.keydown);
+    listeners.fileOpen = workspace.on("file-open", () => {
+      this.renderToolBadges();
     });
-    this.registerEvent(
-      this.plugin.app.workspace.on("file-open", () => {
-        this.renderToolBadges();
-      })
-    );
-    this.registerEvent(
-      this.plugin.app.workspace.on("active-leaf-change", () => {
-        this.renderToolBadges();
-      })
-    );
+    listeners.activeLeafChange = workspace.on("active-leaf-change", () => {
+      this.renderToolBadges();
+    });
+  }
+  /**
+   * Release the listeners `setupOpenEventListeners()` installed, if any.
+   *
+   * Idempotent: each handle is cleared as it is used, so calling this again --
+   * from a second `onClose()`, or from the Component unload backstop -- finds
+   * nothing left to do and cannot remove a listener that is currently in use.
+   */
+  cleanupOpenEventListeners() {
+    const listeners = this.openEventListeners;
+    if (!listeners) return;
+    if (listeners.keydown) document.removeEventListener("keydown", listeners.keydown);
+    const workspace = this.plugin?.app?.workspace;
+    if (listeners.fileOpen) workspace?.offref(listeners.fileOpen);
+    if (listeners.activeLeafChange) workspace?.offref(listeners.activeLeafChange);
+    listeners.keydown = void 0;
+    listeners.fileOpen = void 0;
+    listeners.activeLeafChange = void 0;
+  }
+  async onOpen() {
+    this.cleanupOpenEventListeners();
+    this.setupOpenEventListeners();
     this.renderChatView();
   }
   renderChatView() {
@@ -10479,6 +10567,7 @@ var PiAgentView = class extends f4.ItemView {
     });
   }
   async onClose() {
+    this.cleanupOpenEventListeners();
     this.messagesEl = void 0;
     this.inputEl = void 0;
     this.promptQueueEl = void 0;
@@ -11649,6 +11738,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = /* @__PURE__ */ new Map();
+    this.unloading = false;
     this.piCommands = [];
     this.commandCatalogLoaded = false;
     this.commandCatalogRefreshPromise = void 0;
@@ -11786,8 +11876,9 @@ var PiAgentPlugin = class extends P.Plugin {
     this.addSettingTab(this.settingsTab);
   }
   onunload() {
+    this.unloading = true;
     this.annotationController?.destroy();
-    this.cancelPiRun();
+    this.cancelAllPiRuns();
     this.disposeThreadRunners();
   }
   async loadSettings() {
@@ -12448,6 +12539,38 @@ var PiAgentPlugin = class extends P.Plugin {
     var t2;
     (e != null ? e : (t2 = this.pi) != null ? t2 : void 0)?.cancelCurrentRun();
   }
+  /**
+   * Request cancellation of every Pi run that is actually executing.
+   *
+   * Chat runs execute on the per-thread runner `PiAgentView.runPrompt()` created
+   * for their thread, which lives in `threadRunners` -- not on `this.pi`, the
+   * service-level runner used as a session resolver. Cancelling only that service
+   * runner left real runs to be disposed mid-flight, which the run then reported
+   * as the agent failure "Pi RPC client disposed.". The service runner is included
+   * because `runPiPrompt()` still defaults to it.
+   *
+   * Never throws: `onunload()` must not be interrupted, and a runner without an
+   * active run has nothing to abort.
+   *
+   * @returns {Promise<void>[]} The abort requests. Obsidian does not await
+   * `onunload()`, so a caller may ignore them; see `onunload()` for why an
+   * unawaited cancel still stops Pi.
+   */
+  cancelAllPiRuns() {
+    const runners = new Set(this.threadRunners.values());
+    if (this.pi) runners.add(this.pi);
+    const aborts = [];
+    for (const runner of runners) {
+      if (!runner?.isRunning) continue;
+      try {
+        const abort = runner.cancelCurrentRun();
+        if (abort) aborts.push(abort);
+      } catch (error) {
+        console.warn("Pi Agent: could not cancel a running Pi runner", error);
+      }
+    }
+    return aborts;
+  }
   createPiRunner(threadId = this.getCurrentThread().id) {
     (!this.graph || !this.contextBuilder) && this.rebuildServices();
     if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
@@ -12461,12 +12584,20 @@ var PiAgentPlugin = class extends P.Plugin {
       void 0,
       this.getExtensionUiHandler()
     );
+    if (this.unloading) runner.dispose();
     this.threadRunners.set(threadId, runner);
     return runner;
   }
   disposeThreadRunners() {
-    for (const runner of this.threadRunners.values()) runner.rpcClient?.dispose();
+    const runners = [...this.threadRunners.values()];
     this.threadRunners.clear();
+    for (const runner of runners) {
+      try {
+        runner.dispose();
+      } catch (error) {
+        console.warn("Pi Agent: could not dispose a Pi runner", error);
+      }
+    }
   }
   rebuildServices() {
     this.modelCatalogGeneration += 1;

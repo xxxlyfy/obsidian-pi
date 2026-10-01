@@ -88,6 +88,22 @@ import { t as tr } from "../shared/i18n/index.mjs";
  */
 
 /**
+ * The listeners that live exactly as long as the view is open, kept so `onClose`
+ * can release those and nothing else.
+ *
+ * They are registered by hand instead of through `registerDomEvent()` /
+ * `registerEvent()` because those are released on Component unload, not on
+ * `onClose()`. With them, closing a view left its `keydown` handler on
+ * `document` and its workspace handlers subscribed, and every reopen added
+ * another set on top.
+ *
+ * @typedef {object} OpenEventListeners
+ * @property {((event: KeyboardEvent) => void) | undefined} keydown Handler bound to `document`.
+ * @property {import("obsidian").EventRef | undefined} fileOpen Workspace `file-open` reference.
+ * @property {import("obsidian").EventRef | undefined} activeLeafChange Workspace `active-leaf-change` reference.
+ */
+
+/**
  * Chat view. Its methods are assembled here plus the mixin modules imported
  * above (message-renderer, run-activity-state, prompt-queue, thread-list-view,
  * vault-link-actions, composer-attachments, chat-dom), which all operate on this
@@ -105,6 +121,19 @@ export class PiAgentView extends /** @type {ComposedItemView} */ (f.ItemView) {
     // next to the methods that use it.
     /** @type {import("./view/view-state.mjs").ViewState} */
     this.state = createViewState(t);
+    // Handles owned by the current onOpen. They are cleared by
+    // cleanupOpenEventListeners(), so the view can be opened and closed
+    // repeatedly without collecting listeners.
+    /** @type {OpenEventListeners} */
+    this.openEventListeners = {
+      keydown: undefined,
+      fileOpen: undefined,
+      activeLeafChange: undefined
+    };
+    // Component-level backstop. onClose() is what normally releases these, but
+    // if the view is unloaded without it -- as registerDomEvent()/registerEvent()
+    // used to cover -- the workspace must still not keep the handlers.
+    this.register(() => this.cleanupOpenEventListeners());
   }
 
   // The mixin modules above add their methods to this class's prototype at
@@ -122,24 +151,54 @@ export class PiAgentView extends /** @type {ComposedItemView} */ (f.ItemView) {
   getIcon() {
     return I;
   }
-  async onOpen() {
-    this.registerDomEvent(document, "keydown", (e) => {
+  /**
+   * Install the three listeners that live for as long as the view is open.
+   *
+   * Assumes the previous round was released: `onOpen()` calls
+   * `cleanupOpenEventListeners()` first, so this replaces rather than appends.
+   */
+  setupOpenEventListeners() {
+    const listeners = this.openEventListeners;
+    const workspace = this.plugin.app.workspace;
+    listeners.keydown = (event) => {
       this.syncCurrentRunFlags();
-      if (e.key === "Escape" && this.state.running) {
-        e.preventDefault();
+      if (event.key === "Escape" && this.state.running) {
+        event.preventDefault();
         this.cancelCurrentRun();
       }
+    };
+    document.addEventListener("keydown", listeners.keydown);
+    listeners.fileOpen = workspace.on("file-open", () => {
+      this.renderToolBadges();
     });
-    this.registerEvent(
-      this.plugin.app.workspace.on("file-open", () => {
-        this.renderToolBadges();
-      })
-    );
-    this.registerEvent(
-      this.plugin.app.workspace.on("active-leaf-change", () => {
-        this.renderToolBadges();
-      })
-    );
+    listeners.activeLeafChange = workspace.on("active-leaf-change", () => {
+      this.renderToolBadges();
+    });
+  }
+  /**
+   * Release the listeners `setupOpenEventListeners()` installed, if any.
+   *
+   * Idempotent: each handle is cleared as it is used, so calling this again --
+   * from a second `onClose()`, or from the Component unload backstop -- finds
+   * nothing left to do and cannot remove a listener that is currently in use.
+   */
+  cleanupOpenEventListeners() {
+    const listeners = this.openEventListeners;
+    if (!listeners) return;
+    if (listeners.keydown) document.removeEventListener("keydown", listeners.keydown);
+    const workspace = this.plugin?.app?.workspace;
+    if (listeners.fileOpen) workspace?.offref(listeners.fileOpen);
+    if (listeners.activeLeafChange) workspace?.offref(listeners.activeLeafChange);
+    listeners.keydown = undefined;
+    listeners.fileOpen = undefined;
+    listeners.activeLeafChange = undefined;
+  }
+  async onOpen() {
+    // onOpen can run more than once for one view instance. Component-level
+    // registrations are only released on unload, so the previous round has to be
+    // released here or its listeners would outlive the close and stack up.
+    this.cleanupOpenEventListeners();
+    this.setupOpenEventListeners();
     this.renderChatView();
   }
   renderChatView() {
@@ -221,6 +280,9 @@ export class PiAgentView extends /** @type {ComposedItemView} */ (f.ItemView) {
     });
   }
   async onClose() {
+    // Released first, so no document or workspace event can call into a view
+    // that is being torn down.
+    this.cleanupOpenEventListeners();
     this.messagesEl = void 0;
     this.inputEl = void 0;
     this.promptQueueEl = void 0;

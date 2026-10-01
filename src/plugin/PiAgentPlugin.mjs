@@ -140,6 +140,8 @@ export class PiAgentPlugin extends P.Plugin {
     this.annotationStore = new AnnotationStore();
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = new Map();
+    /** @type {boolean} Set by onunload(); after it, no new Pi process may start. */
+    this.unloading = false;
     this.piCommands = [];
     this.commandCatalogLoaded = false;
     this.commandCatalogRefreshPromise = undefined;
@@ -282,8 +284,18 @@ export class PiAgentPlugin extends P.Plugin {
     this.addSettingTab(this.settingsTab);
   }
   onunload() {
+    // Set first: everything below may create or settle a runner, and nothing may
+    // start a new Pi process once the plugin is going away.
+    this.unloading = true;
     this.annotationController?.destroy();
-    this.cancelPiRun();
+    // Order matters -- request cancellation for every run that is actually
+    // executing, then release resources. `onunload()` has to stay synchronous
+    // because Obsidian does not await it (`Component.unload(): void`), so the
+    // aborts cannot be awaited here; instead `cancelCurrentRun()` writes the abort
+    // request to Pi's stdin before it returns, `PiRpcClient.abort()` terminates the
+    // process tree itself when the request cannot be delivered, and
+    // `disposeThreadRunners()` terminates whatever is left. Neither call throws.
+    this.cancelAllPiRuns();
     this.disposeThreadRunners();
   }
   async loadSettings() {
@@ -965,6 +977,38 @@ export class PiAgentPlugin extends P.Plugin {
     var t;
     (e != null ? e : (t = this.pi) != null ? t : void 0)?.cancelCurrentRun();
   }
+  /**
+   * Request cancellation of every Pi run that is actually executing.
+   *
+   * Chat runs execute on the per-thread runner `PiAgentView.runPrompt()` created
+   * for their thread, which lives in `threadRunners` -- not on `this.pi`, the
+   * service-level runner used as a session resolver. Cancelling only that service
+   * runner left real runs to be disposed mid-flight, which the run then reported
+   * as the agent failure "Pi RPC client disposed.". The service runner is included
+   * because `runPiPrompt()` still defaults to it.
+   *
+   * Never throws: `onunload()` must not be interrupted, and a runner without an
+   * active run has nothing to abort.
+   *
+   * @returns {Promise<void>[]} The abort requests. Obsidian does not await
+   * `onunload()`, so a caller may ignore them; see `onunload()` for why an
+   * unawaited cancel still stops Pi.
+   */
+  cancelAllPiRuns() {
+    const runners = new Set(this.threadRunners.values());
+    if (this.pi) runners.add(this.pi);
+    const aborts = [];
+    for (const runner of runners) {
+      if (!runner?.isRunning) continue;
+      try {
+        const abort = runner.cancelCurrentRun();
+        if (abort) aborts.push(abort);
+      } catch (error) {
+        console.warn("Pi Agent: could not cancel a running Pi runner", error);
+      }
+    }
+    return aborts;
+  }
   createPiRunner(threadId = this.getCurrentThread().id) {
     (!this.graph || !this.contextBuilder) && this.rebuildServices();
     if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
@@ -978,12 +1022,25 @@ export class PiAgentPlugin extends P.Plugin {
       undefined,
       this.getExtensionUiHandler()
     );
+    // After unload a runner may still be requested by a queue drain or a stale
+    // callback. Handing back an already disposed runner makes that request fail as
+    // a cancel instead of spawning Pi behind an unloaded plugin.
+    if (this.unloading) runner.dispose();
     this.threadRunners.set(threadId, runner);
     return runner;
   }
   disposeThreadRunners() {
-    for (const runner of this.threadRunners.values()) runner.rpcClient?.dispose();
+    // Snapshot before clearing, so a runner that settles while this loop runs
+    // cannot change what is being released.
+    const runners = [...this.threadRunners.values()];
     this.threadRunners.clear();
+    for (const runner of runners) {
+      try {
+        runner.dispose();
+      } catch (error) {
+        console.warn("Pi Agent: could not dispose a Pi runner", error);
+      }
+    }
   }
   rebuildServices() {
     this.modelCatalogGeneration += 1;
