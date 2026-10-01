@@ -178,6 +178,13 @@ export class PiRunner {
         settleRun = resolve;
         rejectRun = reject;
       });
+      // Claim the rejection as soon as the promise exists. An rpc_exit can arrive
+      // while the prompt request below is still pending, so rejectRun() may run
+      // before `await completion` attaches its handler, and Node would report an
+      // unhandled rejection even though the run still settles correctly. This
+      // handler only marks the promise as handled; the result is still consumed
+      // by `await completion`.
+      completion.catch(() => {});
       unsubscribe = client.subscribe((event) => {
         if (event.type === "rpc_exit") {
           if (!settled) rejectRun(new Error(event.error || "Pi RPC process stopped."));

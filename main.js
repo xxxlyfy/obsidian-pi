@@ -5601,6 +5601,7 @@ var PiRunner = class {
         settleRun = resolve;
         rejectRun = reject;
       });
+      completion.catch(() => {});
       unsubscribe = client.subscribe((event) => {
         if (event.type === "rpc_exit") {
           if (!settled) rejectRun(new Error(event.error || "Pi RPC process stopped."));
