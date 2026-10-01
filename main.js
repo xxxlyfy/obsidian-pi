@@ -12146,20 +12146,62 @@ var PiAgentPlugin = class extends P.Plugin {
   listThreads(e) {
     return this.threadHistory.listThreads(e);
   }
+  /**
+   * A PiRunner for a one-shot session lookup.
+   *
+   * Built from the same settings, context builder, directories and extension UI as
+   * a chat runner, but deliberately not registered in `threadRunners`: the caller
+   * owns it and disposes it, so a temporary lookup cannot leave a Pi process
+   * behind. `threadId` plays no part in the configuration -- it is only the key a
+   * chat runner is cached under -- so no thread id is needed here.
+   */
+  createEphemeralThreadRunner() {
+    (!this.graph || !this.contextBuilder) && this.rebuildServices({ disposeThreadRunners: false });
+    if (!this.contextBuilder) throw new Error("Pi context builder is not available.");
+    return new PiRunner(
+      this.settings,
+      this.contextBuilder,
+      this.getVaultBasePath(),
+      this.getPluginDirectory(),
+      void 0,
+      this.getExtensionUiHandler()
+    );
+  }
   async getThreadSessionStats(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).getSessionStats(thread.piSessionId);
+    const existing = this.threadRunners.get(threadId);
+    if (existing) return existing.getSessionStats(thread.piSessionId);
+    const runner = this.createEphemeralThreadRunner();
+    try {
+      return await runner.getSessionStats(thread.piSessionId);
+    } finally {
+      runner.dispose();
+    }
   }
   async exportThreadSession(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).exportSession(thread.piSessionId);
+    const existing = this.threadRunners.get(threadId);
+    if (existing) return existing.exportSession(thread.piSessionId);
+    const runner = this.createEphemeralThreadRunner();
+    try {
+      return await runner.exportSession(thread.piSessionId);
+    } finally {
+      runner.dispose();
+    }
   }
   async getThreadSessionTree(threadId) {
     const thread = this.threadHistory.getThread(threadId);
     if (!thread?.piSessionId) return void 0;
-    return this.createPiRunner(threadId).getSessionTree(thread.piSessionId);
+    const existing = this.threadRunners.get(threadId);
+    if (existing) return existing.getSessionTree(thread.piSessionId);
+    const runner = this.createEphemeralThreadRunner();
+    try {
+      return await runner.getSessionTree(thread.piSessionId);
+    } finally {
+      runner.dispose();
+    }
   }
   async getThreadSessionEntries(threadId, since) {
     const thread = this.threadHistory.getThread(threadId);
@@ -12202,9 +12244,31 @@ var PiAgentPlugin = class extends P.Plugin {
         true)
       : false;
   }
+  /**
+   * Release the runner a thread owns once that thread no longer needs it.
+   *
+   * A running runner is left alone: archiving stops a thread from being used again,
+   * it does not cancel the run that is executing on it. A missing runner is a
+   * no-op, and a failing release must not break the operation that asked for it.
+   *
+   * @param {string} threadId Thread whose idle runner is released.
+   * @returns {boolean} Whether a runner was released.
+   */
+  disposeThreadRunner(threadId) {
+    const runner = this.threadRunners.get(threadId);
+    if (!runner || runner.isRunning) return false;
+    try {
+      runner.dispose();
+    } catch (error) {
+      console.warn("Pi Agent: could not dispose a thread runner", error);
+    }
+    this.threadRunners.delete(threadId);
+    return true;
+  }
   archiveThread(e = this.threadHistory.currentThreadId) {
+    if (this.threadRunners.get(e)?.isRunning) return false;
     return this.threadHistory.archiveThread(e)
-      ? (this.syncCurrentThreadState(), this.saveThreadHistory(), true)
+      ? (this.disposeThreadRunner(e), this.syncCurrentThreadState(), this.saveThreadHistory(), true)
       : false;
   }
   unarchiveThread(e) {
@@ -12213,12 +12277,26 @@ var PiAgentPlugin = class extends P.Plugin {
       : false;
   }
   archiveThreads(e) {
-    const archivedIds = this.threadHistory.archiveThreads(e);
+    const requested = new Set(e);
+    const skippedIds = this.threadHistory
+      .listThreads({ includeArchived: true })
+      .filter((thread) => requested.has(thread.id) && this.threadRunners.get(thread.id)?.isRunning)
+      .map((thread) => thread.id);
+    const skipped = new Set(skippedIds);
+    const archivedIds = this.threadHistory.archiveThreads(
+      e.filter((threadId) => !skipped.has(threadId))
+    );
+    for (const threadId of archivedIds) this.disposeThreadRunner(threadId);
     if (archivedIds.length > 0) {
       this.syncCurrentThreadState();
       this.saveThreadHistory();
     }
-    return { archivedIds, archivedCount: archivedIds.length };
+    return {
+      archivedIds,
+      archivedCount: archivedIds.length,
+      skippedIds,
+      skippedCount: skippedIds.length
+    };
   }
   deleteThread(e, options = {}) {
     const thread = this.threadHistory.getThread(e);
@@ -12287,8 +12365,16 @@ var PiAgentPlugin = class extends P.Plugin {
     };
   }
   clearArchivedThreads() {
-    let e = this.threadHistory.clearArchivedThreads();
-    return e === 0 ? 0 : (this.syncCurrentThreadState(), this.saveThreadHistory(), e);
+    const deleteIds = this.threadHistory
+      .listThreads({ includeArchived: true })
+      .filter(
+        (thread) =>
+          thread.archived &&
+          thread.id !== this.threadHistory.currentThreadId &&
+          !this.threadRunners.get(thread.id)?.isRunning
+      )
+      .map((thread) => thread.id);
+    return this.deleteThreads(deleteIds).deletedCount;
   }
   renameThread(e, t2) {
     const thread = this.threadHistory.getThread(e);
