@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.22
+
+- Stopped a failed Pi RPC write from crashing instead of failing one request. A rename, abort, or notification that races a Pi process which exits right after the client starts writes to a closed pipe, and Node reports that single EPIPE twice: to the write callback, which rejected exactly the request that lost the race, and as an `error` event on `child.stdin`, which had no listener and was therefore rethrown as an uncaught exception in the host process. `PiRpcClient.start()` now owns that event and records the reason on `stdinError` (cleared whenever a replacement child starts), so the request fails, the child's close handler still reports `Pi RPC process stopped`, and nothing escapes into Obsidian or the test runner. This was the unhandled `write EPIPE` raised by `tests/thread-rename-runner-lifecycle.test.mjs`, and it is now pinned by `tests/rpc-client-stdin-error.test.mjs`, which drives the request, `notify()`, and restart paths against a real failing `Writable` so the callback and the event arrive through Node's own machinery.
+- Fixed the formatting that failed `format:check` in every CI and release run since `cc87f8e`: `tests/plugin-unload-lifecycle.test.mjs` and `tests/rpc-client-restart-race.test.mjs` were committed unformatted and are now reflowed to the repository's 100-column style.
+- First published release since 0.0.20. The 0.0.21 tag was pushed, but its release run stopped at that formatting gate, so GitHub never received a 0.0.21 release and 0.0.22 ships the 0.0.21 changes listed below together with these fixes.
+
 ## 0.0.21
 
 - Kept chat history recoverable when the stored plugin data or a backup snapshot is damaged. A JSON parse failure in `data.json` is now treated as damaged data (one warning, default settings) instead of rejecting `loadSettings()` and ending `onload()` before the valid local backup could be read, while a missing file, a permission failure, or any other I/O error still propagates because continuing with defaults would hide a vault the plugin cannot read. A temporary snapshot is now named with a random UUID: `tmp-<pid>-<Date.now()>` let writers in the same millisecond share one path, and a 4-writer probe reproduced 113 collisions and 17 rounds that published a truncated mixture with no previous generation to fall back on.
