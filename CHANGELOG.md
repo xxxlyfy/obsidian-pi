@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.27 - 2026-10-02
+
+- Stopped the thinking picker from showing the internal custom-model marker. "Use custom model" stores the sentinel `__custom` in `settings.model` and the slug the user typed in `settings.customModel`, and every other surface resolves that branch before formatting a label (`run-settings.mjs`, `run-metadata.mjs`) while `formatEffectiveModel()` in the model picker modal did not: its default row read "Effective for **custom" / "对 **custom 生效" in an otherwise localized sentence. It now names the custom slug, or "Custom" when the field is empty. Found by the same audit; `tests/thinking-picker-effective-model.test.mjs` fails on the old formatting.
+
 ## 0.0.26 - 2026-10-02
 
 - Fixed six more defects the same audit found: one data-loss path in the annotation store, one in the release tooling, and four things a user could see go wrong - Escape cancelling an answer, a rebuilt view freezing a stream, a background run erasing the visible one, and a blank chat header. Each entry below explains its own defect.

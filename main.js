@@ -6501,6 +6501,9 @@ var ThinkingPickerModal = class extends import_obsidian5.SuggestModal {
   }
 };
 function formatEffectiveModel(settings) {
+  if (settings.model === CUSTOM_MODEL_VALUE) {
+    return settings.customModel?.trim() || "Custom";
+  }
   const slug = settings.model || settings.effectiveModel;
   const model = settings.availableModels.find((candidate) => candidate.slug === slug);
   return model?.displayName || slug;

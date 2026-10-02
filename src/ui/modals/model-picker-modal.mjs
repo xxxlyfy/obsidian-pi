@@ -1,5 +1,6 @@
 import { FuzzySuggestModal, Notice, SuggestModal } from "obsidian";
 import {
+  CUSTOM_MODEL_VALUE,
   getLocalizedReasoningLabel,
   getLocalizedReasoningOptions,
   getReasoningOptions,
@@ -138,6 +139,12 @@ export class ThinkingPickerModal extends SuggestModal {
 }
 
 function formatEffectiveModel(settings) {
+  // The custom entry stores `__custom` in `settings.model` and the slug the user typed in
+  // `settings.customModel`, so the sentinel must never reach a label: every other panel
+  // resolves the custom branch first (`run-settings.mjs`, `run-metadata.mjs`).
+  if (settings.model === CUSTOM_MODEL_VALUE) {
+    return settings.customModel?.trim() || "Custom";
+  }
   const slug = settings.model || settings.effectiveModel;
   const model = settings.availableModels.find((candidate) => candidate.slug === slug);
   return model?.displayName || slug;
