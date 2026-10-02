@@ -8,17 +8,49 @@
 // `args` at a minimal real Node script (the client passes those straight to
 // `spawn`), so every event the client sees comes from the operating system.
 //
-// Measured real-Node behaviour this file pins (Windows, Node 22/24 class):
-//   * normal exit      : exit + close inside one batch, no awaitable boundary;
-//   * spawn failure    : error (exitCode already set, no 'exit' event) and close
-//                        follows one macrotask later - so the state is released;
-//   * kill failure     : kill() returns false and emits NO 'error' at all;
-//   * dead-child terminateProcessTree(): no throw escapes and no child 'error';
-//   * send failure     : the only real 'error' without a following 'close', and it
-//                        needs an IPC channel - which this client never creates;
-//   * exit + delayed close: holdable with a real (detached) descendant that
-//                        inherits stdio, which is the real-world shape the fake
-//                        `exitOnly()` was standing in for.
+// Everything recorded here is a Node/OS fact rather than a PiAgent contract, and
+// the two kinds of statement in this file must not be confused:
+//
+//   Cross-platform invariants (asserted unconditionally on every platform):
+//     * a normal exit delivers exactly one 'exit' and then one 'close';
+//     * the checkpoints an exit handler queues run nextTick -> microtask ->
+//       setImmediate;
+//     * a spawn failure delivers exactly one 'error' then one 'close' and never an
+//       'exit', and fills `exitCode` with the negative libuv errno before 'error',
+//       so `running` is already false when PiRpcClient's own handler runs;
+//     * `pid` is published by Node only after a successful `uv_spawn`
+//       (src/process_wrap.cc), so a failed spawn has no pid;
+//     * `kill()` on a dead child returns false and emits no 'error';
+//     * `terminateProcessTree()` on a dead child throws nothing and emits nothing;
+//     * a detached descendant outlives the parent that spawned it, which is what
+//       makes an exit with 'close' still pending a real-world shape.
+//
+//   Platform facts (branched and pinned per platform - never assumed for the
+//   other one):
+//     * Windows, measured locally on Node 24: a normal exit reports 'close' from
+//       inside the same callback that reported 'exit', before the exit handler's
+//       nextTick; an attached descendant dies together with its parent (the
+//       parent's job object takes the tree down).
+//     * POSIX, measured on ubuntu-latest CI with Node 24: 'close' is delivered
+//       either from inside the exit callback or in the next loop turn after the
+//       check phase - two CI runs of this unchanged file produced one shape each,
+//       so no single order may be demanded - and an attached descendant is merely
+//       reparented, so it keeps running after its parent exits.
+//     * UNIX vs Windows errno: a missing executable is UV_ENOENT, reported as
+//       -4058 on Windows and -2 on POSIX.
+//
+//   Node runtime probes (kept because they show why some shapes are unreachable
+//   for PiRpcClient, not because PiRpcClient must behave this way):
+//     * kill failure, and terminateProcessTree() on an already dead child;
+//     * the only real 'error' without a following 'close' needs an IPC channel,
+//       which this client never creates. The missing 'close' is Node's own close
+//       bookkeeping rather than an OS behaviour: an explicit `disconnect()` closes
+//       the IPC channel without incrementing the counter `_maybeClose()` waits
+//       for, so 'close' can never be emitted. The same combination was measured
+//       on win32 and on ubuntu-latest.
+//     * exit + delayed close: holdable with a real (detached) descendant that
+//       inherits stdio, which is the real-world shape the fake `exitOnly()` was
+//       standing in for.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -29,7 +61,39 @@ import { buildPiProcessInvocation } from "../src/pi/environment.mjs";
 import { terminateProcessTree } from "../src/shared/process-tree.mjs";
 import { PiRpcClient } from "../src/pi/rpc-client.mjs";
 
+const PLATFORM = process.platform;
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ---------------------------------------------------------------------------
+// Platform facts, expressed as pure functions of a platform string.
+//
+// Keeping them pure is what makes the branches testable: the sensitivity test at
+// the bottom proves the two answers really differ, so writing a branch backwards
+// fails there instead of silently weakening a real-process test.
+// ---------------------------------------------------------------------------
+
+/** Does a descendant spawned WITHOUT `detached` die with the parent that spawned it? */
+const attachedDescendantDiesWithParent = (platform) => platform === "win32";
+
+/** Every real 'exit' + 'close' batch shape observed for a normally exiting child. */
+const exitCloseOrders = (platform) =>
+  platform === "win32"
+    ? // Measured on Windows: the stdio pipes are already closed when the exit
+      // notification is delivered, so Node emits 'close' from inside the exit
+      // callback, ahead of every checkpoint the exit handler queued.
+      [["exit", "close", "nextTick-from-exit", "microtask-from-exit", "setImmediate-from-exit"]]
+    : // Measured on ubuntu-latest: the pipe EOF and the exit notification are two
+      // independent loop events, so 'close' lands either inside the exit batch
+      // (like Windows) or in the next loop turn, after the check phase. Two CI
+      // runs produced one shape each, and PiRpcClient does not distinguish them.
+      [
+        ["exit", "close", "nextTick-from-exit", "microtask-from-exit", "setImmediate-from-exit"],
+        ["exit", "nextTick-from-exit", "microtask-from-exit", "setImmediate-from-exit", "close"]
+      ];
+
+/** UV_ENOENT as Node reports it in `error.errno` and in `child.exitCode`. */
+const spawnFailureExitCode = (platform) => (platform === "win32" ? -4058 : -2);
 
 function observe(promise) {
   const record = { status: "pending", value: undefined };
@@ -80,6 +144,7 @@ function trace(child, extra = {}) {
   child.once("error", (error) => {
     extra.atError = {
       code: error.code,
+      errno: error.errno,
       exitCode: child.exitCode,
       killed: child.killed,
       pid: child.pid
@@ -162,7 +227,7 @@ const holderPidsOf = (events) =>
   events.filter((event) => event.type === "holder" && event.pid).map((event) => event.pid);
 
 describe("real Node ChildProcess event order", () => {
-  it("records exit and close in one batch, with no awaitable boundary between them", async () => {
+  it("records 'exit' before 'close', in the batch shape this platform really delivers", async () => {
     const order = [];
     const child = own(
       spawn(process.execPath, ["-e", "process.exit(3)"], { stdio: ["pipe", "pipe", "pipe"] })
@@ -178,20 +243,28 @@ describe("real Node ChildProcess event order", () => {
     await new Promise((resolve) => child.on("close", resolve));
     await delay(50);
 
-    // 'close' is emitted inside the same batch as 'exit': nothing else can run
-    // between them, so a normal exit offers no restart window at all.
-    expect(order).toEqual([
-      "exit",
-      "close",
-      "nextTick-from-exit",
-      "microtask-from-exit",
-      "setImmediate-from-exit"
-    ]);
+    // Cross-platform: both events arrive exactly once, 'close' strictly after
+    // 'exit', and the checkpoints the exit handler queued keep their order on
+    // every platform (nextTick is drained before promise microtasks, and both
+    // before the check phase).
+    expect(order).toHaveLength(5);
+    expect(order.indexOf("exit")).toBeLessThan(order.indexOf("close"));
+    expect(order.indexOf("nextTick-from-exit")).toBeLessThan(order.indexOf("microtask-from-exit"));
+    expect(order.indexOf("microtask-from-exit")).toBeLessThan(
+      order.indexOf("setImmediate-from-exit")
+    );
+
+    // Platform-specific: where 'close' lands relative to those checkpoints. On
+    // Windows it is always inside the exit batch, so a normal exit offers no
+    // awaitable boundary there. On POSIX both shapes occur, so this asserts the
+    // set of real shapes rather than one of them.
+    expect(exitCloseOrders(PLATFORM)).toContainEqual(order);
+
     expect(child.exitCode).toBe(3);
     expect(child.killed).toBe(false);
   });
 
-  it("records a real spawn failure: error sets exitCode, no 'exit' event, and close follows", async () => {
+  it("records a real spawn failure: 'error' with the UV errno, no 'exit', and 'close' after the check phase", async () => {
     const extra = {};
     const child = own(spawn(MISSING_PI_EXECUTABLE, [], { stdio: ["pipe", "pipe", "pipe"] }));
     const order = [];
@@ -210,14 +283,22 @@ describe("real Node ChildProcess event order", () => {
     expect(events).toHaveLength(2);
     expect(events[0]).toMatch(/^error:/);
     expect(events[1]).toMatch(/^close:/);
-    // A spawn failure emits no 'exit' at all...
+    // A spawn failure emits no 'exit' at all: there was never a process to exit.
     expect(events.some((entry) => entry.startsWith("exit:"))).toBe(false);
-    // ...but it DOES set exitCode before close, so `running` is already false.
-    expect(extra.atError.exitCode).not.toBeNull();
-    expect(extra.atError.pid).toBeUndefined();
     expect(extra.atError.killed).toBe(false);
-    // The window error -> close spans a whole macrotask (setImmediate runs first),
-    // yet close always arrives, so this window cannot hold a state forever.
+    // Node publishes `pid` only for a successful uv_spawn, so a failed spawn has
+    // none on either platform.
+    expect(extra.atError.pid).toBeUndefined();
+    // ...but it DOES set exitCode before 'error' - to the same negative errno the
+    // error carries - so PiRpcClient's `running` is already false at 'error'.
+    expect(extra.atError.exitCode).toBe(extra.atError.errno);
+    expect(extra.atError.exitCode).toBeLessThan(0);
+    expect(extra.atError.exitCode).toBe(spawnFailureExitCode(PLATFORM));
+    // Measured identical on win32 and on ubuntu-latest: the stdio handles were
+    // opened before the failed spawn and are closed by Node itself, so their close
+    // callbacks land in the closing phase after the check phase. The window
+    // error -> close therefore spans a whole macrotask but always closes, which is
+    // why it cannot hold a stream state forever.
     expect(order).toEqual(["error", "nextTick", "microtask", "setImmediate", "close"]);
   });
 
@@ -250,6 +331,8 @@ describe("real Node ChildProcess event order", () => {
     expect(child.kill()).toBe(true);
     await new Promise((resolve) => child.on("close", resolve));
 
+    // Platform-neutral: kill() defaults to SIGTERM, a signal death leaves
+    // exitCode null on both platforms, and 'close' still follows 'exit'.
     expect(events).toEqual(["spawn", "exit:null:SIGTERM", "close:null"]);
     expect(child.killed).toBe(true);
   });
@@ -274,7 +357,7 @@ describe("real Node ChildProcess event order", () => {
     expect(events.some((entry) => entry.startsWith("error:"))).toBe(false);
   });
 
-  it("records send failure as the only real 'error' without close - and it needs an IPC channel", async () => {
+  it("(Node runtime probe) records send failure as the only real 'error' without close - and it needs an IPC channel", async () => {
     const child = own(
       spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
         stdio: ["pipe", "pipe", "pipe", "ipc"]
@@ -289,6 +372,10 @@ describe("real Node ChildProcess event order", () => {
     await delay(400);
 
     // A genuine error with no 'close': the child is still alive and still running.
+    // This is a Node runtime probe, not a PiRpcClient contract - and it is not a
+    // Windows quirk either: `disconnect()` closes the IPC channel without
+    // incrementing the close counter `_maybeClose()` waits for, so the same
+    // combination was measured on win32 and on ubuntu-latest.
     expect(sent).toBe(false);
     expect(events).toEqual(["spawn", "error:ERR_IPC_CHANNEL_CLOSED"]);
     expect(child.exitCode).toBeNull();
@@ -312,7 +399,7 @@ describe("real Node ChildProcess event order", () => {
     expect(invocation.options.stdio ?? []).not.toContain("ipc");
   }, 20000);
 
-  it("records a disconnected IPC child as exit-without-close: killed but exitCode null, no close ever", async () => {
+  it("(Node runtime probe) records a disconnected IPC child as exit-without-close: killed but exitCode null, no close ever", async () => {
     const child = own(
       spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
         stdio: ["pipe", "pipe", "pipe", "ipc"]
@@ -330,13 +417,13 @@ describe("real Node ChildProcess event order", () => {
     // This is the closest real-Node equivalent of the fake's `exitOnly()` state:
     // the process is dead and `killed` is true (so `running` would be false), yet
     // 'close' never arrives and exitCode stays null - it would never be released.
-    // It is unreachable for PiRpcClient, whose spawn options carry no 'ipc'.
+    // Unreachable for PiRpcClient, whose spawn options carry no 'ipc'.
     expect(events).toEqual(["spawn", "exit:null:SIGTERM"]);
     expect(child.killed).toBe(true);
     expect(child.exitCode).toBeNull();
   }, 20000);
 
-  it("records that a descendant only outlives its parent when it is detached", async () => {
+  it("records that a detached descendant outlives its parent, and that Windows also takes the attached one down", async () => {
     const heartbeat = path.join(os.tmpdir(), `pi-real-child-heartbeat-${process.pid}.txt`);
     fs.rmSync(heartbeat, { force: true });
     const holderScript = `const fs = require("node:fs"); const p = process.argv[1]; setInterval(() => { try { fs.appendFileSync(p, "x"); } catch {} }, 100);`;
@@ -354,12 +441,32 @@ setTimeout(() => process.exit(0), 300);
     await new Promise((resolve) => child.on("close", resolve));
 
     const pids = JSON.parse(out.trim().split("\n").at(-1));
+    // Own BOTH descendants before asserting anything: a failing expectation must
+    // not be able to leak a real process.
     own({ pid: pids.detached });
+    own({ pid: pids.attached });
     await delay(700);
 
+    // The load-bearing fact for PiRpcClient, true on every platform: a detached
+    // descendant keeps its own lifetime after the parent that spawned it is gone.
+    // That is exactly how a real child can exit while the pipes it handed to its
+    // descendant (and therefore 'close') stay pending.
     expect(isAlive(pids.detached)).toBe(true);
-    expect(isAlive(pids.attached)).toBe(false);
+
+    if (attachedDescendantDiesWithParent(PLATFORM)) {
+      // Windows: the attached descendant sits inside the parent's job object, so
+      // it is taken down together with the parent.
+      expect(isAlive(pids.attached)).toBe(false);
+    } else {
+      // POSIX: there is no job object. An attached descendant whose parent exits
+      // is only reparented, so it also keeps running - this test must not demand
+      // its death. (Measured on ubuntu-latest: alive.)
+      expect(isAlive(pids.attached)).toBe(true);
+    }
+
+    // Clean up both, whatever the expectations above decided.
     killQuietly(pids.detached);
+    killQuietly(pids.attached);
     fs.rmSync(heartbeat, { force: true });
   });
 
@@ -382,7 +489,8 @@ setTimeout(() => process.exit(0), 300);
     expect(isAlive(holderPid)).toBe(true);
 
     // 'exit' is real, exitCode is set (so `running` is false), yet 'close' is
-    // still pending as long as the holder lives.
+    // still pending as long as the holder lives. This shape needs `detached`
+    // precisely because an attached descendant would not survive on Windows.
     await delay(800);
     expect(child.exitCode).toBe(0);
     expect(events).toEqual(["exit:0"]);
@@ -414,7 +522,8 @@ describe("PiRpcClient driven by real Node children", () => {
     await waitFor(() => outcome.status === "rejected", { timeoutMs: 5000 });
     expect(atError.code).toBe("ENOENT");
     // The state is still registered at the error, but the child already counts as
-    // not-running (exitCode was set by Node) and no request is left pending.
+    // not-running (Node set exitCode to the negative UV errno) and no request is
+    // left pending. Both hold on win32 and on ubuntu-latest.
     expect(atError.states).toEqual([1]);
     expect(atError.running).toBe(false);
     expect(atError.childInstalled).toBe(true);
@@ -433,8 +542,8 @@ describe("PiRpcClient driven by real Node children", () => {
     const observed = {};
 
     // Driven from the real 'error' checkpoint: the window spans a macrotask
-    // (setImmediate) before 'close', so a request landing here really starts a
-    // second child while generation 1's state is still registered.
+    // (setImmediate) before 'close' on every platform, so a request landing here
+    // really starts a second child while generation 1's state is still registered.
     client.child.once("error", () => {
       observed.atError = [...client.streamStates.keys()];
       observed.runningAtError = client.running;
@@ -535,8 +644,9 @@ describe("PiRpcClient driven by real Node children", () => {
       const outcome = observe(client.request(`request-${cycle}`, {}, { timeoutMs: 0 }));
       await waitFor(() => outcome.status === "fulfilled", { timeoutMs: 8000 });
       expect(outcome.value).toEqual({ echo: `request-${cycle}` });
-      // The script exits right after answering, and Node delivers exit + close in
-      // one batch, so the state is released before the next request starts.
+      // The script exits right after answering, and the state is released before
+      // the next request starts: 'close' follows 'exit' on every platform, even
+      // where it lands in the next loop turn.
       await waitFor(() => client.streamStates.size === 0, { timeoutMs: 8000 });
       sizes.push(client.streamStates.size);
       generations.push(client.generation);
@@ -549,7 +659,7 @@ describe("PiRpcClient driven by real Node children", () => {
     expect(client.pending.size).toBe(0);
   });
 
-  it("D: a real error with no close (IPC send failure) keeps state and running, and cannot restart", async () => {
+  it("D (Node runtime probe): a real error with no close (IPC send failure) keeps state and running, and cannot restart", async () => {
     // The client cannot be given an IPC channel (asserted above), so this
     // sequence is documented at the raw ChildProcess level: it is the only real
     // 'error' that is not followed by 'close'.
@@ -573,4 +683,40 @@ describe("PiRpcClient driven by real Node children", () => {
     expect(events.some((entry) => entry.startsWith("close"))).toBe(false);
     expect(isAlive(child.pid)).toBe(true);
   }, 20000);
+});
+
+describe("platform expectations are real branches", () => {
+  it("answers Windows and POSIX differently, so a swapped branch fails here", () => {
+    // Windows: job object takes the attached descendant down, and 'close' is
+    // emitted from inside the exit callback.
+    expect(attachedDescendantDiesWithParent("win32")).toBe(true);
+    expect(exitCloseOrders("win32")).toEqual([
+      ["exit", "close", "nextTick-from-exit", "microtask-from-exit", "setImmediate-from-exit"]
+    ]);
+    expect(spawnFailureExitCode("win32")).toBe(-4058);
+
+    // POSIX: the attached descendant is only reparented, 'close' has two real
+    // shapes (so one unconditional order would be a flaky assertion), and the
+    // errno is a POSIX one.
+    expect(attachedDescendantDiesWithParent("linux")).toBe(false);
+    expect(attachedDescendantDiesWithParent("darwin")).toBe(false);
+    expect(exitCloseOrders("linux")).toContainEqual([
+      "exit",
+      "nextTick-from-exit",
+      "microtask-from-exit",
+      "setImmediate-from-exit",
+      "close"
+    ]);
+    expect(exitCloseOrders("linux")).toHaveLength(2);
+    expect(spawnFailureExitCode("linux")).toBe(-2);
+
+    // Writing any branch backwards (for example `platform !== "win32"`, or an
+    // unconditional single expected order) contradicts one of the assertions
+    // above - the branches are load-bearing, not decorative.
+    expect(attachedDescendantDiesWithParent("win32")).not.toBe(
+      attachedDescendantDiesWithParent("linux")
+    );
+    expect(spawnFailureExitCode("win32")).not.toBe(spawnFailureExitCode("linux"));
+    expect(exitCloseOrders("win32")).not.toEqual(exitCloseOrders("linux"));
+  });
 });
