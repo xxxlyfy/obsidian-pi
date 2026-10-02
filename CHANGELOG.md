@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.28 - 2026-10-03
+
+- Stopped a damaged `data.json` from destroying every annotation. A file that cannot be parsed is the one case the plugin recovers from instead of failing loudly: `loadSettings()` falls back to the local chat-history backup, but that snapshot held `chatHistory` alone. The chat history came back, `AnnotationStore` was handed an `undefined` document, and `savePluginData()` writes the store as the whole truth of that field - so the next ordinary save turned "empty because the file could not be read" into "empty", replacing the only copy of every annotation. The snapshot now carries the annotation data of its own generation: `writeChatHistoryBackup()` adds `annotationData` to the same payload, file and rotation, with the checksum covering the whole snapshot. Snapshots written before this change keep working and keep their chat history, while annotation data is only ever read from a snapshot the checksum verified as a unit, so a tampered copy cannot reach the store.
+- Restores those annotations only when `data.json` really failed to parse. An annotation document that is present and simply empty means the annotations were deleted, and a backup must never bring them back.
+- Refuses the save when the file is unreadable and no snapshot can supply the annotations. Nothing is written and the damaged file is left exactly as it is, because it is the last copy of those records; the refusal lifts as soon as the store holds something worth persisting. The reproduction is now the regression test `tests/annotation-recovery-damaged-data.test.mjs`, which fails on either half of the fix alone, and `tests/chat-history-backup-schema.test.mjs` pins the snapshot schema, the older recipe and the checksum rejection.
+
 ## 0.0.27 - 2026-10-02
 
 - Stopped the thinking picker from showing the internal custom-model marker. "Use custom model" stores the sentinel `__custom` in `settings.model` and the slug the user typed in `settings.customModel`, and every other surface resolves that branch before formatting a label (`run-settings.mjs`, `run-metadata.mjs`) while `formatEffectiveModel()` in the model picker modal did not: its default row read "Effective for **custom" / "对 **custom 生效" in an otherwise localized sentence. It now names the custom slug, or "Custom" when the field is empty. Found by the same audit; `tests/thinking-picker-effective-model.test.mjs` fails on the old formatting.
