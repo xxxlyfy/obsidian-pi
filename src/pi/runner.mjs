@@ -312,6 +312,10 @@ export class PiRunner {
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
+      // Release a client that is bound to a different session before asking for
+      // one, exactly as `runPiRpc()` does: a compaction must not be performed by -
+      // or reported as - the session this runner was first bound to.
+      this.discardRpcClientForSessionMismatch(sessionId);
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
       if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 

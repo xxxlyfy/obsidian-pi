@@ -5762,6 +5762,7 @@ var PiRunner = class {
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
+      this.discardRpcClientForSessionMismatch(sessionId);
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
       if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
       const state = createRunState();
