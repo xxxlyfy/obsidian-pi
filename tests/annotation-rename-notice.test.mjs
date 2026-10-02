@@ -221,10 +221,23 @@ describe("the plugin's startup report for annotations whose note is gone", () =>
 
     const messages = harness.notices();
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toContain("2 annotations");
+    expect(messages[0]).toContain("2 annotations are still stored");
     expect(messages[0]).toContain("no longer in the vault");
     // Reported, never deleted: the note may only be missing while the vault indexes.
     expect(harness.plugin.annotationStore.list("Old.md")).toHaveLength(2);
+  });
+
+  it("reads correctly for a single stored annotation", () => {
+    const harness = createHarness({
+      files: [],
+      annotationData: { schemaVersion: 1, annotations: { "Gone.md": [record("Gone.md", "a")] } }
+    });
+
+    harness.plugin.reportOrphanedAnnotations();
+
+    expect(harness.notices()).toEqual([
+      expect.stringContaining("1 annotation is still stored for 1 note no longer in the vault")
+    ]);
   });
 
   it("says nothing when every annotated note still exists", () => {

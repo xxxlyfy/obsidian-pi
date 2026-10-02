@@ -1550,7 +1550,7 @@ export class PiAgentPlugin extends P.Plugin {
     if (paths.length === 0) return;
     const total = paths.reduce((sum, path) => sum + this.annotationStore.list(path).length, 0);
     new P.Notice(
-      `${total} annotation${total === 1 ? "" : "s"} on ${paths.length} note${paths.length === 1 ? "" : "s"} no longer in the vault are still stored. Move those notes back to their original paths to use them again.`
+      `${total} annotation${total === 1 ? " is" : "s are"} still stored for ${paths.length} note${paths.length === 1 ? "" : "s"} no longer in the vault. Move those notes back to their original paths to use them again.`
     );
   }
   beginAnnotationProcessing(threadId, annotations) {
