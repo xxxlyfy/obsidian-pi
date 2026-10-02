@@ -145,12 +145,13 @@ function createLedger() {
       this.failAt.set(seq, { code, phase });
     },
 
-    /** @param {{directory: string, data?: any, history?: any}} payload */
+    /** @param {{directory: string, data: any}} payload */
     async persist(phase, payload) {
       const seq = this.entries.length + 1;
       // Both boundaries persist the snapshot the same `savePluginData()` call captured:
-      // `saveData()` receives it as `data.chatHistory`, the backup writer as `history`.
-      const snapshot = phase === "saveData" ? payload.data.chatHistory : payload.history;
+      // `saveData()` receives the plugin data document, and the backup writer is handed
+      // that same document, from which it takes the chat history as its snapshot.
+      const snapshot = payload.data.chatHistory;
       const entry = {
         seq,
         phase,
@@ -178,7 +179,9 @@ function createLedger() {
       // `saveData()` persists the whole plugin data object, the backup writer only the
       // snapshot; tests assert against the snapshot envelope either way.
       const envelope =
-        phase === "saveData" ? payload.data : { schemaVersion: 1, chatHistory: payload.history };
+        phase === "saveData"
+          ? payload.data
+          : { schemaVersion: 1, chatHistory: payload.data.chatHistory };
       try {
         if (injected) {
           throw Object.assign(new Error(`${injected.code}: injected at ${phase}`), {
@@ -195,16 +198,21 @@ function createLedger() {
             "utf8"
           );
         } else {
-          // The same envelope the production writer produces, checksum included, so the
-          // production reader can validate what this step left behind.
+          // The same envelope the production writer produces from the plugin data it is
+          // handed, checksum included, so the production reader can validate what this
+          // step left behind.
           fs.writeFileSync(
             path.join(payload.directory, BACKUP_FILE),
             `${JSON.stringify(
               {
                 schemaVersion: 1,
                 savedAt: new Date().toISOString(),
-                checksum: checksumOf(payload.history),
-                chatHistory: payload.history
+                checksum: checksumOf({
+                  chatHistory: payload.data.chatHistory,
+                  annotationData: payload.data.annotationData
+                }),
+                chatHistory: payload.data.chatHistory,
+                annotationData: payload.data.annotationData
               },
               null,
               2
@@ -259,8 +267,8 @@ function createPlugin(ledger) {
 
 /** Point the instrumented backup boundary at the ledger and this vault directory. */
 function stubBackup(ledger) {
-  harness.writeChatHistoryBackup = (directory, history) =>
-    ledger.persist("backup", { directory, history });
+  harness.writeChatHistoryBackup = (directory, data) =>
+    ledger.persist("backup", { directory, data });
 }
 
 /**

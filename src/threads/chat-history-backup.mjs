@@ -6,14 +6,30 @@ const BACKUP_SCHEMA_VERSION = 1;
 const BACKUP_FILE = "chat-history.backup.json";
 const PREVIOUS_BACKUP_FILE = "chat-history.backup.previous.json";
 
-export async function writeChatHistoryBackup(pluginDirectory, history) {
+/**
+ * Write one backup snapshot.
+ *
+ * The second argument is either the chat history itself (the historical call shape,
+ * which leaves `annotationData` out and produces exactly the payload it always did) or
+ * the whole plugin data document, which adds the `annotationData` the snapshot has to
+ * carry so a damaged `data.json` does not take the annotations down with it. The
+ * snapshot file, the rotation and the checksum recipe are unchanged apart from the
+ * checksum covering every persisted field.
+ *
+ * @param {string} pluginDirectory
+ * @param {any} snapshot Plugin data, or the chat history on its own.
+ */
+export async function writeChatHistoryBackup(pluginDirectory, snapshot) {
   if (!pluginDirectory) throw new Error("The plugin directory is unavailable.");
-  const normalized = cloneHistory(history);
+  const normalized = cloneHistory(snapshot?.chatHistory ?? snapshot);
   const payload = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     savedAt: new Date().toISOString(),
-    checksum: checksum(normalized),
-    chatHistory: normalized
+    checksum: checksum(persistedSnapshot(normalized, snapshot?.annotationData)),
+    chatHistory: normalized,
+    ...(snapshot?.annotationData !== undefined
+      ? { annotationData: cloneAnnotationData(snapshot.annotationData) }
+      : {})
   };
   await fs.promises.mkdir(pluginDirectory, { recursive: true });
 
@@ -36,10 +52,24 @@ export async function writeChatHistoryBackup(pluginDirectory, history) {
 }
 
 export async function readChatHistoryBackup(pluginDirectory) {
+  return (await readPluginDataBackup(pluginDirectory))?.chatHistory;
+}
+
+/**
+ * Read the newest valid snapshot whole, rather than only its chat history.
+ *
+ * The plugin needs the annotation data of the same snapshot to recover annotations
+ * whose `data.json` could not be parsed. A snapshot written before the backup carried
+ * annotations parses exactly as it always did and simply has none.
+ *
+ * @param {string} [pluginDirectory]
+ * @returns {Promise<{ chatHistory: any, annotationData?: any } | undefined>}
+ */
+export async function readPluginDataBackup(pluginDirectory) {
   if (!pluginDirectory) return undefined;
   for (const fileName of [BACKUP_FILE, PREVIOUS_BACKUP_FILE]) {
     const backup = await readValidBackup(path.join(pluginDirectory, fileName));
-    if (backup) return backup.chatHistory;
+    if (backup) return toRecoverySnapshot(backup);
   }
   return undefined;
 }
@@ -54,6 +84,15 @@ export async function readChatHistoryBackup(pluginDirectory) {
  * failure -- EACCES, EPERM, EIO, EMFILE -- is rethrown, because it says nothing about
  * the snapshot's content, and a caller must never treat a file it could not read as an
  * empty one.
+ *
+ * A snapshot is valid when its checksum matches and it holds a usable chat history.
+ * Two recipes are accepted, because both were written by this module: the one that
+ * covers the whole snapshot, and the one that covers only the chat history, which is
+ * the recipe of every snapshot written before this module carried an annotation copy.
+ * A snapshot written with the older recipe keeps its full value -- its chat history --
+ * instead of being discarded for the sake of a field it never had. Annotation data is
+ * only ever accepted under the whole-snapshot recipe, so it can never be trusted from a
+ * file that was not verified as a unit.
  */
 async function readBackupSnapshot(filePath) {
   let text;
@@ -65,13 +104,24 @@ async function readBackupSnapshot(filePath) {
   }
   try {
     const backup = JSON.parse(text);
-    if (
-      backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
-      backup.checksum !== checksum(backup.chatHistory)
-    ) {
-      return undefined;
-    }
-    return { ...backup, chatHistory: cloneHistory(backup.chatHistory) };
+    if (backup?.schemaVersion !== BACKUP_SCHEMA_VERSION) return undefined;
+    // Either recipe proves the chat history is the history that was written: the one
+    // that covers the whole snapshot, or the one that covers the history alone. The
+    // annotation copy, by contrast, is only ever trusted under the whole-snapshot
+    // recipe, so a snapshot that cannot vouch for it is read as history only.
+    const verifiedWhole =
+      backup.annotationData !== undefined &&
+      backup.checksum === checksum(persistedSnapshot(backup.chatHistory, backup.annotationData));
+    const isAnnotated =
+      verifiedWhole || backup.checksum === checksum(persistedSnapshot(backup.chatHistory));
+    if (!isAnnotated && backup.checksum !== checksum(backup.chatHistory)) return undefined;
+    // Only the fields this module verified are handed on. The raw keys are deliberately
+    // not spread: an annotation copy the checksum did not cover must not reach a caller
+    // that would read it as recovered data.
+    return {
+      chatHistory: cloneHistory(backup.chatHistory),
+      ...(verifiedWhole ? { annotationData: cloneAnnotationData(backup.annotationData) } : {})
+    };
   } catch {
     // The bytes were read successfully, so a malformed payload is a content problem.
     return undefined;
@@ -91,6 +141,32 @@ async function readValidBackup(filePath) {
   }
 }
 
+/**
+ * The part of a snapshot a caller can actually use, so the recovery path reads the
+ * file once and takes both halves of the same generation. `annotationData` stays
+ * absent when the snapshot predates it, which is what tells the caller there is no
+ * annotation copy in this backup.
+ *
+ * @param {{ chatHistory: any, annotationData?: any }} backup
+ */
+function toRecoverySnapshot(backup) {
+  return {
+    chatHistory: backup.chatHistory,
+    ...(backup.annotationData !== undefined ? { annotationData: backup.annotationData } : {})
+  };
+}
+
+/**
+ * The document a snapshot's checksum covers: the chat history, plus the annotation data
+ * when the snapshot carries it. Key order is the payload's own construction order, so
+ * the writer and the reader always compute the same bytes.
+ */
+function persistedSnapshot(history, annotationData) {
+  return annotationData === undefined
+    ? { chatHistory: history }
+    : { chatHistory: history, annotationData };
+}
+
 function cloneHistory(history) {
   if (!history || !Array.isArray(history.threads)) throw new Error("Invalid chat history backup.");
   const cloned = JSON.parse(JSON.stringify(history));
@@ -107,6 +183,21 @@ function cloneHistory(history) {
     throw new Error("Invalid chat history backup.");
   }
   return cloned;
+}
+
+/**
+ * The snapshot's copy of the annotation document.
+ *
+ * Deliberately shallow-validating: this is data the plugin itself just serialized, and
+ * it is the annotation store's own loader that decides what is usable. A value that
+ * cannot be serialized is a broken snapshot rather than a reason to publish one.
+ */
+function cloneAnnotationData(annotationData) {
+  try {
+    return JSON.parse(JSON.stringify(annotationData));
+  } catch {
+    throw new Error("Invalid annotation data in the plugin data backup.");
+  }
 }
 
 function checksum(history) {

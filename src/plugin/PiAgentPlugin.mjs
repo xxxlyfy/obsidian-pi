@@ -35,7 +35,7 @@ import { requestDesktopNotificationPermission } from "../ui/desktop-notification
 import { previewFrontmatterPatch } from "../shared/frontmatter.mjs";
 import { performanceProfiler } from "../shared/performance-profiler.mjs";
 import { sanitizeThreadHistory } from "../shared/thread-history.mjs";
-import { readChatHistoryBackup, writeChatHistoryBackup } from "../threads/chat-history-backup.mjs";
+import { readPluginDataBackup, writeChatHistoryBackup } from "../threads/chat-history-backup.mjs";
 import {
   importVaultChatHistory,
   removeImportedVaultChatHistory
@@ -140,6 +140,11 @@ export class PiAgentPlugin extends P.Plugin {
     this.messages = [];
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
+    /**
+     * Set by `loadSettings()` when `data.json` could not be parsed and no snapshot
+     * supplied the annotations, so `savePluginData()` must not write over them.
+     */
+    this.annotationRecoveryPending = false;
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = new Map();
     // Runners a one-shot session operation (Session Info, export, rename) borrowed and
@@ -343,6 +348,7 @@ export class PiAgentPlugin extends P.Plugin {
     // The persisted plugin data, or an empty object when only a parse failure stood
     // in the way. Typed loosely because it is whatever `data.json` held.
     let rawData = /** @type {any} */ ({});
+    let damagedPluginData = false;
     try {
       rawData = (await this.loadData()) ?? {};
     } catch (error) {
@@ -354,6 +360,7 @@ export class PiAgentPlugin extends P.Plugin {
       // backup is consulted further down either way, so a damaged `data.json` no
       // longer blocks recovery.
       if (!isJsonParseFailure(error)) throw error;
+      damagedPluginData = true;
       console.warn("Pi Agent: data.json could not be parsed; using default settings", error);
     }
     const {
@@ -389,10 +396,25 @@ export class PiAgentPlugin extends P.Plugin {
 
     let restoredHistory = importedHistory?.history;
     if (!restoredHistory && isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
+    let backupSnapshot;
     if (!restoredHistory) {
-      restoredHistory = await readChatHistoryBackup(this.getPluginDirectory());
+      backupSnapshot = await readPluginDataBackup(this.getPluginDirectory());
+      restoredHistory = backupSnapshot?.chatHistory;
       if (restoredHistory) new P.Notice("Pi Agent recovered chat history from its local backup.");
     }
+
+    // Annotations live only in `data.json`, which just proved unreadable, so the
+    // snapshot the chat history came from is their only possible copy. It is taken only
+    // when `data.json` supplied none: an annotation document that is present and simply
+    // empty means the user deleted those annotations, and a backup must never resurrect
+    // them. When nothing supplied them, `annotationRecoveryPending` keeps the empty
+    // store from being written back over the records it could not restore.
+    let restoredAnnotationData = annotationData;
+    let annotationRecoveryPending = false;
+    if (damagedPluginData && !annotationData && backupSnapshot) {
+      restoredAnnotationData = backupSnapshot.annotationData;
+    }
+    if (damagedPluginData && !restoredAnnotationData) annotationRecoveryPending = true;
 
     this.settings = normalizeSettings(rawSettings);
     this.localPromptQueue = restorePersistedLocalPromptQueue(localPromptQueue, localPromptSteering);
@@ -406,7 +428,8 @@ export class PiAgentPlugin extends P.Plugin {
       messages,
       sessionId != null ? sessionId : threadId
     );
-    this.annotationStore = new AnnotationStore(annotationData, () => {
+    this.annotationRecoveryPending = annotationRecoveryPending;
+    this.annotationStore = new AnnotationStore(restoredAnnotationData, () => {
       this.saveAnnotations();
       this.annotationController?.refresh();
       this.refreshAnnotationBadges();
@@ -1647,7 +1670,34 @@ export class PiAgentPlugin extends P.Plugin {
       new P.Notice("Could not save annotations to plugin data.");
     });
   }
+  /**
+   * Whether the annotation store is known to be missing annotations that exist
+   * somewhere in `data.json`, so it must not be persisted over them.
+   *
+   * True only for a session whose `data.json` could not be parsed and whose snapshot
+   * carried no annotation copy. The store is empty in that session because the file
+   * could not be read -- not because there is nothing to store -- and `data.json` is
+   * replaced whole on every save, so writing that empty document once would destroy
+   * the only remaining copy of every annotation. Not one field can be carried over
+   * from the unreadable file to make the write safe, which is why the whole save is
+   * refused instead: the damaged file and its annotations stay exactly as they are
+   * until the user repairs it or reloads with a recoverable snapshot.
+   */
+  isAnnotationRecoveryPending() {
+    return Boolean(this.annotationRecoveryPending) && this.annotationStore.count() === 0;
+  }
   savePluginData() {
+    // Refused before anything is written, and before the save chain is extended, so a
+    // refused save cannot leave a pending step or a rejected chain behind. Refusing as a
+    // rejected promise (rather than a synchronous throw) is what the method has always
+    // promised its callers: `saveSettings()` propagates it, `saveAnnotations()` reports
+    // it as a Notice, and `saveThreadHistory()` logs it.
+    if (this.isAnnotationRecoveryPending())
+      return Promise.reject(
+        new Error(
+          "Pi Agent: plugin data was not saved because annotations could not be recovered from data.json."
+        )
+      );
     const history = sanitizeThreadHistory(this.threadHistory.toJSON());
     const data = {
       ...this.settings,
@@ -1660,7 +1710,7 @@ export class PiAgentPlugin extends P.Plugin {
       .catch(() => {})
       .then(async () => {
         await this.saveData(data);
-        await writeChatHistoryBackup(this.getPluginDirectory(), history);
+        await writeChatHistoryBackup(this.getPluginDirectory(), data);
       });
     return this.dataSaveChain;
   }

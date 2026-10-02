@@ -11343,14 +11343,17 @@ var import_node_path4 = __toESM(require("node:path"), 1);
 var BACKUP_SCHEMA_VERSION = 1;
 var BACKUP_FILE = "chat-history.backup.json";
 var PREVIOUS_BACKUP_FILE = "chat-history.backup.previous.json";
-async function writeChatHistoryBackup(pluginDirectory, history) {
+async function writeChatHistoryBackup(pluginDirectory, snapshot) {
   if (!pluginDirectory) throw new Error("The plugin directory is unavailable.");
-  const normalized = cloneHistory(history);
+  const normalized = cloneHistory(snapshot?.chatHistory ?? snapshot);
   const payload = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     savedAt: /* @__PURE__ */ new Date().toISOString(),
-    checksum: checksum(normalized),
-    chatHistory: normalized
+    checksum: checksum(persistedSnapshot(normalized, snapshot?.annotationData)),
+    chatHistory: normalized,
+    ...(snapshot?.annotationData !== void 0
+      ? { annotationData: cloneAnnotationData(snapshot.annotationData) }
+      : {})
   };
   await import_node_fs4.default.promises.mkdir(pluginDirectory, { recursive: true });
   const backupPath = import_node_path4.default.join(pluginDirectory, BACKUP_FILE);
@@ -11370,11 +11373,11 @@ async function writeChatHistoryBackup(pluginDirectory, history) {
     await removeTemporaryFile(temporaryPath);
   }
 }
-async function readChatHistoryBackup(pluginDirectory) {
+async function readPluginDataBackup(pluginDirectory) {
   if (!pluginDirectory) return void 0;
   for (const fileName of [BACKUP_FILE, PREVIOUS_BACKUP_FILE]) {
     const backup = await readValidBackup(import_node_path4.default.join(pluginDirectory, fileName));
-    if (backup) return backup.chatHistory;
+    if (backup) return toRecoverySnapshot(backup);
   }
   return void 0;
 }
@@ -11392,13 +11395,17 @@ async function readBackupSnapshot(filePath) {
   }
   try {
     const backup = JSON.parse(text);
-    if (
-      backup?.schemaVersion !== BACKUP_SCHEMA_VERSION ||
-      backup.checksum !== checksum(backup.chatHistory)
-    ) {
-      return void 0;
-    }
-    return { ...backup, chatHistory: cloneHistory(backup.chatHistory) };
+    if (backup?.schemaVersion !== BACKUP_SCHEMA_VERSION) return void 0;
+    const verifiedWhole =
+      backup.annotationData !== void 0 &&
+      backup.checksum === checksum(persistedSnapshot(backup.chatHistory, backup.annotationData));
+    const isAnnotated =
+      verifiedWhole || backup.checksum === checksum(persistedSnapshot(backup.chatHistory));
+    if (!isAnnotated && backup.checksum !== checksum(backup.chatHistory)) return void 0;
+    return {
+      chatHistory: cloneHistory(backup.chatHistory),
+      ...(verifiedWhole ? { annotationData: cloneAnnotationData(backup.annotationData) } : {})
+    };
   } catch {
     return void 0;
   }
@@ -11409,6 +11416,17 @@ async function readValidBackup(filePath) {
   } catch {
     return void 0;
   }
+}
+function toRecoverySnapshot(backup) {
+  return {
+    chatHistory: backup.chatHistory,
+    ...(backup.annotationData !== void 0 ? { annotationData: backup.annotationData } : {})
+  };
+}
+function persistedSnapshot(history, annotationData) {
+  return annotationData === void 0
+    ? { chatHistory: history }
+    : { chatHistory: history, annotationData };
 }
 function cloneHistory(history) {
   if (!history || !Array.isArray(history.threads)) throw new Error("Invalid chat history backup.");
@@ -11426,6 +11444,13 @@ function cloneHistory(history) {
     throw new Error("Invalid chat history backup.");
   }
   return cloned;
+}
+function cloneAnnotationData(annotationData) {
+  try {
+    return JSON.parse(JSON.stringify(annotationData));
+  } catch {
+    throw new Error("Invalid annotation data in the plugin data backup.");
+  }
 }
 function checksum(history) {
   return import_node_crypto2.default
@@ -12208,6 +12233,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.messages = [];
     this.threadHistory = new ThreadStore();
     this.annotationStore = new AnnotationStore();
+    this.annotationRecoveryPending = false;
     this.dataSaveChain = Promise.resolve();
     this.threadRunners = /* @__PURE__ */ new Map();
     this.ephemeralRunners = /* @__PURE__ */ new Set();
@@ -12357,10 +12383,12 @@ var PiAgentPlugin = class extends P.Plugin {
     let rawData =
       /** @type {any} */
       {};
+    let damagedPluginData = false;
     try {
       rawData = (await this.loadData()) ?? {};
     } catch (error) {
       if (!isJsonParseFailure(error)) throw error;
+      damagedPluginData = true;
       console.warn("Pi Agent: data.json could not be parsed; using default settings", error);
     }
     const {
@@ -12395,10 +12423,18 @@ var PiAgentPlugin = class extends P.Plugin {
     }
     let restoredHistory = importedHistory?.history;
     if (!restoredHistory && isStoredChatHistory(chatHistory)) restoredHistory = chatHistory;
+    let backupSnapshot;
     if (!restoredHistory) {
-      restoredHistory = await readChatHistoryBackup(this.getPluginDirectory());
+      backupSnapshot = await readPluginDataBackup(this.getPluginDirectory());
+      restoredHistory = backupSnapshot?.chatHistory;
       if (restoredHistory) new P.Notice("Pi Agent recovered chat history from its local backup.");
     }
+    let restoredAnnotationData = annotationData;
+    let annotationRecoveryPending = false;
+    if (damagedPluginData && !annotationData && backupSnapshot) {
+      restoredAnnotationData = backupSnapshot.annotationData;
+    }
+    if (damagedPluginData && !restoredAnnotationData) annotationRecoveryPending = true;
     this.settings = normalizeSettings(rawSettings);
     this.localPromptQueue = restorePersistedLocalPromptQueue(localPromptQueue, localPromptSteering);
     this.localPromptSteering = [];
@@ -12411,7 +12447,8 @@ var PiAgentPlugin = class extends P.Plugin {
       messages,
       sessionId != null ? sessionId : threadId
     );
-    this.annotationStore = new AnnotationStore(annotationData, () => {
+    this.annotationRecoveryPending = annotationRecoveryPending;
+    this.annotationStore = new AnnotationStore(restoredAnnotationData, () => {
       this.saveAnnotations();
       this.annotationController?.refresh();
       this.refreshAnnotationBadges();
@@ -13535,7 +13572,29 @@ var PiAgentPlugin = class extends P.Plugin {
       new P.Notice("Could not save annotations to plugin data.");
     });
   }
+  /**
+   * Whether the annotation store is known to be missing annotations that exist
+   * somewhere in `data.json`, so it must not be persisted over them.
+   *
+   * True only for a session whose `data.json` could not be parsed and whose snapshot
+   * carried no annotation copy. The store is empty in that session because the file
+   * could not be read -- not because there is nothing to store -- and `data.json` is
+   * replaced whole on every save, so writing that empty document once would destroy
+   * the only remaining copy of every annotation. Not one field can be carried over
+   * from the unreadable file to make the write safe, which is why the whole save is
+   * refused instead: the damaged file and its annotations stay exactly as they are
+   * until the user repairs it or reloads with a recoverable snapshot.
+   */
+  isAnnotationRecoveryPending() {
+    return Boolean(this.annotationRecoveryPending) && this.annotationStore.count() === 0;
+  }
   savePluginData() {
+    if (this.isAnnotationRecoveryPending())
+      return Promise.reject(
+        new Error(
+          "Pi Agent: plugin data was not saved because annotations could not be recovered from data.json."
+        )
+      );
     const history = sanitizeThreadHistory(this.threadHistory.toJSON());
     const data = {
       ...this.settings,
@@ -13548,7 +13607,7 @@ var PiAgentPlugin = class extends P.Plugin {
       .catch(() => {})
       .then(async () => {
         await this.saveData(data);
-        await writeChatHistoryBackup(this.getPluginDirectory(), history);
+        await writeChatHistoryBackup(this.getPluginDirectory(), data);
       });
     return this.dataSaveChain;
   }

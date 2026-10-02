@@ -199,6 +199,10 @@ function copyTemporaryPaths(calls, directory) {
 /**
  * Describe one snapshot file as it is on disk, without claiming to be the recovery
  * decision: `readChatHistoryBackup()` below is the authority on that.
+ *
+ * A snapshot either carries annotation data and checksums the whole snapshot, or
+ * predates that and checksums its chat history alone. Both are valid snapshots, so both
+ * are reported as valid here; the suffix names which shape the file has.
  */
 function describeSnapshotFile(filePath) {
   if (!fs.existsSync(filePath)) return "missing";
@@ -209,7 +213,22 @@ function describeSnapshotFile(filePath) {
     return "invalid-json";
   }
   if (backup?.schemaVersion !== 1) return "schema-mismatch";
-  if (backup.checksum !== checksumOf(backup.chatHistory)) return "checksum-mismatch";
+  if (backup.annotationData !== undefined) {
+    const wholeSnapshot = checksumOf({
+      chatHistory: backup.chatHistory,
+      annotationData: backup.annotationData
+    });
+    if (backup.checksum !== wholeSnapshot) return "checksum-mismatch";
+    return `valid+annotations:${backup.chatHistory?.currentThreadId ?? "?"}`;
+  }
+  // A snapshot without an annotation copy: either the current recipe, which checksums
+  // the `{ chatHistory }` document, or the pre-annotation one, which checksums the bare
+  // history. The reader accepts both, so this must too.
+  if (
+    backup.checksum !== checksumOf({ chatHistory: backup.chatHistory }) &&
+    backup.checksum !== checksumOf(backup.chatHistory)
+  )
+    return "checksum-mismatch";
   return `valid:${backup.chatHistory?.currentThreadId ?? "?"}`;
 }
 
@@ -658,10 +677,11 @@ describe("4: the success path is unchanged", () => {
     expect(afterSecondWrite.previous).toBe("valid:old");
     expect(afterSecondWrite.recovered).toBe("new");
     expect(await readChatHistoryBackup(directory)).toEqual(fresh);
-    // The previous snapshot is the old history, checksum and all.
+    // The previous snapshot is the old history, checksum and all: the current recipe
+    // covers the `{ chatHistory }` document, and the rotated copy keeps it.
     const previous = JSON.parse(fs.readFileSync(previousPath(directory), "utf8"));
     expect(previous.chatHistory).toEqual(old);
-    expect(previous.checksum).toBe(checksumOf(old));
+    expect(previous.checksum).toBe(checksumOf({ chatHistory: previous.chatHistory }));
     expect(previous.schemaVersion).toBe(1);
 
     // Damaging the current snapshot must fall back to the old generation.
