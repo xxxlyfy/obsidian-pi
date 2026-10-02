@@ -51,6 +51,11 @@ class FakeElement {
   descendants() {
     return this.children.flatMap((child) => [child, ...child.descendants()]);
   }
+
+  /** The first descendant carrying `cls` as a whole class, as a CSS query would. */
+  find(cls) {
+    return this.descendants().find((element) => element.cls.split(" ").includes(cls));
+  }
 }
 
 const threadListSource = readFileSync(
@@ -216,17 +221,32 @@ describe("native chat polish", () => {
 
     const message = messagesEl.children[0];
     const response = message.children.find((element) => element.cls === "pi-agent-message-content");
-    expect(response.children[0].cls).toBe("pi-agent-thinking-disclosure");
-    expect(response.children[1].cls).toBe("pi-agent-message-answer");
+    const disclosure = response.children[0];
+    const answer = response.children[1];
+
+    // Where the two halves land in the response box: the thinking disclosure
+    // first, the answer second, each exposing the class the chat DOM and styles
+    // address. Checking class membership rather than exact equality keeps a
+    // composed/renamed sibling class from reading as a behaviour regression.
+    expect(disclosure.cls.split(" ")).toContain("pi-agent-thinking-disclosure");
+    expect(answer.cls.split(" ")).toContain("pi-agent-message-answer");
+
+    // Both halves are filled through the Markdown render path, with the right
+    // content: the thinking is not dropped and is not mixed into the answer.
+    expect(renderPlainMessageContent).toHaveBeenCalledTimes(2);
     expect(renderPlainMessageContent).toHaveBeenCalledWith(
-      response.children[0].children[1],
+      disclosure.find("pi-agent-thinking-content"),
       "Reasoning"
     );
-    expect(renderPlainMessageContent).toHaveBeenCalledWith(response.children[1], "Answer");
-    expect(messageRendererSource).toContain("this.renderThinkingDisclosure(\n      response");
-    expect(messageRendererSource).toContain(
-      'answer = response.createDiv({ cls: "pi-agent-message-answer" })'
-    );
+    expect(renderPlainMessageContent).toHaveBeenCalledWith(answer, "Answer");
+
+    // The source-text pins that used to live here
+    // (`this.renderThinkingDisclosure(\n      response` and the exact
+    // `answer = response.createDiv(...)` line) asserted the formatting of two
+    // statements, not what the user sees. They broke on a rename/reflow of
+    // `src/ui/message-renderer.mjs` while this behaviour stayed intact, so the
+    // behaviour is asserted above instead. The same integration is additionally
+    // covered end to end by tests/native-chat-thinking-behaviour.test.mjs.
     expect(styles).toMatch(
       /\.pi-agent-thinking-disclosure \{[\s\S]*?border-bottom: 1px solid var\(--background-modifier-border-hover\)/
     );
