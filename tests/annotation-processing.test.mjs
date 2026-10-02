@@ -90,7 +90,11 @@ describe("annotation processing UX", () => {
     const consumeStart = pluginSource.indexOf("async consumeAnnotationsForPrompt");
     const consumeEnd = pluginSource.indexOf("beginAnnotationProcessing(threadId", consumeStart);
     const consumeSource = pluginSource.slice(consumeStart, consumeEnd);
-    expect(consumeSource).toContain("annotationStore.deletePath");
+    // Only what the prompt carries leaves the store, so the batch is released by id
+    // rather than cleared wholesale.
+    expect(consumeSource).toContain("selectPromptAnnotations(annotations)");
+    expect(consumeSource).toContain("annotationStore.removeByIds(");
+    expect(consumeSource).not.toContain("annotationStore.deletePath");
     expect(consumeSource).not.toContain("beginAnnotationProcessing");
     expect(queueSource).not.toContain("annotationBatchId");
     expect(queueSource).not.toContain("beginAnnotationProcessing(item");

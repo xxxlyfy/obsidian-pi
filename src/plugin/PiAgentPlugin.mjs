@@ -3,7 +3,7 @@ import * as P from "obsidian";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
 import { ANNOTATION_LIMITS } from "../annotations/annotation-model.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
-import { ContextBuilder } from "../context/context-builder.mjs";
+import { ContextBuilder, selectPromptAnnotations } from "../context/context-builder.mjs";
 import { formatContextShowResponse, isContextShowPrompt } from "../context/context-show.mjs";
 import { normalizeSkillFolderList } from "../context/skills.mjs";
 import { VaultGraph } from "../context/vault-graph.mjs";
@@ -609,24 +609,32 @@ export class PiAgentPlugin extends P.Plugin {
 
     let clonedSession;
     if (current.piSessionId) {
-      // A thread that already has a runner keeps it: that runner's client and Pi
-      // process belong to the thread's own lifecycle (archive and delete release
-      // them), so a fork neither releases nor replaces it. A thread that has no
-      // runner borrows an ephemeral one instead of registering a thread runner: a
-      // fork is not a chat run, so the runner it uses is released here once the
-      // requests have settled -- on success and on failure alike. The clone and the
-      // session name both run on the one borrowed runner.
+      // A thread that already has a runner lends it for the clone: that runner's client
+      // and Pi process belong to the thread's own lifecycle (archive and delete release
+      // them), so a fork neither releases nor replaces the runner itself. Pi's `clone`
+      // does rebind the process it touches to the new branch, so `cloneSession()`
+      // releases the borrowed client - the thread's next request then starts a process
+      // on the session it actually asked for instead of appending to the fork. A thread
+      // that has no runner borrows an ephemeral one instead of registering a thread
+      // runner: a fork is not a chat run, so the runner that served the clone is
+      // released here once the requests have settled, on success and on failure alike.
       const existing = this.threadRunners.get(current.id);
-      const runner = existing ?? this.createEphemeralThreadRunner();
+      // Naming the clone is a request too, and it must not run through a runner the
+      // thread keeps: naming an already-rebound client would leave that runner bound to
+      // the clone. The name goes through its own ephemeral runner, released here
+      // whatever the outcome; the runner that cloned is released separately.
+      const cloningRunner = existing ?? this.createEphemeralThreadRunner();
+      const namingRunner = existing ? this.createEphemeralThreadRunner() : cloningRunner;
       try {
-        clonedSession = await runner.cloneSession(current.piSessionId);
+        clonedSession = await cloningRunner.cloneSession(current.piSessionId);
         if (clonedSession) {
-          await runner
+          await namingRunner
             .setSessionName(clonedSession, `${current.title} (fork)`)
             .catch((error) => console.warn("Pi Agent: could not name cloned Pi session", error));
         }
       } finally {
-        if (!existing) this.disposeEphemeralThreadRunner(runner);
+        if (!existing) this.disposeEphemeralThreadRunner(cloningRunner);
+        else this.disposeEphemeralThreadRunner(namingRunner);
       }
       if (!clonedSession) return undefined;
     }
@@ -1495,8 +1503,26 @@ export class PiAgentPlugin extends P.Plugin {
     const file = explicitFile instanceof P.TFile ? explicitFile : this.getCurrentContextFile();
     if (!file) return [];
     const annotations = await this.getAnnotationsForContext(file.path);
-    if (annotations.length > 0) this.annotationStore.deletePath(file.path);
-    return annotations;
+    if (annotations.length === 0) return annotations;
+    // Only the records the prompt can actually carry may leave the store: the prompt
+    // writes the first `promptRecords` records within `promptCharacters`, and a later
+    // `deletePath()` cleared the whole batch, so the records that did not fit were
+    // destroyed without ever reaching Pi. `selectPromptAnnotations()` is the same
+    // decision the prompt builder makes, so "consumed" and "carried" cannot drift.
+    const carried = selectPromptAnnotations(annotations);
+    if (carried.length > 0) {
+      this.annotationStore.removeByIds(
+        file.path,
+        carried.map((annotation) => annotation.id)
+      );
+    }
+    if (carried.length < annotations.length) {
+      const retained = annotations.length - carried.length;
+      new P.Notice(
+        `${carried.length} annotation${carried.length === 1 ? "" : "s"} sent to Pi; ${retained} stayed on this note because a prompt carries at most ${ANNOTATION_LIMITS.promptRecords} annotations and ${ANNOTATION_LIMITS.promptCharacters} characters.`
+      );
+    }
+    return carried;
   }
   /**
    * Follow a note rename with its annotations. The store moves whatever fits and keeps
@@ -1510,14 +1536,18 @@ export class PiAgentPlugin extends P.Plugin {
     if (file?.extension !== "md") return;
     if (this.annotationStore.list(oldPath).length === 0) return;
     const result = this.annotationStore.renamePath(oldPath, file.path);
-    if (result.status === "moved") {
-      if (result.droppedDuplicates > 0)
-        new P.Notice(
-          `The renamed note already carried ${result.droppedDuplicates} of its annotations, so they were not stored twice.`
-        );
+    // Both facts can hold at once - a duplicate dropped and records left behind - and
+    // the retention is the part the user has to act on, so it is reported alongside
+    // rather than instead of the duplicate.
+    const duplicateNote =
+      result.droppedDuplicates > 0
+        ? ` The renamed note already carried ${result.droppedDuplicates} of its annotations, so they were not stored twice.`
+        : "";
+    if (result.status !== "moved") {
+      new P.Notice(this.describeAnnotationRename(result) + duplicateNote);
       return;
     }
-    new P.Notice(this.describeAnnotationRename(result));
+    if (duplicateNote) new P.Notice(duplicateNote.trim());
   }
   /**
    * What to tell the user when a rename could not take every annotation with it.

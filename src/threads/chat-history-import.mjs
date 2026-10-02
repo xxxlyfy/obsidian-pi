@@ -11,7 +11,7 @@ export async function importVaultChatHistory(vaultBasePath, rawData = {}) {
   const basePath = path.resolve(vaultBasePath);
   const configuredFolder = normalizeVaultFolder(rawData.chatHistoryFolder || "chats");
   const version = Number(rawData.chatHistoryStorageVersion) || 0;
-  const sources = orderedSources(basePath, configuredFolder, version);
+  const { sources, preferredSource } = orderedSources(basePath, configuredFolder, version);
   const threadsById = new Map();
   const managedFiles = new Set();
   const warnings = [];
@@ -22,9 +22,15 @@ export async function importVaultChatHistory(vaultBasePath, rawData = {}) {
     sourceCurrentThreadId ??= result.currentThreadId;
     for (const warning of result.warnings) warnings.push(warning);
     for (const filePath of result.managedFiles) managedFiles.add(filePath);
+    // The authoritative generation is read first and keeps its version of a thread: the
+    // same id in a later source is that chat as an older generation left it, and a
+    // markdown `updated` is millisecond-equal to the JSON it was migrated from, so a
+    // later source must not win a tie just by arriving last. It only wins when the
+    // authoritative generation does not have that thread at all.
     for (const thread of result.threads) {
-      const existing = threadsById.get(thread.id);
-      if (!existing || thread.updatedAt >= existing.updatedAt) threadsById.set(thread.id, thread);
+      const kept = threadsById.get(thread.id);
+      if (!kept) threadsById.set(thread.id, thread);
+      else if (source === preferredSource) threadsById.set(thread.id, thread);
     }
   }
 
@@ -79,12 +85,15 @@ function orderedSources(basePath, configuredFolder, version) {
         : version === INDEXED_STORAGE_VERSION
           ? "indexed"
           : undefined;
-  return [
-    ...(preferred ? [sources[preferred]] : []),
-    ...Object.entries(sources)
-      .filter(([name]) => name !== preferred)
-      .map(([, source]) => source)
-  ];
+  return {
+    preferredSource: preferred ? sources[preferred] : undefined,
+    sources: [
+      ...(preferred ? [sources[preferred]] : []),
+      ...Object.entries(sources)
+        .filter(([name]) => name !== preferred)
+        .map(([, source]) => source)
+    ]
+  };
 }
 
 async function loadMarkdownThreads(folder) {

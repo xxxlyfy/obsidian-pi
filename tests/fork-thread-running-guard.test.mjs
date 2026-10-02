@@ -171,6 +171,8 @@ function handle(command) {
     return;
   }
   if (command.type === "get_state") {
+    // A process only ever reports the session file it serves right now; after Pi's
+    // clone that is the branch, which is the post-condition the runner must respect.
     send({
       id: command.id,
       type: "response",
@@ -247,8 +249,8 @@ function threadSessionId(plugin, threadId = THREAD_ID) {
 }
 
 /** Start the thread's own runner for real, so the fork has a live client to reuse. */
-async function startIdleThreadRunner(plugin, runner) {
-  expect(await runner.getSessionStats(threadSessionId(plugin))).toEqual({});
+async function startIdleThreadRunner(plugin, runner, sessionReference = threadSessionId(plugin)) {
+  expect(await runner.getSessionStats(sessionReference)).toEqual({});
   expect(runner.rpcClient.running).toBe(true);
   return runner.rpcClient;
 }
@@ -523,21 +525,19 @@ describe("forking an idle thread through the real button chain", () => {
     expect(plugin.threadRunners.has(THREAD_ID)).toBe(false);
     expect(plugin.ephemeralRunners.size).toBe(0);
     expect(plugin.ephemeralRunners.has(tracker.runners[0])).toBe(false);
-    expect(tracker.clients).toHaveLength(1);
-    expect(tracker.clients[0].disposed).toBe(true);
+    expect(tracker.clients).toHaveLength(2);
+    expect(tracker.clients.every((client) => client.disposed)).toBe(true);
     expect(tracker.disposals.map(({ client }) => client)).toEqual(tracker.clients);
-    expect(spawnedChildren).toHaveLength(1);
     await expectChildrenGone();
     expect(view.renderToolBadges).toHaveBeenCalled();
   }, 60_000);
 
-  it("keeps the thread's own runner, client and Pi process when it already has one", async () => {
+  it("keeps the thread's own runner but releases the client the clone rebound", async () => {
     const plugin = createForkPlugin();
     const runner = plugin.createPiRunner(THREAD_ID);
     expect(runner).toBeInstanceOf(PiRunner);
     const tracker = trackForkActivity();
     const client = await startIdleThreadRunner(plugin, runner);
-    const child = client.child;
     expect(requestTypes(tracker.requests)).toEqual(["get_session_stats"]);
     expect(plugin.threadRunners.get(THREAD_ID)).toBe(runner);
     expect(plugin.threadRunners.size).toBe(1);
@@ -547,8 +547,10 @@ describe("forking an idle thread through the real button chain", () => {
     click(button);
 
     const fork = await waitForFork(plugin);
-    // The fork borrowed the runner the thread already had: same runner, same client,
-    // same Pi process, no second runner and no second process.
+    // The fork borrowed the runner the thread already had: same runner, no second
+    // thread runner, same requests in the same order. Naming the clone goes through its
+    // own ephemeral runner, because naming an already-rebound client would leave the
+    // thread's runner bound to the clone.
     expect(requestTypes(tracker.requests)).toEqual([
       "get_session_stats",
       "clone",
@@ -558,17 +560,48 @@ describe("forking an idle thread through the real button chain", () => {
     expect(fork.piSessionId).toBe("cloned.jsonl");
     expect(plugin.threadHistory.history.threads).toHaveLength(2);
     expect(tracker.runners).toEqual([runner]);
-    expect(tracker.disposals).toEqual([]);
     expect(plugin.threadRunners.get(THREAD_ID)).toBe(runner);
     expect(plugin.threadRunners.size).toBe(1);
     expect(plugin.ephemeralRunners.size).toBe(0);
     expect(runner.disposed).toBe(false);
-    expect(runner.rpcClient).toBe(client);
-    expect(client.disposed).toBe(false);
-    expect(client.running).toBe(true);
-    expect(childAlive(child)).toBe(true);
-    expect(spawnedChildren).toHaveLength(1);
+    // Pi's `clone` rebound that process to the branch, so the runner cannot keep it:
+    // every later request naming the thread's own session would have been served by
+    // the clone's process while the plugin still recorded the thread's session.
+    expect(runner.rpcClient).toBeUndefined();
+    expect(runner.rpcSession).toBeUndefined();
+    expect(client.disposed).toBe(true);
+    // Both clients are released: the borrowed one the clone rebound, and the ephemeral
+    // one that carried the clone's name.
+    expect(new Set(tracker.disposals.map(({ client: disposed }) => disposed))).toEqual(
+      new Set(tracker.clients)
+    );
+    expect(tracker.clients).toHaveLength(2);
+    expect(plugin.threadHistory.getThread(THREAD_ID).piSessionId).toBe("session-thread-a.jsonl");
+    await expectChildrenGone();
     expect(harness.notices).toEqual([]);
+  }, 60_000);
+
+  it("serves the thread's next request from a process on its own session after a fork", async () => {
+    const plugin = createForkPlugin();
+    const runner = plugin.createPiRunner(THREAD_ID);
+    trackForkActivity();
+    const originalClient = await startIdleThreadRunner(plugin, runner);
+    click(createForkButton(plugin).button);
+    const fork = await waitForFork(plugin);
+    expect(fork.piSessionId).toBe("cloned.jsonl");
+    // The fork owns the clone; the thread still records its own session.
+    expect(plugin.threadHistory.getCurrentThread().piSessionId).toBe("cloned.jsonl");
+    expect(plugin.threadHistory.getThread(THREAD_ID).piSessionId).toBe("session-thread-a.jsonl");
+
+    // The thread asks again: it must get a process launched on its own session, not the
+    // process the clone rebound. Before the fix this request was answered by the clone's
+    // process while the thread still recorded its own session id, so the thread's new
+    // messages were appended to the fork's session file.
+    const nextClient = await startIdleThreadRunner(plugin, runner, "session-thread-a.jsonl");
+    expect(nextClient).not.toBe(originalClient);
+    expect(originalClient.running).toBe(false);
+    expect(path.basename(runner.rpcSession.path)).toBe("session-thread-a.jsonl");
+    expect(path.basename(runner.rpcSession.path)).not.toBe("cloned.jsonl");
   }, 60_000);
 });
 
@@ -648,11 +681,19 @@ describe("fork failures keep the same runner ownership", () => {
       expect.any(Error)
     );
     expect(plugin.threadHistory.history.threads).toHaveLength(2);
-    expect(tracker.disposals).toEqual([]);
+    // The session the caller named stays the thread's, whatever happened to the client.
+    expect(threadSessionId(plugin)).toBe("session-thread-a.jsonl");
+    // Both clients are released: the borrowed one the clone rebound, and the ephemeral
+    // one whose naming request failed.
+    expect(new Set(tracker.disposals.map(({ client: disposed }) => disposed))).toEqual(
+      new Set(tracker.clients)
+    );
+    expect(tracker.clients).toHaveLength(2);
     expect(plugin.threadRunners.get(THREAD_ID)).toBe(runner);
     expect(runner.disposed).toBe(false);
-    expect(client.disposed).toBe(false);
-    expect(childAlive(client.child)).toBe(true);
+    expect(runner.rpcClient).toBeUndefined();
+    expect(client.disposed).toBe(true);
+    await expectChildrenGone();
   }, 60_000);
 
   it("reports the original clone error through the real button chain", async () => {

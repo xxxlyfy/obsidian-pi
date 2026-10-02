@@ -105,4 +105,40 @@ describe("AnnotationStore", () => {
     listed[0].context = "mutated";
     expect(store.list("Note.md")[0].context).toBe("Rewrite this");
   });
+
+  it("refuses a replace that would exceed the per-note ceiling instead of truncating", () => {
+    const store = new AnnotationStore();
+    const tooMany = Array.from({ length: ANNOTATION_LIMITS.perPath + 1 }, (_, index) =>
+      input("Note.md", `n${index}`)
+    );
+
+    // The loader keeps only the first `perPath` records of a path, so accepting this
+    // write would drop the overflow without telling anyone.
+    expect(() => store.replacePath("Note.md", tooMany)).toThrow(
+      new RegExp(`at most ${ANNOTATION_LIMITS.perPath}`)
+    );
+    expect(store.list("Note.md")).toEqual([]);
+
+    const exact = tooMany.slice(0, ANNOTATION_LIMITS.perPath);
+    expect(store.replacePath("Note.md", exact)).toHaveLength(ANNOTATION_LIMITS.perPath);
+  });
+
+  it("refuses a replace that would add a path past the paths ceiling", () => {
+    const annotations = {};
+    for (let index = 0; index < ANNOTATION_LIMITS.paths; index += 1) {
+      annotations[`Note-${index}.md`] = [input(`Note-${index}.md`, `id-${index}`)];
+    }
+    const store = new AnnotationStore({ schemaVersion: 1, annotations });
+
+    // The loader keeps only the first `paths` keys, so a 501st key is dropped on the
+    // next load - together with the record this call just restored.
+    expect(() => store.replacePath("Fresh.md", [input("Fresh.md", "fresh")])).toThrow(
+      new RegExp(`at most ${ANNOTATION_LIMITS.paths}`)
+    );
+    expect(Object.keys(store.toJSON().annotations)).toHaveLength(ANNOTATION_LIMITS.paths);
+    expect(store.list("Fresh.md")).toEqual([]);
+
+    // Replacing a path the store already carries stays allowed: it adds no key.
+    expect(store.replacePath("Note-0.md", [input("Note-0.md", "replaced")])).toHaveLength(1);
+  });
 });

@@ -191,6 +191,35 @@ describe("the plugin's rename handler reports what the store did", () => {
     expect(harness.plugin.annotationStore.list("New.md")).toHaveLength(1);
   });
 
+  it("mentions the records left behind even when a duplicate was dropped too", () => {
+    // The destination is full AND already holds one of the source's ids, so the move
+    // drops a duplicate and still keeps records on the old path. Reporting only the
+    // duplicate told the user everything had followed.
+    const harness = createHarness({
+      annotationData: {
+        schemaVersion: 1,
+        annotations: {
+          "Old.md": [record("Old.md", "shared"), record("Old.md", "kept")],
+          "New.md": [
+            record("New.md", "shared"),
+            ...fillPath("New.md", ANNOTATION_LIMITS.perPath).slice(1)
+          ]
+        }
+      }
+    });
+
+    harness.rename("Old.md", "New.md");
+
+    const messages = harness.notices();
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("1 annotation could not follow");
+    expect(messages[0]).toContain(`${ANNOTATION_LIMITS.perPath} annotations`);
+    // The duplicate drop is reported too, in the same message.
+    expect(messages[0]).toContain("not stored twice");
+    expect(harness.plugin.annotationStore.list("Old.md").map((item) => item.id)).toEqual(["kept"]);
+    expect(harness.plugin.annotationStore.list("New.md")).toHaveLength(ANNOTATION_LIMITS.perPath);
+  });
+
   it("stays silent for a note with no annotations and for a non-markdown file", () => {
     const harness = createHarness({
       annotationData: { schemaVersion: 1, annotations: { "Other.md": [record("Other.md", "x")] } }

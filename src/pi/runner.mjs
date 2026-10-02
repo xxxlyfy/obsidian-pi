@@ -488,7 +488,7 @@ export class PiRunner {
   }
 
   async cloneSession(sessionReference) {
-    const { client } = await this.getExistingSessionRpcClient(sessionReference);
+    const { client, session } = await this.getExistingSessionRpcClient(sessionReference);
     const result = await client.request("clone");
     if (result?.cancelled) return undefined;
 
@@ -498,6 +498,21 @@ export class PiRunner {
     if (!clonePath || !fs.existsSync(clonePath)) {
       throw new Error("Pi did not return a portable local clone session.");
     }
+
+    // Pi's `clone` rebinds the process to the branch it just created, so this client
+    // now serves the clone and can no longer serve the session the runner recorded
+    // for it. Keeping it would make every later request for `session.path` (runs,
+    // renames, stats, exports) read and append the clone's file while the plugin
+    // still persisted `session.path` as the thread's session - the fork and its
+    // origin would silently share one Pi session. The guard in
+    // `discardRpcClientForSessionMismatch()` cannot catch this: it compares the
+    // request's reference with the recorded path, and that recorded path is exactly
+    // what went stale here. Releasing the client makes the next request start a
+    // fresh process on the requested session.
+    //
+    // Only when the process really moved: a `clone` that reports the bound session
+    // back leaves this runner's client reusable, as it always was.
+    if (session?.path !== clonePath) this.discardRpcClient(client);
     return cloneReference;
   }
 

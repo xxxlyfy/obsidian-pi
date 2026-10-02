@@ -499,14 +499,7 @@ var AnnotationStore = class {
       throw error;
     }
     const keptBack = candidates.length - movedCount;
-    const status =
-      movedCount === candidates.length
-        ? "moved"
-        : movedCount === 0
-          ? droppedDuplicates > 0
-            ? "moved"
-            : "none"
-          : "partial";
+    const status = keptBack === 0 ? "moved" : movedCount === 0 ? "none" : "partial";
     const reasons = [];
     if (movedCount < Math.min(candidates.length, roomLeft)) reasons.push("storage");
     if (candidates.length > roomLeft) reasons.push("per-path");
@@ -549,6 +542,30 @@ var AnnotationStore = class {
     this.changed();
     return true;
   }
+  /**
+   * Remove exactly the named records from one path, so a consumer that could only take
+   * part of them leaves the rest in place. `deletePath()` used to be the only way to
+   * clear a consumed batch, which silently destroyed the records a prompt or a queue
+   * entry had no room for.
+   *
+   * @param {unknown} path
+   * @param {Iterable<string>} ids
+   * @returns {number} How many records were removed.
+   */
+  removeByIds(path6, ids) {
+    const key = String(path6 ?? "");
+    const items = this.data.annotations[key];
+    if (!items) return 0;
+    const removing = new Set(ids);
+    if (removing.size === 0) return 0;
+    const remaining = items.filter((annotation) => !removing.has(annotation.id));
+    const removed = items.length - remaining.length;
+    if (removed === 0) return 0;
+    if (remaining.length > 0) this.data.annotations[key] = remaining;
+    else delete this.data.annotations[key];
+    this.changed();
+    return removed;
+  }
   reanchorPath(path6, text) {
     const key = String(path6 ?? "");
     const items = this.data.annotations[key];
@@ -577,8 +594,16 @@ var AnnotationStore = class {
   }
   replacePath(path6, annotations) {
     const key = String(path6 ?? "");
+    const incoming = Array.isArray(annotations) ? annotations.length : 0;
+    if (incoming > ANNOTATION_LIMITS.perPath)
+      throw new Error(`A note can have at most ${ANNOTATION_LIMITS.perPath} annotations.`);
     const normalized =
       normalizeAnnotationData({ annotations: { [key]: annotations } }).annotations[key] ?? [];
+    if (
+      !this.data.annotations[key] &&
+      Object.keys(this.data.annotations).length >= ANNOTATION_LIMITS.paths
+    )
+      throw new Error(`Annotations can cover at most ${ANNOTATION_LIMITS.paths} notes.`);
     const next = { ...this.data.annotations };
     if (normalized.length > 0) next[key] = normalized;
     else delete next[key];
@@ -2861,43 +2886,7 @@ ${prompt}
 ${contextPacket}`;
   }
   formatAnnotations(annotations = []) {
-    const formatted = [];
-    let remaining = ANNOTATION_LIMITS.promptCharacters - 2;
-    for (const annotation of annotations.slice(0, ANNOTATION_LIMITS.promptRecords)) {
-      const fixed = {
-        id: annotation.id,
-        path: annotation.path,
-        intent: annotation.intent,
-        status: annotation.status,
-        range: annotation.range,
-        targetKind: annotation.targetKind,
-        anchorLabel: annotation.anchorLabel || void 0
-      };
-      const fixedLength = JSON.stringify(fixed).length;
-      const recordBudget = Math.min(ANNOTATION_LIMITS.promptRecordCharacters, remaining);
-      const textFieldOverhead = 96;
-      if (recordBudget <= fixedLength + textFieldOverhead) break;
-      let textBudget = recordBudget - fixedLength - textFieldOverhead;
-      const take = (value, preferred) => {
-        const text = String(value ?? "");
-        const result = text.slice(0, Math.min(preferred, textBudget));
-        textBudget -= result.length;
-        return result;
-      };
-      const record = {
-        ...fixed,
-        request: take(annotation.context, 2e3),
-        quote: take(annotation.quote, 3e3),
-        prefix: take(annotation.prefix, ANNOTATION_LIMITS.prefix),
-        suffix: take(annotation.suffix, ANNOTATION_LIMITS.suffix),
-        renderedText: take(annotation.renderedText, 1e3) || void 0
-      };
-      const length = JSON.stringify(record).length + (formatted.length > 0 ? 1 : 0);
-      if (length > remaining) break;
-      formatted.push(record);
-      remaining -= length;
-    }
-    return formatted;
+    return promptAnnotationRecords(annotations);
   }
   async resolveAttachments(references, activeNote) {
     const attachments = [];
@@ -3079,6 +3068,48 @@ ${contextPacket}`;
       : this.settings.model.trim() || "default";
   }
 };
+function promptAnnotationRecords(annotations = []) {
+  const formatted = [];
+  let remaining = ANNOTATION_LIMITS.promptCharacters - 2;
+  for (const annotation of annotations.slice(0, ANNOTATION_LIMITS.promptRecords)) {
+    const fixed = {
+      id: annotation.id,
+      path: annotation.path,
+      intent: annotation.intent,
+      status: annotation.status,
+      range: annotation.range,
+      targetKind: annotation.targetKind,
+      anchorLabel: annotation.anchorLabel || void 0
+    };
+    const fixedLength = JSON.stringify(fixed).length;
+    const recordBudget = Math.min(ANNOTATION_LIMITS.promptRecordCharacters, remaining);
+    const textFieldOverhead = 96;
+    if (recordBudget <= fixedLength + textFieldOverhead) break;
+    let textBudget = recordBudget - fixedLength - textFieldOverhead;
+    const take = (value, preferred) => {
+      const text = String(value ?? "");
+      const result = text.slice(0, Math.min(preferred, textBudget));
+      textBudget -= result.length;
+      return result;
+    };
+    const record = {
+      ...fixed,
+      request: take(annotation.context, 2e3),
+      quote: take(annotation.quote, 3e3),
+      prefix: take(annotation.prefix, ANNOTATION_LIMITS.prefix),
+      suffix: take(annotation.suffix, ANNOTATION_LIMITS.suffix),
+      renderedText: take(annotation.renderedText, 1e3) || void 0
+    };
+    const length = JSON.stringify(record).length + (formatted.length > 0 ? 1 : 0);
+    if (length > remaining) break;
+    formatted.push(record);
+    remaining -= length;
+  }
+  return formatted;
+}
+function selectPromptAnnotations(annotations = []) {
+  return annotations.slice(0, promptAnnotationRecords(annotations).length);
+}
 function findPiCommand(prompt, commands) {
   const match = String(prompt ?? "").match(/^\/([^\s]+)/);
   if (!match) return void 0;
@@ -6011,7 +6042,7 @@ var PiRunner = class {
     return this.getOrCreateRpcClient(sessionReference);
   }
   async cloneSession(sessionReference) {
-    const { client } = await this.getExistingSessionRpcClient(sessionReference);
+    const { client, session } = await this.getExistingSessionRpcClient(sessionReference);
     const result = await client.request("clone");
     if (result?.cancelled) return void 0;
     const state = await client.request("get_state");
@@ -6020,6 +6051,7 @@ var PiRunner = class {
     if (!clonePath || !import_node_fs2.default.existsSync(clonePath)) {
       throw new Error("Pi did not return a portable local clone session.");
     }
+    if (session?.path !== clonePath) this.discardRpcClient(client);
     return cloneReference;
   }
   async getSessionStats(sessionReference) {
@@ -11422,7 +11454,7 @@ async function importVaultChatHistory(vaultBasePath, rawData = {}) {
   const basePath = import_node_path5.default.resolve(vaultBasePath);
   const configuredFolder = normalizeVaultFolder2(rawData.chatHistoryFolder || "chats");
   const version = Number(rawData.chatHistoryStorageVersion) || 0;
-  const sources = orderedSources(basePath, configuredFolder, version);
+  const { sources, preferredSource } = orderedSources(basePath, configuredFolder, version);
   const threadsById = /* @__PURE__ */ new Map();
   const managedFiles = /* @__PURE__ */ new Set();
   const warnings = [];
@@ -11433,8 +11465,9 @@ async function importVaultChatHistory(vaultBasePath, rawData = {}) {
     for (const warning of result.warnings) warnings.push(warning);
     for (const filePath of result.managedFiles) managedFiles.add(filePath);
     for (const thread of result.threads) {
-      const existing = threadsById.get(thread.id);
-      if (!existing || thread.updatedAt >= existing.updatedAt) threadsById.set(thread.id, thread);
+      const kept = threadsById.get(thread.id);
+      if (!kept) threadsById.set(thread.id, thread);
+      else if (source === preferredSource) threadsById.set(thread.id, thread);
     }
   }
   const threads = [...threadsById.values()];
@@ -11485,12 +11518,15 @@ function orderedSources(basePath, configuredFolder, version) {
         : version === INDEXED_STORAGE_VERSION
           ? "indexed"
           : void 0;
-  return [
-    ...(preferred ? [sources[preferred]] : []),
-    ...Object.entries(sources)
-      .filter(([name]) => name !== preferred)
-      .map(([, source]) => source)
-  ];
+  return {
+    preferredSource: preferred ? sources[preferred] : void 0,
+    sources: [
+      ...(preferred ? [sources[preferred]] : []),
+      ...Object.entries(sources)
+        .filter(([name]) => name !== preferred)
+        .map(([, source]) => source)
+    ]
+  };
 }
 async function loadMarkdownThreads(folder) {
   const result = emptyResult();
@@ -12541,16 +12577,18 @@ var PiAgentPlugin = class extends P.Plugin {
     let clonedSession;
     if (current.piSessionId) {
       const existing = this.threadRunners.get(current.id);
-      const runner = existing ?? this.createEphemeralThreadRunner();
+      const cloningRunner = existing ?? this.createEphemeralThreadRunner();
+      const namingRunner = existing ? this.createEphemeralThreadRunner() : cloningRunner;
       try {
-        clonedSession = await runner.cloneSession(current.piSessionId);
+        clonedSession = await cloningRunner.cloneSession(current.piSessionId);
         if (clonedSession) {
-          await runner
+          await namingRunner
             .setSessionName(clonedSession, `${current.title} (fork)`)
             .catch((error) => console.warn("Pi Agent: could not name cloned Pi session", error));
         }
       } finally {
-        if (!existing) this.disposeEphemeralThreadRunner(runner);
+        if (!existing) this.disposeEphemeralThreadRunner(cloningRunner);
+        else this.disposeEphemeralThreadRunner(namingRunner);
       }
       if (!clonedSession) return void 0;
     }
@@ -13336,8 +13374,21 @@ var PiAgentPlugin = class extends P.Plugin {
     const file = explicitFile instanceof P.TFile ? explicitFile : this.getCurrentContextFile();
     if (!file) return [];
     const annotations = await this.getAnnotationsForContext(file.path);
-    if (annotations.length > 0) this.annotationStore.deletePath(file.path);
-    return annotations;
+    if (annotations.length === 0) return annotations;
+    const carried = selectPromptAnnotations(annotations);
+    if (carried.length > 0) {
+      this.annotationStore.removeByIds(
+        file.path,
+        carried.map((annotation) => annotation.id)
+      );
+    }
+    if (carried.length < annotations.length) {
+      const retained = annotations.length - carried.length;
+      new P.Notice(
+        `${carried.length} annotation${carried.length === 1 ? "" : "s"} sent to Pi; ${retained} stayed on this note because a prompt carries at most ${ANNOTATION_LIMITS.promptRecords} annotations and ${ANNOTATION_LIMITS.promptCharacters} characters.`
+      );
+    }
+    return carried;
   }
   /**
    * Follow a note rename with its annotations. The store moves whatever fits and keeps
@@ -13351,14 +13402,15 @@ var PiAgentPlugin = class extends P.Plugin {
     if (file?.extension !== "md") return;
     if (this.annotationStore.list(oldPath).length === 0) return;
     const result = this.annotationStore.renamePath(oldPath, file.path);
-    if (result.status === "moved") {
-      if (result.droppedDuplicates > 0)
-        new P.Notice(
-          `The renamed note already carried ${result.droppedDuplicates} of its annotations, so they were not stored twice.`
-        );
+    const duplicateNote =
+      result.droppedDuplicates > 0
+        ? ` The renamed note already carried ${result.droppedDuplicates} of its annotations, so they were not stored twice.`
+        : "";
+    if (result.status !== "moved") {
+      new P.Notice(this.describeAnnotationRename(result) + duplicateNote);
       return;
     }
-    new P.Notice(this.describeAnnotationRename(result));
+    if (duplicateNote) new P.Notice(duplicateNote.trim());
   }
   /**
    * What to tell the user when a rename could not take every annotation with it.

@@ -161,43 +161,7 @@ export class ContextBuilder {
   }
 
   formatAnnotations(annotations = []) {
-    const formatted = [];
-    let remaining = ANNOTATION_LIMITS.promptCharacters - 2;
-    for (const annotation of annotations.slice(0, ANNOTATION_LIMITS.promptRecords)) {
-      const fixed = {
-        id: annotation.id,
-        path: annotation.path,
-        intent: annotation.intent,
-        status: annotation.status,
-        range: annotation.range,
-        targetKind: annotation.targetKind,
-        anchorLabel: annotation.anchorLabel || undefined
-      };
-      const fixedLength = JSON.stringify(fixed).length;
-      const recordBudget = Math.min(ANNOTATION_LIMITS.promptRecordCharacters, remaining);
-      const textFieldOverhead = 96;
-      if (recordBudget <= fixedLength + textFieldOverhead) break;
-      let textBudget = recordBudget - fixedLength - textFieldOverhead;
-      const take = (value, preferred) => {
-        const text = String(value ?? "");
-        const result = text.slice(0, Math.min(preferred, textBudget));
-        textBudget -= result.length;
-        return result;
-      };
-      const record = {
-        ...fixed,
-        request: take(annotation.context, 2_000),
-        quote: take(annotation.quote, 3_000),
-        prefix: take(annotation.prefix, ANNOTATION_LIMITS.prefix),
-        suffix: take(annotation.suffix, ANNOTATION_LIMITS.suffix),
-        renderedText: take(annotation.renderedText, 1_000) || undefined
-      };
-      const length = JSON.stringify(record).length + (formatted.length > 0 ? 1 : 0);
-      if (length > remaining) break;
-      formatted.push(record);
-      remaining -= length;
-    }
-    return formatted;
+    return promptAnnotationRecords(annotations);
   }
 
   async resolveAttachments(references, activeNote) {
@@ -391,6 +355,70 @@ export class ContextBuilder {
       ? this.settings.customModel.trim() || "custom"
       : this.settings.model.trim() || "default";
   }
+}
+
+/**
+ * The annotations a prompt can actually carry, as the records that will be written.
+ *
+ * This is the one place that decides how much of an annotation batch fits, so a
+ * consumer that gives up the records it handed over can ask the same question and
+ * release exactly what was carried. `consumeAnnotationsForPrompt()` used to clear a
+ * note's whole batch while the prompt only carried the first records that fit
+ * (`promptRecords` records, `promptCharacters` characters), so the rest were
+ * destroyed without being sent.
+ *
+ * @param {Array<object>} annotations
+ * @returns {Array<object>} Prompt records, in the order they will be written.
+ */
+export function promptAnnotationRecords(annotations = []) {
+  const formatted = [];
+  let remaining = ANNOTATION_LIMITS.promptCharacters - 2;
+  for (const annotation of annotations.slice(0, ANNOTATION_LIMITS.promptRecords)) {
+    const fixed = {
+      id: annotation.id,
+      path: annotation.path,
+      intent: annotation.intent,
+      status: annotation.status,
+      range: annotation.range,
+      targetKind: annotation.targetKind,
+      anchorLabel: annotation.anchorLabel || undefined
+    };
+    const fixedLength = JSON.stringify(fixed).length;
+    const recordBudget = Math.min(ANNOTATION_LIMITS.promptRecordCharacters, remaining);
+    const textFieldOverhead = 96;
+    if (recordBudget <= fixedLength + textFieldOverhead) break;
+    let textBudget = recordBudget - fixedLength - textFieldOverhead;
+    const take = (value, preferred) => {
+      const text = String(value ?? "");
+      const result = text.slice(0, Math.min(preferred, textBudget));
+      textBudget -= result.length;
+      return result;
+    };
+    const record = {
+      ...fixed,
+      request: take(annotation.context, 2_000),
+      quote: take(annotation.quote, 3_000),
+      prefix: take(annotation.prefix, ANNOTATION_LIMITS.prefix),
+      suffix: take(annotation.suffix, ANNOTATION_LIMITS.suffix),
+      renderedText: take(annotation.renderedText, 1_000) || undefined
+    };
+    const length = JSON.stringify(record).length + (formatted.length > 0 ? 1 : 0);
+    if (length > remaining) break;
+    formatted.push(record);
+    remaining -= length;
+  }
+  return formatted;
+}
+
+/**
+ * The prefix of `annotations` that `promptAnnotationRecords()` writes, so a caller can
+ * compare what left the store with what actually reached the prompt.
+ *
+ * @param {Array<object>} annotations
+ * @returns {Array<object>}
+ */
+export function selectPromptAnnotations(annotations = []) {
+  return annotations.slice(0, promptAnnotationRecords(annotations).length);
 }
 
 export function findPiCommand(prompt, commands) {

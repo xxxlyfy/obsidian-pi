@@ -196,14 +196,11 @@ export class AnnotationStore {
     }
 
     const keptBack = candidates.length - movedCount;
-    const status =
-      movedCount === candidates.length
-        ? "moved"
-        : movedCount === 0
-          ? droppedDuplicates > 0
-            ? "moved"
-            : "none"
-          : "partial";
+    // A record that had to stay on the old path is a retention the caller has to know
+    // about, even when the move also dropped a duplicate: reporting "moved" there told
+    // the plugin everything followed, and the records left on a path with no note went
+    // unmentioned until the next load.
+    const status = keptBack === 0 ? "moved" : movedCount === 0 ? "none" : "partial";
     /** @type {Array<"storage" | "per-path" | "duplicate-ids">} */
     const reasons = [];
     if (movedCount < Math.min(candidates.length, roomLeft)) reasons.push("storage");
@@ -250,6 +247,31 @@ export class AnnotationStore {
     return true;
   }
 
+  /**
+   * Remove exactly the named records from one path, so a consumer that could only take
+   * part of them leaves the rest in place. `deletePath()` used to be the only way to
+   * clear a consumed batch, which silently destroyed the records a prompt or a queue
+   * entry had no room for.
+   *
+   * @param {unknown} path
+   * @param {Iterable<string>} ids
+   * @returns {number} How many records were removed.
+   */
+  removeByIds(path, ids) {
+    const key = String(path ?? "");
+    const items = this.data.annotations[key];
+    if (!items) return 0;
+    const removing = new Set(ids);
+    if (removing.size === 0) return 0;
+    const remaining = items.filter((annotation) => !removing.has(annotation.id));
+    const removed = items.length - remaining.length;
+    if (removed === 0) return 0;
+    if (remaining.length > 0) this.data.annotations[key] = remaining;
+    else delete this.data.annotations[key];
+    this.changed();
+    return removed;
+  }
+
   reanchorPath(path, text) {
     const key = String(path ?? "");
     const items = this.data.annotations[key];
@@ -280,8 +302,23 @@ export class AnnotationStore {
 
   replacePath(path, annotations) {
     const key = String(path ?? "");
+    const incoming = Array.isArray(annotations) ? annotations.length : 0;
+    // `normalizeAnnotationData()` keeps the first `perPath` records of a path and drops
+    // the rest, so a write that is over that ceiling would silently lose records the
+    // caller believes it restored. The total ceiling already throws here; this one has
+    // to as well.
+    if (incoming > ANNOTATION_LIMITS.perPath)
+      throw new Error(`A note can have at most ${ANNOTATION_LIMITS.perPath} annotations.`);
     const normalized =
       normalizeAnnotationData({ annotations: { [key]: annotations } }).annotations[key] ?? [];
+    // The same rule the loader applies to the whole document: a path the store does not
+    // already carry cannot be added once `paths` is reached, or the next load drops the
+    // last one - which is the record this call just wrote.
+    if (
+      !this.data.annotations[key] &&
+      Object.keys(this.data.annotations).length >= ANNOTATION_LIMITS.paths
+    )
+      throw new Error(`Annotations can cover at most ${ANNOTATION_LIMITS.paths} notes.`);
     const next = { ...this.data.annotations };
     if (normalized.length > 0) next[key] = normalized;
     else delete next[key];
