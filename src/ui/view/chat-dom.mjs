@@ -96,7 +96,6 @@ export function createHeader(root, view) {
       view.startThreadTitleRename();
     }
   });
-  view.renderThreadTitle();
 
   const actions = header.createDiv({ cls: "pi-agent-header-actions" });
   const favoriteButton = actions.createEl("button", {
@@ -107,7 +106,6 @@ export function createHeader(root, view) {
     attr: { "aria-label": tr("view.newChat"), title: tr("view.newChat") }
   });
   setIcon(favoriteButton, "star");
-  view.renderThreadFavorite();
   favoriteButton.addEventListener("click", () => view.toggleCurrentThreadFavorite());
   setIcon(newChatButton, "plus");
   newChatButton.addEventListener("click", (event) => {
@@ -186,13 +184,10 @@ export function createComposer(root, view) {
   const composer = root.createDiv({ cls: "pi-agent-composer" });
 
   const toolBadgesEl = composer.createDiv({ cls: "pi-agent-tool-badges" });
-  view.renderToolBadges();
 
   const promptQueueEl = composer.createDiv({ cls: "pi-agent-prompt-queue" });
-  view.renderPromptQueue();
 
   const extensionWidgetsAboveEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
-  view.renderComposerImages();
 
   const inputEl = composer.createEl("textarea", {
     placeholder: tr("composer.placeholder")
@@ -205,6 +200,10 @@ export function createComposer(root, view) {
     }
     if (event.key === "Escape") {
       view.syncCurrentRunFlags();
+      // The composer's own Escape belongs to whatever popup is open. The suggestion
+      // controller consumes the key but lets it bubble, and the document-level listener
+      // would read it as "cancel the run" and stop an answer the user is reading.
+      if (view.suggestions?.isPopupOpen?.()) return;
       if (view.state.running) {
         event.preventDefault();
         view.cancelCurrentRun();
@@ -232,8 +231,6 @@ export function createComposer(root, view) {
   });
 
   const extensionWidgetsBelowEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
-  view.renderExtensionWidgets();
-  view.resizeInput();
 
   const imageInputEl = composer.createEl("input", {
     cls: "pi-agent-image-input",

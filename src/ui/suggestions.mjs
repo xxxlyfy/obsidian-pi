@@ -49,8 +49,17 @@ export class ComposerSuggestions {
     }
   }
 
+  /**
+   * Whether Escape belongs to this popup right now. The composer's keydown handler and
+   * the view's document-level run cancellation both ask this, so one Escape closes the
+   * popup and a second one cancels the run.
+   */
+  isPopupOpen() {
+    return Boolean(this.suggestEl || this.commandRefresh);
+  }
+
   handleKeydown(event) {
-    if (event.key === "Escape" && (this.suggestEl || this.commandRefresh)) {
+    if (event.key === "Escape" && this.isPopupOpen()) {
       event.preventDefault();
       this.close();
       return true;

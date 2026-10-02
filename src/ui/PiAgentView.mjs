@@ -209,7 +209,15 @@ export class PiAgentView extends /** @type {ComposedItemView} */ (f.ItemView) {
   }
   renderChatView() {
     // The DOM is rebuilt from scratch here, so the previous lifecycle's timers
-    // and cleanups (if any survived onClose) must not outlive this call.
+    // and cleanups (if any survived onClose) must not outlive this call. The transient
+    // state those timers guard has to be released with them: `lifecycle.dispose()`
+    // cancels the pending animation frame and timers but leaves their handles in the
+    // view state, and every scheduler treats a set handle as "one is already pending".
+    // Rebuilding the same thread mid-run therefore froze the streaming answer and the
+    // activity line until the run ended.
+    this.cancelStreamingFlush();
+    this.clearPendingActivityTimer();
+    this.clearCoalescedActivity();
     if (this.lifecycle) this.lifecycle.dispose();
     this.lifecycle = createViewLifecycle();
     this.showingThreadList = !1;
@@ -231,6 +239,18 @@ export class PiAgentView extends /** @type {ComposedItemView} */ (f.ItemView) {
     // Assigned here rather than in createComposer so the builder never has to
     // know which collaborator class the composer needs.
     this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
+    // The repaints run only after every element is attached to the view. Each of them
+    // starts by checking its own element (`if (!this.threadTitleEl) return;`), so while
+    // they were called from inside the builders they read the previous round's detached
+    // elements or nothing at all: the header showed an empty title with no favorite
+    // state, the context badges and a restored paused queue were invisible, and the
+    // composer never measured its own size.
+    this.renderThreadTitle();
+    this.renderToolBadges();
+    this.renderComposerImages();
+    this.renderPromptQueue();
+    this.renderExtensionWidgets();
+    this.resizeInput();
     this.renderMessages();
     this.setRunningState(this.state.running);
   }

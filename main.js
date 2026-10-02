@@ -620,7 +620,7 @@ var AnnotationStore = class {
   }
   assertStorageBudget(annotations) {
     if (
-      annotationDataBytes({ schemaVersion: this.data.schemaVersion, annotations }) >
+      annotationDataBytes({ schemaVersion: this.data.schemaVersion, annotations }) + 1 >
       ANNOTATION_LIMITS.storageBytes
     )
       throw new Error("Annotation storage limit reached.");
@@ -944,7 +944,10 @@ function requestAnnotationRefresh(view) {
   view?.dispatch?.({ effects: refreshAnnotations.of(null) });
 }
 function closestLineElement(target) {
-  return target instanceof Element ? target.closest(".cm-line") : null;
+  const candidate =
+    /** @type {{ closest?: (selector: string) => Element | null }} */
+    target;
+  return typeof candidate?.closest === "function" ? candidate.closest(".cm-line") : null;
 }
 function buildDecorations(view, controller) {
   const ranges = [];
@@ -9650,8 +9653,16 @@ var ComposerSuggestions = class {
         .catch(() => {});
     }
   }
+  /**
+   * Whether Escape belongs to this popup right now. The composer's keydown handler and
+   * the view's document-level run cancellation both ask this, so one Escape closes the
+   * popup and a second one cancels the run.
+   */
+  isPopupOpen() {
+    return Boolean(this.suggestEl || this.commandRefresh);
+  }
   handleKeydown(event) {
-    if (event.key === "Escape" && (this.suggestEl || this.commandRefresh)) {
+    if (event.key === "Escape" && this.isPopupOpen()) {
       event.preventDefault();
       this.close();
       return true;
@@ -10030,13 +10041,15 @@ function settleRunSuccess(view, run, threadId, result) {
     run.thinkingUserSet ? run.thinkingExpanded : false
   );
   const runMetadata = getCurrentRunMetadata(view.plugin.settings, result.runtimeState);
-  view.cancelStreamingFlush();
-  view.state.streamingAssistantContent = "";
-  view.state.streamingAnswerDirty = false;
-  view.state.streamingThinkingContent = "";
-  view.state.streamingThinkingDirty = false;
-  view.streamingItemEl = void 0;
-  view.streamingTextEl = void 0;
+  if (view.isCurrentThread(threadId)) {
+    view.cancelStreamingFlush();
+    view.state.streamingAssistantContent = "";
+    view.state.streamingAnswerDirty = false;
+    view.state.streamingThinkingContent = "";
+    view.state.streamingThinkingDirty = false;
+    view.streamingItemEl = void 0;
+    view.streamingTextEl = void 0;
+  }
   view.plugin.addMessageToThread(threadId, {
     role: "assistant",
     content: result.finalResponse,
@@ -10188,24 +10201,28 @@ function settleRunCleanup(view, threadId, skipQueueDrain) {
   view.state.running = view.isThreadRunning(view.plugin.getCurrentThread().id);
   view.state.canceling = view.getCurrentThreadRun()?.canceling === true;
   performanceProfiler.markHeap("after");
-  view.clearCoalescedActivity();
-  view.cancelStreamingFlush();
-  view.state.streamingAssistantContent = "";
-  view.state.streamingAnswerDirty = false;
-  view.state.streamingThinkingContent = "";
-  view.state.streamingThinkingDirty = false;
-  view.state.thinkingDisclosureExpanded = false;
-  view.state.thinkingDisclosureUserSet = false;
-  view.state.activityStickyUntil = 0;
-  view.state.pendingActivity = void 0;
-  view.clearPendingActivityTimer();
-  view.state.activeToolCalls.clear();
-  view.state.activityText = "";
-  view.state.activityDetail = "";
-  view.state.currentRunContextUsage = void 0;
-  if (view.isCurrentThread(threadId)) view.state.nativePiQueue = void 0;
+  if (view.isCurrentThread(threadId)) {
+    view.clearCoalescedActivity();
+    view.cancelStreamingFlush();
+    view.state.streamingAssistantContent = "";
+    view.state.streamingAnswerDirty = false;
+    view.state.streamingThinkingContent = "";
+    view.state.streamingThinkingDirty = false;
+    view.streamingItemEl = void 0;
+    view.streamingTextEl = void 0;
+    view.state.thinkingDisclosureExpanded = false;
+    view.state.thinkingDisclosureUserSet = false;
+    view.state.activityStickyUntil = 0;
+    view.state.pendingActivity = void 0;
+    view.clearPendingActivityTimer();
+    view.state.activeToolCalls.clear();
+    view.state.activityText = "";
+    view.state.activityDetail = "";
+    view.state.currentRunContextUsage = void 0;
+    view.state.nativePiQueue = void 0;
+    view.runningThreadId = void 0;
+  }
   view.renderPromptQueue();
-  view.runningThreadId = void 0;
   view.setRunningState(view.state.running);
   if (view.isCurrentThread(threadId)) {
     view.renderMessages();
@@ -10284,7 +10301,6 @@ function createHeader(root, view) {
       view.startThreadTitleRename();
     }
   });
-  view.renderThreadTitle();
   const actions = header.createDiv({ cls: "pi-agent-header-actions" });
   const favoriteButton = actions.createEl("button", {
     cls: "clickable-icon pi-agent-header-action pi-agent-header-favorite"
@@ -10294,7 +10310,6 @@ function createHeader(root, view) {
     attr: { "aria-label": t("view.newChat"), title: t("view.newChat") }
   });
   (0, import_obsidian22.setIcon)(favoriteButton, "star");
-  view.renderThreadFavorite();
   favoriteButton.addEventListener("click", () => view.toggleCurrentThreadFavorite());
   (0, import_obsidian22.setIcon)(newChatButton, "plus");
   newChatButton.addEventListener("click", (event) => {
@@ -10342,11 +10357,8 @@ function createMessagesArea(root, view) {
 function createComposer(root, view) {
   const composer = root.createDiv({ cls: "pi-agent-composer" });
   const toolBadgesEl = composer.createDiv({ cls: "pi-agent-tool-badges" });
-  view.renderToolBadges();
   const promptQueueEl = composer.createDiv({ cls: "pi-agent-prompt-queue" });
-  view.renderPromptQueue();
   const extensionWidgetsAboveEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
-  view.renderComposerImages();
   const inputEl = composer.createEl("textarea", {
     placeholder: t("composer.placeholder")
   });
@@ -10358,6 +10370,7 @@ function createComposer(root, view) {
     }
     if (event.key === "Escape") {
       view.syncCurrentRunFlags();
+      if (view.suggestions?.isPopupOpen?.()) return;
       if (view.state.running) {
         event.preventDefault();
         view.cancelCurrentRun();
@@ -10384,8 +10397,6 @@ function createComposer(root, view) {
     }, 120);
   });
   const extensionWidgetsBelowEl = composer.createDiv({ cls: "pi-agent-extension-widgets" });
-  view.renderExtensionWidgets();
-  view.resizeInput();
   const imageInputEl = composer.createEl("input", {
     cls: "pi-agent-image-input",
     attr: {
@@ -10895,6 +10906,9 @@ var PiAgentView = class extends f4.ItemView {
     this.renderChatView();
   }
   renderChatView() {
+    this.cancelStreamingFlush();
+    this.clearPendingActivityTimer();
+    this.clearCoalescedActivity();
     if (this.lifecycle) this.lifecycle.dispose();
     this.lifecycle = createViewLifecycle();
     this.showingThreadList = false;
@@ -10910,6 +10924,12 @@ var PiAgentView = class extends f4.ItemView {
     Object.assign(this, createMessagesArea(root, this));
     Object.assign(this, createComposer(root, this));
     this.suggestions = new ComposerSuggestions(this.inputEl, this.plugin, () => this.resizeInput());
+    this.renderThreadTitle();
+    this.renderToolBadges();
+    this.renderComposerImages();
+    this.renderPromptQueue();
+    this.renderExtensionWidgets();
+    this.resizeInput();
     this.renderMessages();
     this.setRunningState(this.state.running);
   }

@@ -336,8 +336,13 @@ export class AnnotationStore {
   }
 
   assertStorageBudget(annotations) {
+    // The loader measures the same document incrementally and is one byte more
+    // pessimistic than the exact serialization (it adds the separator between items
+    // before knowing whether another one follows). Accepting exactly the limit here
+    // wrote a document that the next load truncated by one record, so this check has
+    // to leave that byte free.
     if (
-      annotationDataBytes({ schemaVersion: this.data.schemaVersion, annotations }) >
+      annotationDataBytes({ schemaVersion: this.data.schemaVersion, annotations }) + 1 >
       ANNOTATION_LIMITS.storageBytes
     )
       throw new Error("Annotation storage limit reached.");

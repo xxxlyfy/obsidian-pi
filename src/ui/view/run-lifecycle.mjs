@@ -119,15 +119,19 @@ export function settleRunSuccess(view, run, threadId, result) {
     run.thinkingUserSet ? run.thinkingExpanded : false
   );
   const runMetadata = getCurrentRunMetadata(view.plugin.settings, result.runtimeState);
-  // Drop the streaming frame and its buffers before the final message lands, so
-  // a late frame cannot repaint over the finished answer.
-  view.cancelStreamingFlush();
-  view.state.streamingAssistantContent = "";
-  view.state.streamingAnswerDirty = false;
-  view.state.streamingThinkingContent = "";
-  view.state.streamingThinkingDirty = false;
-  view.streamingItemEl = void 0;
-  view.streamingTextEl = void 0;
+  // Drop the streaming frame and its buffers before the final message lands, so a late
+  // frame cannot repaint over the finished answer - but only for the run whose output is
+  // on screen. This state is the view's, not the run's, so a background thread finishing
+  // used to wipe the streaming text of the thread the user was reading.
+  if (view.isCurrentThread(threadId)) {
+    view.cancelStreamingFlush();
+    view.state.streamingAssistantContent = "";
+    view.state.streamingAnswerDirty = false;
+    view.state.streamingThinkingContent = "";
+    view.state.streamingThinkingDirty = false;
+    view.streamingItemEl = void 0;
+    view.streamingTextEl = void 0;
+  }
   view.plugin.addMessageToThread(threadId, {
     role: "assistant",
     content: result.finalResponse,
@@ -332,24 +336,34 @@ export function settleRunCleanup(view, threadId, skipQueueDrain) {
   view.state.running = view.isThreadRunning(view.plugin.getCurrentThread().id);
   view.state.canceling = view.getCurrentThreadRun()?.canceling === true;
   performanceProfiler.markHeap("after");
-  view.clearCoalescedActivity();
-  view.cancelStreamingFlush();
-  view.state.streamingAssistantContent = "";
-  view.state.streamingAnswerDirty = false;
-  view.state.streamingThinkingContent = "";
-  view.state.streamingThinkingDirty = false;
-  view.state.thinkingDisclosureExpanded = false;
-  view.state.thinkingDisclosureUserSet = false;
-  view.state.activityStickyUntil = 0;
-  view.state.pendingActivity = void 0;
-  view.clearPendingActivityTimer();
-  view.state.activeToolCalls.clear();
-  view.state.activityText = "";
-  view.state.activityDetail = "";
-  view.state.currentRunContextUsage = void 0;
-  if (view.isCurrentThread(threadId)) view.state.nativePiQueue = void 0;
+  // Everything below paints or clears what the *visible* thread shows. A run settling in
+  // the background must not clear the current thread's stream, activity line, tool list
+  // or the queue's native answer.
+  if (view.isCurrentThread(threadId)) {
+    view.clearCoalescedActivity();
+    view.cancelStreamingFlush();
+    view.state.streamingAssistantContent = "";
+    view.state.streamingAnswerDirty = false;
+    view.state.streamingThinkingContent = "";
+    view.state.streamingThinkingDirty = false;
+    // The elements go with the buffers: a later delta would otherwise write into the
+    // finished run's boxes.
+    view.streamingItemEl = void 0;
+    view.streamingTextEl = void 0;
+    view.state.thinkingDisclosureExpanded = false;
+    view.state.thinkingDisclosureUserSet = false;
+    view.state.activityStickyUntil = 0;
+    view.state.pendingActivity = void 0;
+    view.clearPendingActivityTimer();
+    view.state.activeToolCalls.clear();
+    view.state.activityText = "";
+    view.state.activityDetail = "";
+    view.state.currentRunContextUsage = void 0;
+    view.state.nativePiQueue = void 0;
+    // This thread's run just ended, so it is no longer the running one.
+    view.runningThreadId = void 0;
+  }
   view.renderPromptQueue();
-  view.runningThreadId = void 0;
   view.setRunningState(view.state.running);
   if (view.isCurrentThread(threadId)) {
     view.renderMessages();

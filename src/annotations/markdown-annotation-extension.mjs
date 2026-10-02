@@ -85,14 +85,19 @@ export function requestAnnotationRefresh(view) {
 }
 
 /**
- * CodeMirror reports pointer targets as EventTarget, but a mouse event target is
- * an element. Narrow it here so the call site can use closest() safely.
+ * CodeMirror reports pointer targets as EventTarget, but a mouse event target is an
+ * element. Narrow it here so the call site can use closest() safely.
+ *
+ * Deliberately not `target instanceof Element`: an editor moved to a popout window
+ * delivers targets from that window's realm, where the constructor from this realm
+ * fails the check, and the hover highlight and block pick then stop responding.
  *
  * @param {EventTarget | null} target
  * @returns {Element | null}
  */
-function closestLineElement(target) {
-  return target instanceof Element ? target.closest(".cm-line") : null;
+export function closestLineElement(target) {
+  const candidate = /** @type {{ closest?: (selector: string) => Element | null }} */ (target);
+  return typeof candidate?.closest === "function" ? candidate.closest(".cm-line") : null;
 }
 
 function buildDecorations(view, controller) {
