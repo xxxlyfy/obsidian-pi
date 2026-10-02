@@ -4122,8 +4122,6 @@ var PiRpcClient = class {
     this.listeners = /* @__PURE__ */ new Set();
     this.stderr = "";
     this.stdinError = void 0;
-    this.stdoutBuffer = "";
-    this.decoder = new import_node_string_decoder.StringDecoder("utf8");
     this.timerHost = options.hostWindow;
     this.disposed = false;
     this.yieldScheduler = options.yieldScheduler ?? new YieldScheduler();
@@ -4132,9 +4130,28 @@ var PiRpcClient = class {
       maxMs: options.drainBudget?.maxMs ?? DRAIN_BATCH_MAX_MS
     };
     this.generation = 0;
-    this.drainPending = false;
-    this.drainPromise = void 0;
-    this.stdoutEnded = false;
+    this.streamState = this.createStreamState(0);
+    this.streamStates = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Create the stdout parser/drain state of exactly one child generation.
+   *
+   * Every field is owned by a single child, so a replacement child's `start()`
+   * can neither clear an older child's buffered lines nor detach the drain that
+   * is still consuming them.
+   *
+   * @param {number} generation Generation this state belongs to.
+   * @returns {PiRpcStreamState} The new, empty state.
+   */
+  createStreamState(generation) {
+    return {
+      generation,
+      buffer: "",
+      decoder: new import_node_string_decoder.StringDecoder("utf8"),
+      stdoutEnded: false,
+      drainPending: false,
+      drainPromise: void 0
+    };
   }
   get running() {
     return !!this.child && this.child.exitCode === null && !this.child.killed;
@@ -4165,13 +4182,11 @@ var PiRpcClient = class {
       this.child = child;
       this.stderr = "";
       this.stdinError = void 0;
-      this.stdoutBuffer = "";
-      this.decoder = new import_node_string_decoder.StringDecoder("utf8");
       this.generation += 1;
       const childGeneration = this.generation;
-      this.stdoutEnded = false;
-      this.drainPending = false;
-      this.drainPromise = void 0;
+      const state = this.createStreamState(childGeneration);
+      this.streamState = state;
+      this.streamStates.set(childGeneration, state);
       let started = false;
       const failStart = (error) => {
         if (started) return;
@@ -4185,8 +4200,8 @@ var PiRpcClient = class {
         this.startPromise = void 0;
         resolve();
       });
-      child.stdout.on("data", (chunk) => this.handleStdoutChunk(chunk));
-      child.stdout.on("end", () => this.flushDecoder());
+      child.stdout.on("data", (chunk) => this.handleStdoutChunk(chunk, state));
+      child.stdout.on("end", () => this.flushDecoder(state));
       child.stderr.on("data", (chunk) => {
         this.stderr += chunk.toString("utf8");
       });
@@ -4200,7 +4215,8 @@ var PiRpcClient = class {
       });
       child.once("close", async (exitCode) => {
         if (this.child === child) this.child = void 0;
-        await this.whenDrainIdle();
+        await this.whenDrainIdle(state);
+        this.streamStates.delete(childGeneration);
         if (this.disposed) return;
         const error = new Error(
           formatPiCliFailure({ context: "Pi RPC process stopped", stderr: this.stderr, exitCode })
@@ -4275,23 +4291,34 @@ var PiRpcClient = class {
 `);
     return true;
   }
-  handleStdoutChunk(chunk) {
+  /**
+   * @param {Buffer} chunk Bytes read from one child's stdout.
+   * @param {PiRpcStreamState} state That child's own parser state.
+   */
+  handleStdoutChunk(chunk, state) {
     if (this.disposed) return;
-    this.stdoutBuffer += this.decoder.write(chunk);
-    this.measureQueue();
-    this.scheduleDrain();
+    state.buffer += state.decoder.write(chunk);
+    this.measureQueue(state);
+    this.scheduleDrain(state);
   }
-  flushDecoder() {
-    this.stdoutBuffer += this.decoder.end();
-    this.stdoutEnded = true;
-    this.measureQueue();
-    this.scheduleDrain();
+  /**
+   * stdout reached EOF for one child: flush its decoder and mark only its own
+   * stream as ended, so a late `end` from a replaced child cannot reinterpret the
+   * replacement child's partial line.
+   *
+   * @param {PiRpcStreamState} state That child's own parser state.
+   */
+  flushDecoder(state) {
+    state.buffer += state.decoder.end();
+    state.stdoutEnded = true;
+    this.measureQueue(state);
+    this.scheduleDrain(state);
   }
   // Bounded queue observations (enabled-only; O(chunk) scan of buffered lines).
-  measureQueue() {
+  measureQueue(state) {
     const profiler = performanceProfiler;
-    if (!profiler.enabled || !this.stdoutBuffer) return;
-    const buffer = this.stdoutBuffer;
+    const buffer = state.buffer;
+    if (!profiler.enabled || !buffer) return;
     let depth = 0;
     for (let index = 0; index < buffer.length; index += 1) {
       if (buffer.charCodeAt(index) === 10) depth += 1;
@@ -4300,47 +4327,50 @@ var PiRpcClient = class {
     profiler.recordMax("rpcQueueDepth", depth);
     profiler.recordMax("rpcQueueBytes", Buffer.byteLength(buffer, "utf8"));
   }
-  // At most one pending drain; new chunks only append to the parser buffer.
-  // Batches are bounded by event count and time, and yields happen only between
-  // complete JSONL lines (partial lines stay in the buffer).
-  scheduleDrain() {
-    if (this.disposed || this.drainPending) return;
-    this.drainPending = true;
-    const generation = this.generation;
+  // At most one pending drain PER CHILD; new chunks only append to that child's
+  // parser buffer. Batches are bounded by event count and time, and yields happen
+  // only between complete JSONL lines (partial lines stay in the buffer).
+  //
+  // The loop is deliberately not gated on `this.generation`: a replaced child
+  // still owns the lines in its own buffer, and its close handler is waiting for
+  // exactly this drain to finish before it reports the exit. Stopping here on a
+  // generation change is what used to drop that child's trailing events.
+  scheduleDrain(state) {
+    if (this.disposed || state.drainPending) return;
+    state.drainPending = true;
     const drain = (async () => {
-      while (!this.disposed && generation === this.generation) {
-        this.drainBatch();
-        if (!this.hasDrainWork()) break;
+      while (!this.disposed) {
+        this.drainBatch(state);
+        if (!this.hasDrainWork(state)) break;
         await this.yieldScheduler.yield();
       }
     })();
-    this.drainPromise = drain;
+    state.drainPromise = drain;
     const settle = (error) => {
       if (error) console.error("Pi Agent: RPC drain failed", error);
-      if (this.drainPromise !== drain) return;
-      this.drainPromise = void 0;
-      this.drainPending = false;
-      if (!this.disposed && generation === this.generation && this.hasDrainWork())
-        this.scheduleDrain();
+      if (state.drainPromise !== drain) return;
+      state.drainPromise = void 0;
+      state.drainPending = false;
+      if (!this.disposed && this.hasDrainWork(state)) this.scheduleDrain(state);
     };
     drain.then(
       () => settle(void 0),
       (error) => settle(error)
     );
   }
-  drainBatch() {
+  drainBatch(state) {
     const profiler = performanceProfiler;
     const startedAt = now();
     let processed = 0;
     while (processed < this.drainBudget.maxEvents) {
       let line;
-      const newlineIndex = this.stdoutBuffer.indexOf("\n");
+      const newlineIndex = state.buffer.indexOf("\n");
       if (newlineIndex >= 0) {
-        line = this.stdoutBuffer.slice(0, newlineIndex);
-        this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
-      } else if (this.stdoutEnded && this.stdoutBuffer.length > 0) {
-        line = this.stdoutBuffer;
-        this.stdoutBuffer = "";
+        line = state.buffer.slice(0, newlineIndex);
+        state.buffer = state.buffer.slice(newlineIndex + 1);
+      } else if (state.stdoutEnded && state.buffer.length > 0) {
+        line = state.buffer;
+        state.buffer = "";
       } else {
         break;
       }
@@ -4351,17 +4381,24 @@ var PiRpcClient = class {
     }
     if (profiler.enabled && processed > 0) profiler.recordDuration("drain", now() - startedAt);
   }
-  hasDrainWork() {
-    if (this.stdoutBuffer.includes("\n")) return true;
-    return this.stdoutEnded && this.stdoutBuffer.length > 0;
+  hasDrainWork(state) {
+    if (state.buffer.includes("\n")) return true;
+    return state.stdoutEnded && state.buffer.length > 0;
   }
-  async whenDrainIdle() {
-    while (this.drainPromise) {
-      const current = this.drainPromise;
+  /**
+   * Wait until the given child's own drain is idle. Reading a client-level slot
+   * here would make one generation's close handler wait for another generation's
+   * drain.
+   *
+   * @param {PiRpcStreamState} state The child whose drain must finish.
+   */
+  async whenDrainIdle(state) {
+    while (state.drainPromise) {
+      const current = state.drainPromise;
       try {
         await current;
       } catch {}
-      if (this.drainPromise === current) return;
+      if (state.drainPromise === current) return;
     }
   }
   handleLine(line) {
@@ -4461,6 +4498,7 @@ var PiRpcClient = class {
     this.terminate();
     this.listeners.clear();
     this.yieldScheduler.dispose();
+    this.streamStates.clear();
     const error = new Error("Pi RPC client disposed.");
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();

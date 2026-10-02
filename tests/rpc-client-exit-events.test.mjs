@@ -380,7 +380,7 @@ describe("PiRpcClient exits: error then close for the same child", () => {
     const nextId = nextChild.writes[0].id;
 
     nextChild.pushStdout({ id: nextId, type: "response", success: true, data: { ok: true } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     expect(nextOutcome.status).toBe("fulfilled");
     expect(nextOutcome.value).toEqual({ ok: true });
@@ -429,7 +429,7 @@ describe("PiRpcClient exits: error then close for the same child", () => {
     expect(client.pending.get(nextId)?.generation).toBe(2);
 
     nextChild.pushStdout({ id: nextId, type: "response", success: true, data: { ok: true } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
     expect(nextOutcome.status).toBe("fulfilled");
   });
 
@@ -474,7 +474,7 @@ describe("PiRpcClient exits: error then close for the same child", () => {
     expect(nextOutcome.status).toBe("pending");
 
     nextChild.pushStdout({ id: nextId, type: "response", success: true, data: { ok: true } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
     expect(nextOutcome.status).toBe("fulfilled");
   });
 });

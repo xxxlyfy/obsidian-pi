@@ -190,7 +190,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     oldChild.pushStdout({ type: "notice", n: 1 }, { type: "notice", n: 2 });
     await flushMicrotasks();
     expect(scheduler.waiters.length).toBe(1);
-    expect(client.drainPromise).toBeDefined();
+    expect(client.streamState.drainPromise).toBeDefined();
 
     // Old child closes: the handler clears this.child, then suspends.
     oldChild.exit(7);
@@ -225,7 +225,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
 
     // The replacement child answers its own request.
     newChild.pushStdout({ id: newRequestId, type: "response", success: true, data: { ok: true } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     expect(newOutcome.status).toBe("fulfilled");
     expect(newOutcome.value).toEqual({ ok: true });
@@ -269,7 +269,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     newChild.pushStdout(
       ...newIds.map((id) => ({ id, type: "response", success: true, data: { id } }))
     );
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     expect(newOutcomes.filter((outcome) => outcome.status === "rejected")).toEqual([]);
     // Requests racing on one startPromise do not necessarily receive their ids in
@@ -310,7 +310,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     expect(newOutcome.status).toBe("pending");
 
     newChild.pushStdout({ id: newRequestId, type: "response", success: true, data: { ok: true } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
     expect(newOutcome.status).toBe("fulfilled");
   });
 
@@ -321,7 +321,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     await flushMicrotasks();
     const oldChild = spawnRegistry.children[0];
     const oldRequestId = oldChild.writes[0].id;
-    expect(client.drainPromise).toBeUndefined();
+    expect(client.streamState.drainPromise).toBeUndefined();
 
     // No drain in flight: the close handler does not pause before handleExit().
     oldChild.exit(4);
@@ -344,7 +344,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     expect(pendingGeneration(client, firstId)).toBe(2);
 
     newChild.pushStdout({ id: firstId, type: "response", success: true, data: { step: 1 } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
     expect(firstOutcome.status).toBe("fulfilled");
     expect(firstOutcome.value).toEqual({ step: 1 });
 
@@ -354,7 +354,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     expect(spawnRegistry.children).toHaveLength(2);
     const secondId = newChild.writes[1].id;
     newChild.pushStdout({ id: secondId, type: "response", success: true, data: { step: 2 } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     expect(secondOutcome.status).toBe("fulfilled");
     expect(secondOutcome.value).toEqual({ step: 2 });
@@ -403,7 +403,7 @@ describe("PiRpcClient restart race between an old exit and new requests", () => 
     expect(newOutcome.status).toBe("pending");
 
     newChild.pushStdout({ id: newRequestId, type: "response", success: true, data: { ok: true } });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     expect(newOutcome.status).toBe("fulfilled");
     expect(newOutcome.value).toEqual({ ok: true });

@@ -9,10 +9,10 @@ describe("PiRpcClient protocol framing", () => {
 
     const payload = `${JSON.stringify({ type: "notice", text: "a\u2028b\u2029c" })}\n${JSON.stringify({ type: "agent_settled" })}\n`;
     const bytes = Buffer.from(payload, "utf8");
-    client.handleStdoutChunk(bytes.subarray(0, 17));
-    client.handleStdoutChunk(bytes.subarray(17, 31));
-    client.handleStdoutChunk(bytes.subarray(31));
-    await client.whenDrainIdle();
+    client.handleStdoutChunk(bytes.subarray(0, 17), client.streamState);
+    client.handleStdoutChunk(bytes.subarray(17, 31), client.streamState);
+    client.handleStdoutChunk(bytes.subarray(31), client.streamState);
+    await client.whenDrainIdle(client.streamState);
 
     expect(events).toEqual([{ type: "notice", text: "a b c" }, { type: "agent_settled" }]);
   });

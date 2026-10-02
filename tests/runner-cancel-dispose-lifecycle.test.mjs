@@ -532,7 +532,7 @@ describe("PiRunner cancel/dispose lifecycle", () => {
     await waitFor(() => runner.runCompletionRejector !== undefined);
 
     child.pushStdout({ type: "agent_settled" });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
     expect(await settleRun(outcome)).toBe("fulfilled");
     await macrotaskBarrier();
 
@@ -615,7 +615,7 @@ describe("PiRunner cancel/dispose lifecycle", () => {
     // Pi answers the abort and still reports its normal final event.
     child.pushStdout({ id: abortId, type: "response", success: true, data: {} });
     child.pushStdout({ type: "agent_settled" });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
     expect(await settleRun(outcome)).toBe("rejected");
     await abortPromise;
 
@@ -719,7 +719,7 @@ describe("PiRunner cancel/dispose lifecycle", () => {
     respondToCommands(secondChild, { prompt: true });
     await waitFor(() => runner.runCompletionRejector !== undefined);
     secondChild.pushStdout({ type: "agent_settled" });
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     expect(await settleRun(second)).toBe("fulfilled");
     expect(second.value.finalResponse).toBeDefined();

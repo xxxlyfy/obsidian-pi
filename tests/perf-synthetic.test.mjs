@@ -112,7 +112,7 @@ function createStreamingView() {
 function feed(client, text, chunkSize) {
   const bytes = Buffer.from(text, "utf8");
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    client.handleStdoutChunk(bytes.subarray(offset, offset + chunkSize));
+    client.handleStdoutChunk(bytes.subarray(offset, offset + chunkSize), client.streamState);
   }
 }
 
@@ -247,7 +247,7 @@ describe("PATCH 5 synthetic tests", () => {
         JSON.stringify({ type: "notice", n: index })
       );
       feed(client, `${lines.join("\n")}\n`, 65_536);
-      await client.whenDrainIdle();
+      await client.whenDrainIdle(client.streamState);
 
       expect(notices).toHaveLength(2_000);
       expect(new Set(notices).size).toBe(2_000);
@@ -283,7 +283,7 @@ describe("PATCH 5 synthetic tests", () => {
         ).join("\n")}\n`,
         4_096
       );
-      await client.whenDrainIdle();
+      await client.whenDrainIdle(client.streamState);
 
       expect(noticed).toHaveLength(12);
       const { metrics } = performanceProfiler.snapshot();

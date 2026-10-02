@@ -21,7 +21,7 @@ function createClient(options = {}) {
 function feed(client, lines, chunkSize) {
   const bytes = Buffer.from(`${lines.join("\n")}\n`, "utf8");
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    client.handleStdoutChunk(bytes.subarray(offset, offset + chunkSize));
+    client.handleStdoutChunk(bytes.subarray(offset, offset + chunkSize), client.streamState);
   }
 }
 
@@ -48,7 +48,7 @@ describe("PiRpcClient cooperative drain", () => {
       JSON.stringify({ id: "req-burst", type: "response", success: true, data: { ok: true } })
     );
     feed(client, lines, 4096);
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     const notices = events.filter((event) => event.type === "notice");
     expect(notices).toHaveLength(1000);
@@ -69,7 +69,7 @@ describe("PiRpcClient cooperative drain", () => {
     client.subscribe((event) => events.push(event));
 
     feed(client, noticeLines(10_000), 65_536);
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     const notices = events.filter((event) => event.type === "notice");
     expect(notices).toHaveLength(10_000);
@@ -87,7 +87,7 @@ describe("PiRpcClient cooperative drain", () => {
     client.subscribe((event) => events.push(event));
 
     feed(client, noticeLines(10), 4096);
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
 
     expect(events).toHaveLength(10);
     expect(yieldSpy.mock.calls.length).toBeGreaterThanOrEqual(9);
@@ -102,9 +102,9 @@ describe("PiRpcClient cooperative drain", () => {
     const bytes = Buffer.from(`${JSON.stringify({ type: "notice", text })}\n`, "utf8");
     const splitAt = bytes.indexOf(Buffer.from("中", "utf8")) + 1;
 
-    client.handleStdoutChunk(bytes.subarray(0, splitAt));
-    client.handleStdoutChunk(bytes.subarray(splitAt));
-    await client.whenDrainIdle();
+    client.handleStdoutChunk(bytes.subarray(0, splitAt), client.streamState);
+    client.handleStdoutChunk(bytes.subarray(splitAt), client.streamState);
+    await client.whenDrainIdle(client.streamState);
 
     expect(events).toEqual([{ type: "notice", text }]);
   });
@@ -120,12 +120,12 @@ describe("PiRpcClient cooperative drain", () => {
     );
     const middle = Math.floor(bytes.length / 2);
 
-    client.handleStdoutChunk(bytes.subarray(0, middle));
-    await client.whenDrainIdle();
+    client.handleStdoutChunk(bytes.subarray(0, middle), client.streamState);
+    await client.whenDrainIdle(client.streamState);
     expect(events).toEqual([]);
 
-    client.handleStdoutChunk(bytes.subarray(middle));
-    await client.whenDrainIdle();
+    client.handleStdoutChunk(bytes.subarray(middle), client.streamState);
+    await client.whenDrainIdle(client.streamState);
     expect(events).toEqual([{ type: "notice", text: "hello 世界" }]);
   });
 
@@ -140,11 +140,11 @@ describe("PiRpcClient cooperative drain", () => {
     const deliveredBeforeDispose = events.length;
 
     client.dispose();
-    await client.whenDrainIdle();
+    await client.whenDrainIdle(client.streamState);
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     expect(disposeSpy).toHaveBeenCalledTimes(1);
     expect(events.length).toBe(deliveredBeforeDispose);
-    expect(client.drainPending).toBe(false);
+    expect(client.streamState.drainPending).toBe(false);
   });
 });
