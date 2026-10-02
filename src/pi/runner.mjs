@@ -167,6 +167,37 @@ export class PiRunner {
     this.rpcSession = undefined;
   }
 
+  /**
+   * Give up a bound client when a RUN asks for a different session than the one
+   * that client is serving.
+   *
+   * `runPiRpc()` is where this decides an outcome: a run's session is fixed when
+   * its Pi process is launched (`buildPiArgs` passes `--session <path>`), so a
+   * client bound to A can only ever read and append A and cannot serve a run that
+   * asked for B. The binding used to be returned silently (`this.rpcSession ??=`),
+   * which ran the request against A and reported A back as the run's `sessionId`
+   * - the value the plugin persists as `thread.piSessionId`. Releasing the client
+   * here makes the following `getOrCreateRpcClient()` start a process on the
+   * requested session, which keeps the request authoritative.
+   *
+   * Deliberately not part of `getOrCreateRpcClient()`: the session lookups that
+   * pass another session's reference to an already-bound client
+   * (`cloneSession()`, `setSessionName()`, `exportSession()`, ...) address that
+   * session BY PARAMETER and deliberately reuse the client the thread already
+   * owns. A reference that names the bound session, or that is absent, keeps the
+   * client exactly as before.
+   *
+   * @param {string | undefined} sessionReference Session the run named.
+   */
+  discardRpcClientForSessionMismatch(sessionReference) {
+    if (!sessionReference || !this.rpcClient || !this.rpcSession) return;
+    // Compare what the reference names, resolved the same way
+    // `resolveSessionPath()` resolves it, without opening or creating anything.
+    const requestedPath = this.resolveSessionPath(sessionReference);
+    if (!requestedPath || requestedPath === this.rpcSession.path) return;
+    this.discardRpcClient(this.rpcClient);
+  }
+
   async runPiRpc(prompt, sessionId, callbacks, images = []) {
     if (!this.pluginDirectory) throw new Error("Plugin directory is not available.");
     if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
@@ -175,6 +206,9 @@ export class PiRunner {
     this.isRunning = true;
     let unsubscribe = () => {};
     try {
+      // Release a client that is bound to a different session before asking for
+      // one, so this run cannot be served by - or report - the wrong session.
+      this.discardRpcClientForSessionMismatch(sessionId);
       const { client, session } = await this.getOrCreateRpcClient(sessionId);
       if (this.cancelPending || callbacks?.isCanceled?.()) throw new Error("Pi run canceled.");
 
