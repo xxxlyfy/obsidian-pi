@@ -1,0 +1,20 @@
+# Every tracked text file is stored and checked out with LF.
+#
+# The repository normalizes to LF (0.0.16) and CI runs `prettier --check`, whose
+# default endOfLine is LF. On Windows, Git for Windows defaults to
+# `core.autocrlf=true`, so every checkout rewrote the working tree to CRLF and
+# `npm run ci` failed `format:check` on ~153 files whose committed content was
+# already correct. `eol=lf` makes the working tree LF too, so the local gate agrees
+# with CI instead of failing on line endings alone.
+* text=auto eol=lf
+
+# Binary assets keep whatever bytes they were committed with.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
