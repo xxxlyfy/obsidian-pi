@@ -4096,6 +4096,7 @@ function renderExtensionStatuses(container, elements, statuses, visible) {
 var DEFAULT_REQUEST_TIMEOUT_MS = 3e4;
 var DRAIN_BATCH_MAX_EVENTS = 64;
 var DRAIN_BATCH_MAX_MS = 6;
+var PI_RPC_TIMEOUT_CODE = "PI_RPC_TIMEOUT";
 var nodeTimerHost = {
   setTimeout: import_node_timers.setTimeout,
   clearTimeout: import_node_timers.clearTimeout
@@ -4109,6 +4110,17 @@ var UNSUPPORTED_COMMAND_PATTERNS = [
 function isUnsupportedPiRpcCommandError(error) {
   const message = error instanceof Error ? error.message : String(error || "");
   return UNSUPPORTED_COMMAND_PATTERNS.some((pattern) => pattern.test(message));
+}
+function createPiRpcTimeoutError(type, timeoutMs) {
+  const error = new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`);
+  error.code = PI_RPC_TIMEOUT_CODE;
+  return error;
+}
+function isPiRpcTimeoutError(error) {
+  return (
+    /** @type {{ code?: string }} */
+    error?.code === PI_RPC_TIMEOUT_CODE
+  );
 }
 function formatPiCapabilityFailure(command, error) {
   const detail = error instanceof Error ? error.message : String(error || "Unknown RPC error.");
@@ -4239,7 +4251,7 @@ var PiRpcClient = class {
         timeoutMs > 0
           ? timerHost.setTimeout(() => {
               this.pending.delete(id);
-              reject(new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`));
+              reject(createPiRpcTimeoutError(type, timeoutMs));
             }, timeoutMs)
           : void 0;
       this.pending.set(id, {
@@ -5599,7 +5611,7 @@ var PiRunner = class {
         if (this.disposed) throw new Error("Pi run canceled.");
         return { client: client2, session: this.rpcSession };
       } catch (error) {
-        this.resetRpcClientAfterStartupFailure(client2);
+        this.discardRpcClient(client2);
         throw error;
       }
     }
@@ -5617,11 +5629,20 @@ var PiRunner = class {
       if (this.disposed) throw new Error("Pi run canceled.");
       return { client, session };
     } catch (error) {
-      this.resetRpcClientAfterStartupFailure(client);
+      this.discardRpcClient(client);
       throw error;
     }
   }
-  resetRpcClientAfterStartupFailure(client) {
+  /**
+   * Give up a client this runner cannot keep using, whatever the reason: the
+   * process could not be started, or a run's request lost its owner while Pi was
+   * still working. Disposing stops the Pi process (and the task it is running)
+   * and clears the session attachment, so the next run starts a fresh process on
+   * the same thread session instead of attaching to a stream whose run is over.
+   *
+   * @param {PiRpcClient} client The client to dispose and forget.
+   */
+  discardRpcClient(client) {
     client.dispose?.();
     if (this.rpcClient === client) this.rpcClient = void 0;
     this.rpcSession = void 0;
@@ -5665,7 +5686,12 @@ var PiRunner = class {
         message: prompt,
         ...(rpcImages.length > 0 ? { images: rpcImages } : {})
       });
-      await promptRequest;
+      try {
+        await promptRequest;
+      } catch (error) {
+        if (isPiRpcTimeoutError(error)) this.discardRpcClient(client);
+        throw error;
+      }
       callbacks?.onPromptAccepted?.();
       this.runCompletionRejector = rejectRun;
       await completion;

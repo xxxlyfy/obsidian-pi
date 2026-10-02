@@ -5,7 +5,7 @@ import { CUSTOM_MODEL_VALUE } from "../plugin/settings.mjs";
 import { createContextUsage } from "./token-usage.mjs";
 import { handlePiEvent } from "./events.mjs";
 import { createRunState } from "./run-state.mjs";
-import { PiRpcClient } from "./rpc-client.mjs";
+import { isPiRpcTimeoutError, PiRpcClient } from "./rpc-client.mjs";
 import { toRpcImages } from "../ui/prompt-payload.mjs";
 
 export function getCompactInstructions(prompt) {
@@ -128,7 +128,7 @@ export class PiRunner {
         if (this.disposed) throw new Error("Pi run canceled.");
         return { client, session: this.rpcSession };
       } catch (error) {
-        this.resetRpcClientAfterStartupFailure(client);
+        this.discardRpcClient(client);
         throw error;
       }
     }
@@ -147,12 +147,21 @@ export class PiRunner {
       if (this.disposed) throw new Error("Pi run canceled.");
       return { client, session };
     } catch (error) {
-      this.resetRpcClientAfterStartupFailure(client);
+      this.discardRpcClient(client);
       throw error;
     }
   }
 
-  resetRpcClientAfterStartupFailure(client) {
+  /**
+   * Give up a client this runner cannot keep using, whatever the reason: the
+   * process could not be started, or a run's request lost its owner while Pi was
+   * still working. Disposing stops the Pi process (and the task it is running)
+   * and clears the session attachment, so the next run starts a fresh process on
+   * the same thread session instead of attaching to a stream whose run is over.
+   *
+   * @param {PiRpcClient} client The client to dispose and forget.
+   */
+  discardRpcClient(client) {
     client.dispose?.();
     if (this.rpcClient === client) this.rpcClient = undefined;
     this.rpcSession = undefined;
@@ -209,7 +218,19 @@ export class PiRunner {
         message: prompt,
         ...(rpcImages.length > 0 ? { images: rpcImages } : {})
       });
-      await promptRequest;
+      try {
+        await promptRequest;
+      } catch (error) {
+        // A timed-out prompt request is not a dead process: Pi keeps working on
+        // the task it started, and the `agent_settled` it eventually emits cannot
+        // be told apart from one this run owns. Giving the client up here puts
+        // that abandoned task - and its late events - out of reach of the next run
+        // on this thread, which reopens the same session from disk. Every other
+        // prompt failure (a canceled run, a process that went away) keeps its
+        // existing handling and its reusable client.
+        if (isPiRpcTimeoutError(error)) this.discardRpcClient(client);
+        throw error;
+      }
       callbacks?.onPromptAccepted?.();
       // From here the run waits for Pi's final event, which no pending RPC request
       // can wake. Hand dispose() the rejection handle so releasing the runner

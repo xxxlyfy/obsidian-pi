@@ -15,6 +15,9 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 // comes first) so a burst of Pi output cannot block the Obsidian UI thread.
 const DRAIN_BATCH_MAX_EVENTS = 64;
 const DRAIN_BATCH_MAX_MS = 6;
+// Marks the local request timeout below, so a run owner can tell "Pi did not
+// answer in time" apart from "Pi is gone" without matching the message.
+const PI_RPC_TIMEOUT_CODE = "PI_RPC_TIMEOUT";
 const nodeTimerHost = { setTimeout: setNodeTimeout, clearTimeout: clearNodeTimeout };
 
 const UNSUPPORTED_COMMAND_PATTERNS = [
@@ -27,6 +30,33 @@ const UNSUPPORTED_COMMAND_PATTERNS = [
 export function isUnsupportedPiRpcCommandError(error) {
   const message = error instanceof Error ? error.message : String(error || "");
   return UNSUPPORTED_COMMAND_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/**
+ * The error `request()` rejects with when its `timeoutMs` expires.
+ *
+ * The timeout is local: `request()` stops waiting without sending anything to Pi,
+ * so a task Pi already started keeps running. Callers that own a run can tell
+ * this apart from a process failure with `isPiRpcTimeoutError()`.
+ *
+ * @param {string} type Request type that timed out.
+ * @param {number} timeoutMs The expired timeout.
+ * @returns {Error} Tagged timeout error.
+ */
+function createPiRpcTimeoutError(type, timeoutMs) {
+  const error = new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`);
+  /** @type {{ code?: string }} */ (error).code = PI_RPC_TIMEOUT_CODE;
+  return error;
+}
+
+/**
+ * Whether `error` is the local request timeout rather than a Pi failure.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isPiRpcTimeoutError(error) {
+  return /** @type {{ code?: string }} */ (error)?.code === PI_RPC_TIMEOUT_CODE;
 }
 
 export function formatPiCapabilityFailure(command, error) {
@@ -212,7 +242,7 @@ export class PiRpcClient {
         timeoutMs > 0
           ? timerHost.setTimeout(() => {
               this.pending.delete(id);
-              reject(new Error(`Pi RPC ${type} timed out after ${timeoutMs}ms.`));
+              reject(createPiRpcTimeoutError(type, timeoutMs));
             }, timeoutMs)
           : undefined;
 
