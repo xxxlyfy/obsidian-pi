@@ -38,7 +38,8 @@ describe("AnnotationStore", () => {
       }
     });
 
-    expect(store.renamePath("Old.md", "New.md")).toBe(true);
+    const result = store.renamePath("Old.md", "New.md");
+    expect(result).toMatchObject({ status: "moved", ok: true, moved: 1, droppedDuplicates: 0 });
     expect(store.list("Old.md")).toEqual([]);
     expect(store.list("New.md").map((item) => item.id)).toEqual(["existing", "old"]);
     expect(store.list("New.md")[1].path).toBe("New.md");
@@ -46,7 +47,7 @@ describe("AnnotationStore", () => {
     expect(store.toJSON().annotations).toEqual({});
   });
 
-  it("leaves both paths intact when a rename would collide instead of dropping records", () => {
+  it("keeps the destination's record when a rename carries the same id, and reports the drop", () => {
     const store = new AnnotationStore({
       annotations: {
         "Old.md": [input("Old.md", "same")],
@@ -54,9 +55,12 @@ describe("AnnotationStore", () => {
       }
     });
 
-    expect(store.renamePath("Old.md", "New.md")).toBe(false);
-    expect(store.list("Old.md")).toHaveLength(1);
-    expect(store.list("New.md")).toHaveLength(1);
+    // The id is the same annotation, so the move stores it once: the destination's copy
+    // stays and the arrival is counted instead of failing the whole rename.
+    const result = store.renamePath("Old.md", "New.md");
+    expect(result).toMatchObject({ status: "moved", moved: 0, droppedDuplicates: 1 });
+    expect(store.list("New.md").map((item) => item.id)).toEqual(["same"]);
+    expect(store.list("Old.md")).toEqual([]);
   });
 
   it("reconciles persisted anchors and saves only when their attachment changes", () => {

@@ -418,29 +418,129 @@ var AnnotationStore = class {
     this.changed();
     return true;
   }
+  /**
+   * Move a path's annotations after Obsidian renames, merges, or replaces a note.
+   *
+   * The destination's existing records always win: they are never dropped or
+   * reordered, and the moving records are appended after them up to the per-note
+   * ceiling. Whatever does not fit stays on the old path, so the caller can report
+   * it and a later rename can still carry it over. Nothing is ever dropped silently:
+   * a moving record is discarded only when the destination already holds that exact
+   * id (the same annotation reached the destination first), which is reported as
+   * `droppedDuplicates`.
+   *
+   * @param {unknown} oldPath
+   * @param {unknown} newPath
+   * @returns {{
+   *   status: "moved" | "partial" | "none",
+   *   ok: boolean,
+   *   from: string,
+   *   to: string,
+   *   moved: number,
+   *   droppedDuplicates: number,
+   *   retained: { path: string, count: number } | null,
+   *   reason: "no-op" | "duplicate-ids" | "per-path" | "storage" | null
+   * }}
+   */
   renamePath(oldPath, newPath) {
     const oldKey = String(oldPath ?? "");
     const newKey = String(newPath ?? "");
+    const empty = (status2, reason) => ({
+      status: status2,
+      ok: false,
+      from: oldKey,
+      to: newKey,
+      moved: 0,
+      droppedDuplicates: 0,
+      retained: null,
+      reason
+    });
     const moving = this.data.annotations[oldKey];
-    if (!moving || !newKey || oldKey === newKey) return false;
+    if (!moving || !newKey || oldKey === newKey) return empty("none", "no-op");
     const existing = this.data.annotations[newKey] ?? [];
-    const ids = new Set(existing.map((annotation) => annotation.id));
-    if (
-      existing.length + moving.length > ANNOTATION_LIMITS.perPath ||
-      moving.some((annotation) => ids.has(annotation.id))
-    )
-      return false;
-    const moved = [...existing, ...moving.map((annotation) => ({ ...annotation, path: newKey }))];
-    const next = { ...this.data.annotations, [newKey]: moved };
-    delete next[oldKey];
-    try {
-      this.assertStorageBudget(next);
-    } catch {
-      return false;
+    const existingIds = new Set(existing.map((annotation) => annotation.id));
+    const candidates = moving.filter((annotation) => !existingIds.has(annotation.id));
+    const droppedDuplicates = moving.length - candidates.length;
+    const roomLeft = Math.max(0, ANNOTATION_LIMITS.perPath - existing.length);
+    const attempt = (count) => {
+      const staying = candidates.slice(count);
+      const next2 = {};
+      for (const [key, items] of Object.entries(this.data.annotations)) {
+        if (key !== oldKey && key !== newKey) next2[key] = items;
+      }
+      if (staying.length > 0) next2[oldKey] = staying;
+      if (existing.length > 0 || count > 0)
+        next2[newKey] = [
+          ...existing,
+          ...candidates.slice(0, count).map((annotation) => ({ ...annotation, path: newKey }))
+        ];
+      try {
+        this.assertStorageBudget(next2);
+      } catch {
+        return void 0;
+      }
+      return next2;
+    };
+    let movedCount = Math.min(candidates.length, roomLeft);
+    let next;
+    while (movedCount > 0) {
+      next = attempt(movedCount);
+      if (next) break;
+      movedCount -= 1;
     }
-    this.data.annotations = next;
-    this.changed();
-    return true;
+    if (!next) next = attempt(0);
+    if (!next) return empty("none", "storage");
+    const original = this.data.annotations;
+    try {
+      this.data.annotations = next;
+      this.changed();
+    } catch (error) {
+      this.data.annotations = original;
+      throw error;
+    }
+    const keptBack = candidates.length - movedCount;
+    const status =
+      movedCount === candidates.length
+        ? "moved"
+        : movedCount === 0
+          ? droppedDuplicates > 0
+            ? "moved"
+            : "none"
+          : "partial";
+    const reasons = [];
+    if (movedCount < Math.min(candidates.length, roomLeft)) reasons.push("storage");
+    if (candidates.length > roomLeft) reasons.push("per-path");
+    if (droppedDuplicates > 0) reasons.push("duplicate-ids");
+    return {
+      status,
+      ok: status !== "none",
+      from: oldKey,
+      to: newKey,
+      moved: movedCount,
+      droppedDuplicates,
+      retained: keptBack > 0 ? { path: oldKey, count: keptBack } : null,
+      // The blocker the caller should act on: storage first, then the note's own
+      // ceiling, then duplicate ids (which lose nothing the destination does not hold).
+      reason: status === "moved" ? null : (reasons[0] ?? null)
+    };
+  }
+  /**
+   * Paths whose annotations are persisted but that no longer have a note in the
+   * vault: the records a refused or partial rename left behind. Read-only, and the
+   * caller decides what to show, because a path can also be missing only while the
+   * vault is still indexing.
+   *
+   * @param {Set<string> | Map<string, unknown> | ((path: string) => boolean)} vaultHasPath
+   * @returns {string[]}
+   */
+  orphanedAnnotationPaths(vaultHasPath) {
+    const has = (path6) =>
+      typeof vaultHasPath === "function"
+        ? Boolean(vaultHasPath(path6))
+        : Boolean(vaultHasPath?.has(path6));
+    return Object.keys(this.data.annotations)
+      .filter((path6) => this.data.annotations[path6].length > 0 && !has(path6))
+      .sort();
   }
   deletePath(path6) {
     const key = String(path6 ?? "");
@@ -12091,6 +12191,7 @@ var PiAgentPlugin = class extends P.Plugin {
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
     this.annotationController.start();
+    this.reportOrphanedAnnotations();
     warmupPiCli(this.settings.piExecutablePath, this.getPluginDirectory());
     this.refreshCurrentContextFile();
     void this.refreshCommandCatalog(false);
@@ -12106,15 +12207,7 @@ var PiAgentPlugin = class extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
-        if (
-          /** @type {any} */
-          file.extension === "md" &&
-          this.annotationStore.list(oldPath).length > 0 &&
-          !this.annotationStore.renamePath(oldPath, file.path)
-        )
-          new P.Notice(
-            "Annotations could not follow the renamed note; their original records were kept."
-          );
+        this.handleVaultRename(file, oldPath);
       })
     );
     this.registerEvent(
@@ -13245,6 +13338,61 @@ var PiAgentPlugin = class extends P.Plugin {
     const annotations = await this.getAnnotationsForContext(file.path);
     if (annotations.length > 0) this.annotationStore.deletePath(file.path);
     return annotations;
+  }
+  /**
+   * Follow a note rename with its annotations. The store moves whatever fits and keeps
+   * the rest, so the only work here is reporting the difference; a non-markdown file and
+   * a note without annotations have nothing to report.
+   *
+   * @param {{ path: string, extension?: string }} file
+   * @param {string} oldPath
+   */
+  handleVaultRename(file, oldPath) {
+    if (file?.extension !== "md") return;
+    if (this.annotationStore.list(oldPath).length === 0) return;
+    const result = this.annotationStore.renamePath(oldPath, file.path);
+    if (result.status === "moved") {
+      if (result.droppedDuplicates > 0)
+        new P.Notice(
+          `The renamed note already carried ${result.droppedDuplicates} of its annotations, so they were not stored twice.`
+        );
+      return;
+    }
+    new P.Notice(this.describeAnnotationRename(result));
+  }
+  /**
+   * What to tell the user when a rename could not take every annotation with it.
+   * `renamePath()` keeps what did not fit on the old path instead of dropping it, so
+   * the message names the count that stayed and the one action that reclaims it: a
+   * later rename of that same path retries the move.
+   *
+   * @param {{ moved: number, droppedDuplicates: number, retained: { path: string, count: number } | null, reason: string | null }} result
+   */
+  describeAnnotationRename(result) {
+    const count = (n) => `${n} annotation${n === 1 ? "" : "s"}`;
+    const perNote = `its limit of ${ANNOTATION_LIMITS.perPath} annotations`;
+    if (result.reason === "duplicate-ids")
+      return `${count(result.droppedDuplicates)} moved with the destination note, which already carried them.`;
+    if (result.reason === "storage")
+      return `Annotation storage is at its limit, so ${count(result.retained?.count ?? 0)} stayed with the old path and were not lost. Free annotation storage, then rename the note again.`;
+    if (result.moved > 0)
+      return `Moved ${count(result.moved)} to the renamed note; ${count(result.retained?.count ?? 0)} stayed on the original path because the note there is already at ${perNote}. Remove some of that note's annotations and rename again to bring the rest along.`;
+    return `${count(result.retained?.count ?? 0)} could not follow the renamed note because the note there is already at ${perNote}; their records were kept on the original path. Remove some of that note's annotations and rename again.`;
+  }
+  /**
+   * Annotations whose note is no longer in the vault: the records a refused or
+   * partial rename left behind. Reported once per load, never deleted, because the
+   * note can also be missing only while the vault is still indexing.
+   */
+  reportOrphanedAnnotations() {
+    const paths = this.annotationStore.orphanedAnnotationPaths((path6) =>
+      Boolean(this.app.vault.getAbstractFileByPath(path6))
+    );
+    if (paths.length === 0) return;
+    const total = paths.reduce((sum, path6) => sum + this.annotationStore.list(path6).length, 0);
+    new P.Notice(
+      `${total} annotation${total === 1 ? "" : "s"} on ${paths.length} note${paths.length === 1 ? "" : "s"} no longer in the vault are still stored. Move those notes back to their original paths to use them again.`
+    );
   }
   beginAnnotationProcessing(threadId, annotations) {
     this.annotationController?.beginProcessing(threadId, annotations);

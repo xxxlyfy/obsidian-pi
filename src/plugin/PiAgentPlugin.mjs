@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import * as P from "obsidian";
 import { AnnotationStore } from "../annotations/annotation-store.mjs";
+import { ANNOTATION_LIMITS } from "../annotations/annotation-model.mjs";
 import { MarkdownAnnotationsController } from "../annotations/markdown-annotations-controller.mjs";
 import { ContextBuilder } from "../context/context-builder.mjs";
 import { formatContextShowResponse, isContextShowPrompt } from "../context/context-show.mjs";
@@ -217,6 +218,7 @@ export class PiAgentPlugin extends P.Plugin {
     this.rebuildServices();
     this.annotationController = new MarkdownAnnotationsController(this);
     this.annotationController.start();
+    this.reportOrphanedAnnotations();
 
     warmupPiCli(this.settings.piExecutablePath, this.getPluginDirectory());
 
@@ -237,14 +239,7 @@ export class PiAgentPlugin extends P.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
-        if (
-          /** @type {any} */ (file).extension === "md" &&
-          this.annotationStore.list(oldPath).length > 0 &&
-          !this.annotationStore.renamePath(oldPath, file.path)
-        )
-          new P.Notice(
-            "Annotations could not follow the renamed note; their original records were kept."
-          );
+        this.handleVaultRename(file, oldPath);
       })
     );
     this.registerEvent(
@@ -1502,6 +1497,61 @@ export class PiAgentPlugin extends P.Plugin {
     const annotations = await this.getAnnotationsForContext(file.path);
     if (annotations.length > 0) this.annotationStore.deletePath(file.path);
     return annotations;
+  }
+  /**
+   * Follow a note rename with its annotations. The store moves whatever fits and keeps
+   * the rest, so the only work here is reporting the difference; a non-markdown file and
+   * a note without annotations have nothing to report.
+   *
+   * @param {{ path: string, extension?: string }} file
+   * @param {string} oldPath
+   */
+  handleVaultRename(file, oldPath) {
+    if (file?.extension !== "md") return;
+    if (this.annotationStore.list(oldPath).length === 0) return;
+    const result = this.annotationStore.renamePath(oldPath, file.path);
+    if (result.status === "moved") {
+      if (result.droppedDuplicates > 0)
+        new P.Notice(
+          `The renamed note already carried ${result.droppedDuplicates} of its annotations, so they were not stored twice.`
+        );
+      return;
+    }
+    new P.Notice(this.describeAnnotationRename(result));
+  }
+  /**
+   * What to tell the user when a rename could not take every annotation with it.
+   * `renamePath()` keeps what did not fit on the old path instead of dropping it, so
+   * the message names the count that stayed and the one action that reclaims it: a
+   * later rename of that same path retries the move.
+   *
+   * @param {{ moved: number, droppedDuplicates: number, retained: { path: string, count: number } | null, reason: string | null }} result
+   */
+  describeAnnotationRename(result) {
+    const count = (n) => `${n} annotation${n === 1 ? "" : "s"}`;
+    const perNote = `its limit of ${ANNOTATION_LIMITS.perPath} annotations`;
+    if (result.reason === "duplicate-ids")
+      return `${count(result.droppedDuplicates)} moved with the destination note, which already carried them.`;
+    if (result.reason === "storage")
+      return `Annotation storage is at its limit, so ${count(result.retained?.count ?? 0)} stayed with the old path and were not lost. Free annotation storage, then rename the note again.`;
+    if (result.moved > 0)
+      return `Moved ${count(result.moved)} to the renamed note; ${count(result.retained?.count ?? 0)} stayed on the original path because the note there is already at ${perNote}. Remove some of that note's annotations and rename again to bring the rest along.`;
+    return `${count(result.retained?.count ?? 0)} could not follow the renamed note because the note there is already at ${perNote}; their records were kept on the original path. Remove some of that note's annotations and rename again.`;
+  }
+  /**
+   * Annotations whose note is no longer in the vault: the records a refused or
+   * partial rename left behind. Reported once per load, never deleted, because the
+   * note can also be missing only while the vault is still indexing.
+   */
+  reportOrphanedAnnotations() {
+    const paths = this.annotationStore.orphanedAnnotationPaths((path) =>
+      Boolean(this.app.vault.getAbstractFileByPath(path))
+    );
+    if (paths.length === 0) return;
+    const total = paths.reduce((sum, path) => sum + this.annotationStore.list(path).length, 0);
+    new P.Notice(
+      `${total} annotation${total === 1 ? "" : "s"} on ${paths.length} note${paths.length === 1 ? "" : "s"} no longer in the vault are still stored. Move those notes back to their original paths to use them again.`
+    );
   }
   beginAnnotationProcessing(threadId, annotations) {
     this.annotationController?.beginProcessing(threadId, annotations);
